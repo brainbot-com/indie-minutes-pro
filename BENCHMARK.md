@@ -53,4 +53,112 @@ LibriSpeech, both CC BY 4.0; audio converted and transcripts normalized by us.
 
 ## Results
 
-(filled in when the run finishes)
+### Accuracy and speed
+
+<!-- RESULTS-TABLE -->
+
+Distant mic, where the configurations differ (pooled over the ten meetings):
+
+| | WER: sub / del / ins | DER: missed / false alarm / confusion |
+|---|---|---|
+| A-iq4 | 7.4 / 4.3 / 2.3 | 16.2 / 8.3 / 2.8 |
+| A-q8 | 7.3 / 4.3 / 2.3 | 16.1 / 7.9 / 2.7 |
+| A-iq4-diar | 11.6 / 18.8 / 2.6 | 42.8 / 2.0 / 1.1 |
+| B | 12.0 / 21.9 / 7.0 | 39.4 / 7.6 / 1.8 |
+
+- Engine A matches NVIDIA's published AMI numbers for the full-precision model
+  (cpWER 17.3 % SDM, 10.3 % IHM): IQ4_NL loses nothing measurable against
+  Q8_0, needs 22 GiB of GTT instead of 36 and is about 10 % faster.
+- Engine B loses most of its accuracy to deletions: Qwen3-ASR leaves out
+  overlapping speech and backchannels on the distant mic, which also leaves
+  speech regions without words (DER missed). Where it does have words, its
+  speakers are the cleanest (confusion 1.8 %), because they come from a
+  dedicated diarizer.
+- A-iq4-diar (engine A without `--diarize`, speakers from Nemotron 3
+  Diarization) was a try at combining the two. It is worse on every count:
+  without the speaker prompt the model transcribes far fewer words in
+  crosstalk (EN2002a: 3,706 against 7,179) and many word timestamps move
+  (TS3003c: 68 % of the matching words more than 2 s from where the
+  `--diarize` run puts them), so the diarizer's turns land on the wrong words.
+  The run was stopped after the distant-mic set; `--diarize` stays.
+- Per meeting, A-iq4's cpWER on the distant mic ranges from 9 % (TS3003b) to
+  43 % (ES2004a, the kick-off meeting full of crosstalk and laughter).
+- MLS German is read speech without overlap: a sanity check that German works
+  end to end, not a meeting benchmark.
+
+### Where the time goes
+
+Seconds per audio hour on the distant-mic set:
+
+| | Load | Recognition | Alignment | Diarization | Total | RTF |
+|---|---:|---:|---:|---:|---:|---:|
+| A-iq4 | 4 to 5 (warm page cache) | rest of 297 | in the model | in the model | 297 | 0.082 |
+| A-q8 | 11 (warm page cache) | rest of 327 | in the model | in the model | 327 | 0.091 |
+| B | 7 | 971 | 17 | 52 | 1040 | 0.29 |
+
+- Engine A is one speech-LLM pass (encoder, decoder and the CTC timestamp
+  head); NeMo-Speech.cpp 0.3.0 reports no encode/prefill/decode split for it.
+  `nemo-speech bench asr` on IS1009a (14 min, transcription only) separates
+  load from processing: IQ4_NL 4.3 s load and 45.4 s processing (18.5x real
+  time), Q8_0 11.2 s and 50.0 s (16.8x). The speaker branch of `--diarize`
+  adds the rest.
+- Engine B on ES2004a alone, before the benchmark: RTF 0.19 (ASR 184 s for
+  17.5 min). In the benchmark run its ASR was slower (RTF 0.27 for ASR); the
+  GPU was shared with the box's Ollama, which kept serving its other clients.
+  Without the ROCm settings in compose.yaml (AOTriton attention, MIOpen FAST
+  find) it ran at RTF 0.56.
+- Peak extra GTT while a job runs: A-iq4 22.3 GiB, A-q8 36.0 GiB, B 3.4 GiB.
+  Process RSS stays below 2 GiB: the weights live in GTT.
+
+### The GPU is really used
+
+The same 2-minute clip (ES2004a, distant mic) on the GPU and on the CPU (32
+cores), wall time including model load:
+
+| | GPU | CPU | Factor |
+|---|---:|---:|---:|
+| A-iq4 (Vulkan) | 15.1 s | 63.2 s | 4.2x |
+| B (ROCm + Vulkan diarizer) | 15.1 s | 424.3 s | 28x |
+
+During every GPU job GTT use rose by the model size (A-iq4 19 to 22 GiB) and
+`gpu_busy_percent` averaged 90 to 100 %; on the CPU runs it did not move.
+
+### Box impact: the main LLM while a job runs
+
+qwen3.8:27b-ctx65536 on the box's Ollama, a short question with 48 answer
+tokens once a minute (`data/bench/runs/llm-probe.jsonl`):
+
+| GPU doing | Probes | Time to first token (median, p90) | Tokens/s (median) | Answer time (median) |
+|---|---:|---|---:|---:|
+| nothing | 7 | 0.17 s, 0.20 s | 17.4 | 3.0 s |
+| engine A IQ4_NL | 59 | 0.23 s, 0.32 s | 12.8 | 4.0 s |
+| engine A Q8_0 | 57 | 0.23 s, 0.26 s | 12.5 | 4.1 s |
+| engine B | <!-- B-PROBES --> | 0.23 s, 0.25 s | 12.2 | 4.2 s |
+
+Chat answers come about 30 % slower while a transcription runs; no request
+failed. Long prompts (prefill) were not measured.
+
+### More than one hour
+
+ES2004b and ES2004c joined into one 78-minute file (the same four people):
+engine A cut it into two windows overlapping by 60 s, linked all four
+speakers through 206 words both windows heard, and created no new labels;
+8.3 minutes in total (RTF 0.106). The transcript carries
+`speaker_scope: per_chunk` and a note.
+
+<!-- SPOTCHECK -->
+
+## Recommendation
+
+Make **engine A with the AD-IQ4_NL decoder (`A-iq4`)** the default:
+
+- best accuracy where it matters, a phone on the table: cpWER 18.1 % against
+  47.4 % for engine B on the AMI distant mic, and the same as Q8_0;
+- about 5 minutes per hour of audio, three to four times faster than B;
+- 22 GiB of GTT while it runs (Q8_0 needs 36 GiB), which leaves room for the
+  box's LLM and embedding models (102 GiB GTT in total).
+
+Keep engine B as the fallback when GPU memory is short (3.4 GiB) or when
+punctuated text matters more than completeness; engine A with `--diarize`
+writes lowercase text without punctuation. Do not use Q8_0: it costs 14 GiB
+more for no measurable gain.
