@@ -1,0 +1,140 @@
+"""SQLite index next to the meeting folders. One short-lived connection per call,
+so the web app, the worker thread and the CLIs can share the file safely (WAL)."""
+import sqlite3
+from contextlib import contextmanager
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS tokens (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('device', 'agent', 'admin')),
+  token_hash TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL,
+  last_used_at TEXT,
+  revoked_at TEXT
+);
+CREATE TABLE IF NOT EXISTS recordings (
+  id TEXT PRIMARY KEY,
+  token_id TEXT NOT NULL,
+  client_id TEXT NOT NULL,
+  mime TEXT NOT NULL,
+  title TEXT,
+  language TEXT,
+  started_at TEXT,
+  created_at TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'uploading',
+  total_chunks INTEGER,
+  meeting_id TEXT,
+  UNIQUE (token_id, client_id)
+);
+CREATE TABLE IF NOT EXISTS chunks (
+  recording_id TEXT NOT NULL,
+  idx INTEGER NOT NULL,
+  size INTEGER NOT NULL,
+  sha256 TEXT NOT NULL,
+  received_at TEXT NOT NULL,
+  PRIMARY KEY (recording_id, idx)
+);
+CREATE TABLE IF NOT EXISTS meetings (
+  id TEXT PRIMARY KEY,
+  title TEXT,
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  duration_s REAL,
+  language TEXT,
+  source TEXT,
+  recording_id TEXT,
+  state TEXT NOT NULL,
+  engine TEXT,
+  error TEXT,
+  speakers INTEGER,
+  tldr TEXT,
+  summary_version INTEGER NOT NULL DEFAULT 0,
+  summary_author TEXT,
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  meeting_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  engine TEXT,
+  state TEXT NOT NULL DEFAULT 'queued',
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  finished_at TEXT,
+  error TEXT
+);
+CREATE TABLE IF NOT EXISTS proposals (
+  id TEXT PRIMARY KEY,
+  meeting_id TEXT NOT NULL,
+  item_key TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  rationale TEXT,
+  state TEXT NOT NULL DEFAULT 'proposed',
+  created_at TEXT NOT NULL,
+  decided_at TEXT,
+  executed_at TEXT,
+  result TEXT,
+  error TEXT,
+  UNIQUE (meeting_id, item_key)
+);
+CREATE TABLE IF NOT EXISTS mappings (
+  meeting_id TEXT NOT NULL,
+  item_key TEXT NOT NULL,
+  target_kind TEXT NOT NULL,
+  target TEXT NOT NULL,
+  proposal_id TEXT,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (meeting_id, item_key)
+);
+CREATE TABLE IF NOT EXISTS followup_seen (
+  meeting_id TEXT PRIMARY KEY,
+  summary_version INTEGER NOT NULL,
+  seen_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS jobs_state ON jobs (state, id);
+CREATE INDEX IF NOT EXISTS proposals_state ON proposals (state);
+"""
+
+
+class DB:
+    def __init__(self, path):
+        self.path = str(path)
+        with self.connect() as con:
+            con.execute("PRAGMA journal_mode=WAL")
+            con.executescript(SCHEMA)
+
+    @contextmanager
+    def connect(self):
+        con = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        con.row_factory = sqlite3.Row
+        con.execute("PRAGMA busy_timeout=30000")
+        try:
+            yield con
+        finally:
+            con.close()
+
+    @contextmanager
+    def tx(self):
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            try:
+                yield con
+            except BaseException:
+                con.execute("ROLLBACK")
+                raise
+            con.execute("COMMIT")
+
+    def all(self, sql, *args):
+        with self.connect() as con:
+            return [dict(r) for r in con.execute(sql, args)]
+
+    def one(self, sql, *args):
+        with self.connect() as con:
+            row = con.execute(sql, args).fetchone()
+            return dict(row) if row else None
+
+    def run(self, sql, *args):
+        with self.connect() as con:
+            return con.execute(sql, args).rowcount

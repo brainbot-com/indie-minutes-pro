@@ -1,0 +1,35 @@
+{
+	# The box already runs another Caddy with its admin API on :2019.
+	admin off
+	auto_https off
+	servers {
+		protocols h1 h2
+	}
+}
+
+# The recorder: phone PWA, upload API, web view, MCP for agents.
+https://{$BIND_IP}:{$HTTPS_PORT} {
+	bind {$BIND_IP}
+	tls /certs/server.crt /certs/server.key
+	@outside not remote_ip {$ALLOW_CIDRS}
+	respond @outside "indie-recorder is only reachable over the VPN" 403
+	request_body {
+		max_size 80MB
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		Permissions-Policy "microphone=(self)"
+	}
+	reverse_proxy 127.0.0.1:18000
+}
+
+# Plain HTTP, only to hand the phone the CA certificate it must trust first.
+http://{$BIND_IP}:{$CA_PORT} {
+	bind {$BIND_IP}
+	@outside not remote_ip {$ALLOW_CIDRS}
+	respond @outside "VPN only" 403
+	root * /certs/public
+	file_server browse
+}

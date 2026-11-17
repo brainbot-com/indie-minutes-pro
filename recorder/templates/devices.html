@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Devices · indie recorder{% endblock %}
+{% block main %}
+<h1>Devices and agents</h1>
+{% if created %}
+<section class="card highlight">
+  <h2>New {{ created.role }} token for {{ created.name }}</h2>
+  <p>Shown once. Copy it now.</p>
+  <p><code class="token">{{ created.token }}</code></p>
+  {% if created.qr %}
+  <p>On the phone (on the VPN, with the CA certificate installed): scan this, or open the link.</p>
+  <div class="qr">{{ created.qr|safe }}</div>
+  <p class="small"><a href="{{ created.pair }}">{{ created.pair }}</a></p>
+  {% else %}
+  <p>Give it to the agent as <code>Authorization: Bearer &lt;token&gt;</code> for <code>{{ s.public_url }}/mcp</code> or the JSON API.</p>
+  {% endif %}
+</section>
+{% endif %}
+<section class="card">
+  <h2>Add</h2>
+  <form method="post" action="/devices" class="inline">
+    <input name="name" placeholder="Luis's phone" required>
+    <select name="role"><option value="device">phone or device</option><option value="agent">agent</option></select>
+    <button>Create token</button>
+  </form>
+  <p class="muted">Phones need the box's CA certificate once: <a href="http://10.1.9.7:8480/ca.crt">http://10.1.9.7:8480/ca.crt</a> (VPN only). See the README for the Android steps and the fingerprint.</p>
+</section>
+<section class="card">
+  <h2>Tokens</h2>
+  <table>
+    <thead><tr><th>Name</th><th>Role</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+    <tr class="{% if r.revoked_at %}muted{% endif %}">
+      <td>{{ r.name }}</td><td>{{ r.role }}</td><td>{{ local_time(r.created_at) }}</td>
+      <td>{{ local_time(r.last_used_at) if r.last_used_at else '' }}</td>
+      <td>{% if r.revoked_at %}revoked{% elif r.id != tok.id %}<form method="post" action="/devices/{{ r.id }}/revoke"><button class="secondary small">Revoke</button></form>{% else %}this session{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

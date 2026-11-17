@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}{{ m.title or m.id }} · indie recorder{% endblock %}
+{% block head %}{% if m.state not in ('done', 'failed') %}<meta http-equiv="refresh" content="5">{% endif %}{% endblock %}
+{% block main %}
+<h1>{{ m.title or m.id }}</h1>
+<p class="meta">
+  {{ local_time(m.started_at or m.created_at) }} · {{ fmt_duration(m.duration_s or 0) }}
+  {% if m.speakers %} · {{ m.speakers }} speakers{% endif %}
+  {% if m.language %} · {{ m.language }}{% endif %}
+  · <span class="state state-{{ m.state }}">{{ m.state }}</span>
+  {% if t.engine %} · {{ t.engine.label or t.engine.name }}{% endif %}
+</p>
+{% if m.error %}<p class="error">{{ m.error }}</p>{% endif %}
+{% if m.state not in ('done', 'failed') %}<p class="notice">Processing: {{ m.state }}. This page refreshes itself.</p>{% endif %}
+{% for note in t.notes or [] %}<p class="notice">{{ note }}</p>{% endfor %}
+{% if has_audio %}<audio id="player" controls preload="none" src="/m/{{ m.id }}/audio"></audio>{% endif %}
+
+{% if summary_md %}
+<section class="card summary">
+  {% if versions|length > 1 %}
+  <p class="versions">Summary versions:
+    {% for v in versions %}
+      <a href="/m/{{ m.id }}{% if v.version != versions[-1].version %}?v={{ v.version }}{% endif %}#summary"
+         class="{% if (shown and shown.version == v.version) or (not shown and loop.last) %}current{% endif %}">v{{ v.version }} · {{ v.author }}</a>{% if not loop.last %} ·{% endif %}
+    {% endfor %}
+  </p>
+  {% endif %}
+  <div id="summary">{{ summary_md|md|safe }}</div>
+</section>
+{% endif %}
+
+{% if actions %}
+<section class="card">
+  <h2>Action items and follow-ups</h2>
+  <ul class="actions">
+  {% for a in actions %}
+    <li id="a-{{ a.key }}">
+      <span>{{ a.text }}</span>
+      <span class="muted">{% if a.owner %}{{ a.owner }}{% endif %}{% if a.due %} · due {{ a.due }}{% endif %}</span>
+      {% set mp = mappings.get(a.key) %}{% set p = proposals.get(a.key) %}
+      {% if mp %}<a class="badge ok" href="{{ mp.target }}">{{ mp.target_kind|replace('_', ' ') }}</a>
+      {% elif p %}<a class="badge" href="/review#{{ p.id }}">{{ p.kind|replace('_', ' ') }}: {{ p.state }}</a>{% endif %}
+    </li>
+  {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% if names %}
+<section class="card" id="speakers">
+  <h2>Speakers</h2>
+  <p class="muted">Names you set here replace "Speaker N" in the transcript, the summary and the action items. No voice profiles are stored.</p>
+  <form method="post" action="/m/{{ m.id }}/speakers" class="speakers">
+    {% for label, name in names.items() %}
+    <label>{{ label }} <input name="name:{{ label }}" value="{{ name }}" placeholder="name"></label>
+    {% endfor %}
+    <button>Save names</button>
+  </form>
+</section>
+{% endif %}
+
+{% if segs %}
+<section class="card transcript">
+  <h2>Transcript</h2>
+  {% set ns = namespace(prev=None) %}
+  {% for seg in segs %}
+    {% if seg.spk != ns.prev %}<p class="spk spk-{{ seg.spk|replace(' ', '')|lower }}">{{ seg.name }} <a class="ts" href="#" data-t="{{ seg.s }}">{{ fmt_ts(seg.s) }}</a></p>{% set ns.prev = seg.spk %}{% endif %}
+    <p>{{ seg.text }}</p>
+  {% endfor %}
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>Files and processing</h2>
+  <p>
+    {% for f in ['summary.md', 'actions.json', 'transcript.md', 'transcript.json', 'speakers.json', 'meta.json'] %}
+    <a href="/m/{{ m.id }}/files/{{ f }}">{{ f }}</a>{% if not loop.last %} · {% endif %}
+    {% endfor %}
+  </p>
+  {% if t.timings %}<p class="muted">Timings: {% for k, v in t.timings.items() %}{{ k }} {{ v }}{% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
+  {% if t.resources %}<p class="muted">Resources: {% for k, v in t.resources.items() %}{{ k }} {{ v }}{% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
+  <form method="post" action="/m/{{ m.id }}/reprocess" class="inline">
+    <input type="hidden" name="kind" value="transcribe">
+    <select name="engine">{% for e in engines %}<option {% if t.engine and e == m.engine %}selected{% endif %}>{{ e }}</option>{% endfor %}</select>
+    <button>Transcribe again</button>
+  </form>
+  <form method="post" action="/m/{{ m.id }}/reprocess" class="inline">
+    <input type="hidden" name="kind" value="summarize">
+    <button class="secondary">New recorder summary</button>
+  </form>
+</section>
+<script>
+document.querySelectorAll('a.ts').forEach(a => a.addEventListener('click', e => {
+  e.preventDefault();
+  const p = document.getElementById('player');
+  if (p) { p.currentTime = Number(a.dataset.t); p.play(); }
+}));
+</script>
+{% endblock %}

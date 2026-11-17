@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Review · indie recorder{% endblock %}
+{% block main %}
+<div class="head-row">
+  <h1>Follow-up proposals</h1>
+  <form method="post" action="/review/run"><button class="secondary">Check for new meetings now</button></form>
+</div>
+<p class="muted">
+  Mode: <strong>{{ 'auto' if auto else 'dry-run' }}</strong>
+  {% if not auto %}(nothing runs until you approve it){% endif %} ·
+  GitHub: {{ repo }} {% if not has_token %}<span class="error">(no token yet: secrets/github_token)</span>{% endif %} ·
+  Drive updates go to the outbox for the Agent Command Center agent.
+</p>
+{% set groups = {'proposed': 'Waiting for review', 'approved': 'Approved, not done yet', 'executed': 'Done', 'rejected': 'Rejected'} %}
+{% for state, heading in groups.items() %}
+  {% set rows = items|selectattr('state', 'equalto', state)|list %}
+  {% if rows %}
+  <h2>{{ heading }} ({{ rows|length }})</h2>
+  {% for p in rows %}
+  <article class="card proposal" id="{{ p.id }}">
+    <div class="meta">
+      <span class="badge">{{ p.kind|replace('_', ' ') }}</span>
+      <a href="/m/{{ p.meeting_id }}">{{ titles.get(p.meeting_id, p.meeting_id) }}</a>
+      · {{ local_time(p.created_at) }}
+    </div>
+    {% if p.kind == 'github_comment' %}
+      <p>Comment on <a href="{{ p.payload.issue_url }}">#{{ p.payload.issue_number }} {{ p.payload.issue_title }}</a></p>
+      <pre>{{ p.payload.body }}</pre>
+    {% elif p.kind == 'github_issue' %}
+      <p>New issue: <strong>{{ p.payload.title }}</strong></p>
+      <pre>{{ p.payload.body }}</pre>
+    {% else %}
+      <p>Append to "{{ p.payload.doc }}" in Drive folder "{{ p.payload.folder }}"</p>
+      <pre>{{ p.payload.markdown }}</pre>
+    {% endif %}
+    {% if p.rationale %}<p class="muted">Why: {{ p.rationale }}</p>{% endif %}
+    {% if p.error %}<p class="error">{{ p.error }}</p>{% endif %}
+    {% if p.result and p.result.url %}<p>Result: <a href="{{ p.result.url }}">{{ p.result.url }}</a></p>{% endif %}
+    {% if p.state == 'approved' and p.kind == 'drive_log' %}<p class="muted">Waiting for the Drive agent to apply it.</p>{% endif %}
+    {% if p.state == 'proposed' %}
+    <div class="buttons">
+      <form method="post" action="/review/{{ p.id }}/approve"><button>Approve</button></form>
+      <form method="post" action="/review/{{ p.id }}/reject"><button class="secondary">Reject</button></form>
+    </div>
+    {% endif %}
+  </article>
+  {% endfor %}
+  {% endif %}
+{% endfor %}
+{% if not items %}<section class="card"><p>No proposals yet. They appear after a meeting is summarized.</p></section>{% endif %}
+{% endblock %}

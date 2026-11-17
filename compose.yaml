@@ -1,0 +1,38 @@
+# indie-recorder on aibox1. Nothing here listens on the LAN except Caddy on
+# BIND_IP (10.1.9.7), and Caddy only lets in ALLOW_CIDRS (the VPN clients).
+name: indie-recorder
+
+services:
+  recorder:
+    build: .
+    image: indie-recorder:latest
+    restart: unless-stopped
+    # The box user (uid 1000) owns data/ and can read every meeting file.
+    user: "1000:1000"
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+      GITHUB_TOKEN_FILE: /secrets/github_token
+    volumes:
+      - ./data:/data
+      - ./secrets:/secrets:ro
+    ports:
+      - "127.0.0.1:18000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks: [rec]
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    # Host network so Caddy sees the real VPN client address for the allowlist
+    # and binds to BIND_IP only.
+    network_mode: host
+    env_file: .env
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./secrets/tls:/certs:ro
+    depends_on: [recorder]
+
+networks:
+  rec: {}

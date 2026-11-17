@@ -1,0 +1,9 @@
+[Unit]
+Description=indie-recorder follow-up agent (proposals for new meeting summaries)
+Documentation=https://github.com/brainbot-com/indie-recorder
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/indie-recorder
+# JSON report goes to the journal: journalctl --user -u indie-recorder-followup
+ExecStart=/usr/bin/docker compose exec -T recorder python -m recorder.followup run

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}indie recorder{% endblock %}</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="/favicon.ico">
+{% block head %}{% endblock %}
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/"><span class="dot"></span>indie recorder</a>
+  {% if tok %}
+  <nav>
+    <a href="/">Meetings</a>
+    <a href="/review">Review</a>
+    {% if tok.role == 'admin' %}<a href="/devices">Devices</a>{% endif %}
+    <a href="/app/">Record</a>
+    <a href="/logout" class="muted">Log out</a>
+  </nav>
+  {% endif %}
+</header>
+<main>
+{% block main %}{% endblock %}
+</main>
+<footer>indie-recorder {{ version }} · audio and transcripts stay on this box</footer>
+</body>
+</html>
