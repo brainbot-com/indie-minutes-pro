@@ -67,7 +67,22 @@ LibriSpeech, both CC BY 4.0; audio converted and transcripts normalized by us.
 
 ### Accuracy and speed
 
-<!-- RESULTS-TABLE -->
+| Set | Engine | Items | Audio h | WER | cpWER | DER | Wall s per audio h | RTF | Peak GTT delta GiB |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| ami-sdm | A-iq4 | 10 | 5.24 | 14.1% | 18.1% | 27.3% | 297 | 0.082 | 22.3 |
+| ami-sdm | A-q8 | 10 | 5.24 | 13.9% | 18.1% | 26.8% | 327 | 0.091 | 36.0 |
+| ami-sdm | B | 10 | 5.24 | 40.9% | 47.4% | 48.8% | 1040 | 0.289 | 3.4 |
+| ami-sdm | A-iq4-diar | 10 | 5.24 | 33.1% | 56.3% | 45.9% | 267 | 0.074 | 22.3 |
+| ami-ihm-mix | A-iq4 | 10 | 5.24 | 9.5% | 10.3% | 21.1% | 286 | 0.079 | 22.3 |
+| ami-ihm-mix | A-q8 | 10 | 5.24 | 10.8% | 11.6% | 22.4% | 327 | 0.091 | 36.0 |
+| ami-ihm-mix | B | 10 | 5.24 | 25.7% | 27.5% | 34.6% | 898 | 0.250 | 2.7 |
+| mls-de | A-iq4 | 4 | 0.41 | 4.1% | 4.1% | 10.5% | 312 | 0.087 | 19.9 |
+| mls-de | A-q8 | 4 | 0.41 | 4.0% | 4.0% | 10.5% | 410 | 0.114 | 33.6 |
+| mls-de | B | 4 | 0.41 | 12.4% | 12.4% | 12.5% | 1140 | 0.317 | 2.4 |
+
+A-iq4-diar is the attempt described below, run on the distant mic only.
+Engine B's speed in this table was measured while the box's Ollama kept
+serving other clients on the same GPU (see "Where the time goes").
 
 Distant mic, where the configurations differ (pooled over the ten meetings):
 
@@ -145,7 +160,7 @@ tokens once a minute (`data/bench/runs/llm-probe.jsonl`):
 | nothing | 7 | 0.17 s, 0.20 s | 17.4 | 3.0 s |
 | engine A IQ4_NL | 59 | 0.23 s, 0.32 s | 12.8 | 4.0 s |
 | engine A Q8_0 | 57 | 0.23 s, 0.26 s | 12.5 | 4.1 s |
-| engine B | <!-- B-PROBES --> | 0.23 s, 0.25 s | 12.2 | 4.2 s |
+| engine B | 191 | 0.23 s, 0.25 s | 12.3 | 4.1 s |
 
 Chat answers come about 30 % slower while a transcription runs; no request
 failed. Long prompts (prefill) were not measured.
@@ -158,7 +173,35 @@ speakers through 206 words both windows heard, and created no new labels;
 8.3 minutes in total (RTF 0.106). The transcript carries
 `speaker_scope: per_chunk` and a note.
 
-<!-- SPOTCHECK -->
+### Action items against AMI's human summaries
+
+Our summary of engine A's distant-mic transcript (qwen3.8:27b on the box)
+next to the action sentences of AMI's human abstractive summaries, for the
+three of our ten meetings with the most human action items. The box's LLM
+marked which human items our list covers and which of ours match a human
+one (`data/bench/spotcheck.md`).
+
+| Meeting | Human actions covered | Our items that match a human one |
+|---|---|---|
+| IS1009a | 3 of 3 | 2 of 3 |
+| IS1009c | 3 of 4 | 3 of 5 |
+| TS3003c | 0 of 3 | 0 of 3 |
+
+- IS1009a and IS1009c: the substance is there (product evaluation, user
+  interface design, the clay prototype, requirement specs). The one human
+  item we miss ("their coaches will send specific instructions") is about
+  the course organisers, not the team. Our extras are real tasks from the
+  meeting the annotators left out (research the cost of speech recognition)
+  plus one icebreaker exercise (draw your favourite animal on the whiteboard)
+  that should not be an action item.
+- TS3003c: the human items are vague ("continue with what he has been
+  working on", "work together"); ours are specific (pricing of wooden cases,
+  ask manufacturing about voice recognition costs, look and feel and user
+  interface). The judge counted no overlap; read side by side, the third of
+  ours covers the second and third human items in substance.
+- So the recorder's simple summary finds the concrete commitments, but also
+  lists small in-meeting asks. The Command Center agent's later summary,
+  with its context, is the place to weed those out.
 
 ## Recommendation
 
@@ -166,11 +209,18 @@ Make **engine A with the AD-IQ4_NL decoder (`A-iq4`)** the default:
 
 - best accuracy where it matters, a phone on the table: cpWER 18.1 % against
   47.4 % for engine B on the AMI distant mic, and the same as Q8_0;
-- about 5 minutes per hour of audio, three to four times faster than B;
+- about 5 minutes per hour of audio, three to four times faster than B
+  (and still three times faster than B's best isolated run, RTF 0.19);
 - 22 GiB of GTT while it runs (Q8_0 needs 36 GiB), which leaves room for the
   box's LLM and embedding models (102 GiB GTT in total).
 
 Keep engine B as the fallback when GPU memory is short (3.4 GiB) or when
 punctuated text matters more than completeness; engine A with `--diarize`
 writes lowercase text without punctuation. Do not use Q8_0: it costs 14 GiB
-more for no measurable gain.
+more for no measurable gain. Do not run engine A without `--diarize` to pair
+it with a separate diarizer: in NeMo-Speech.cpp 0.3.0 that loses words and
+moves word timestamps on far-field audio.
+
+What is not settled yet: German meetings. MLS is read speech; the German
+ground truth from our own calls (Drive recordings, hand-corrected excerpts)
+is still to come, and so is the corrected excerpt of the retreat recording.
