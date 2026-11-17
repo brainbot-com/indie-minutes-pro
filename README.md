@@ -259,6 +259,10 @@ through the phone simulator into the running recorder, end to end.
   in BENCHMARK.md); summaries also wait for the LLM if it is busy.
 - Tokens are not per user: any phone or admin token can read every meeting
   (on top of the VPN).
+- The phone must get the CA through Settings (user certificate store).
+  Chrome on Android trusts user-installed CAs for websites without asking
+  for Certificate Transparency; a CA placed in the system store (rooted
+  phones) would need CT and fail.
 - NeMo-Speech.cpp issue #89 (Vulkan batching assert) concerns the realtime
   streaming batcher of `nemo-speech serve`; file transcription here runs one
   sequence at a time and diarization with `--no-batching`.

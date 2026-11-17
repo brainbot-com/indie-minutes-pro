@@ -137,11 +137,13 @@ def main(argv=None):
     ap.add_argument("--cpu-proof", action="store_true")
     ap.add_argument("--probe-only", type=int, default=0, help="seconds of idle LLM probing")
     ap.add_argument("--probe-every", type=int, default=60)
+    ap.add_argument("--no-probe", action="store_true", help="for a second runner next to one that probes")
     a = ap.parse_args(argv)
     s = Settings()
     (ROOT / "runs").mkdir(parents=True, exist_ok=True)
     probe = Probe(s, ROOT / "runs" / "llm-probe.jsonl", a.probe_every)
-    probe.start()
+    if not a.no_probe:
+        probe.start()
     try:
         if a.probe_only:
             time.sleep(a.probe_only)

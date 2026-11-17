@@ -1,7 +1,8 @@
 """Scores the runs: data/bench/results.json and data/bench/results.md.
 
-WER    speaker-agnostic: reference utterances in time order against the
-       hypothesis words in time order (jiwer), after normalization.
+WER    speaker-agnostic greedy ORC-WER (meeteval): each reference utterance may go
+       to any hypothesis speaker stream, so speaker labels do not count and
+       overlapping speech is not penalized for its word order.
 cpWER  meeteval's concatenated minimum-permutation WER (speaker-attributed).
 DER    pyannote.metrics, collar 0.25 s (pyannote convention: 0.125 s either
        side of each reference boundary), overlapping speech scored.
@@ -57,8 +58,13 @@ def read_rttm(path):
     return out
 
 
+def seglst(segs, sid, norm):
+    from meeteval.io import SegLST
+    return SegLST([{"session_id": sid, "speaker": x["speaker"], "start_time": x["start_time"],
+                    "end_time": x["end_time"], "words": norm(x["words"])} for x in segs])
+
+
 def score_item(ref_dir, t):
-    import jiwer
     import meeteval
     from pyannote.core import Segment, Timeline
     from pyannote.metrics.diarization import DiarizationErrorRate
@@ -67,18 +73,15 @@ def score_item(ref_dir, t):
     norm = normalizer(meta["language"])
     ref = json.loads((ref_dir / "ref.seglst.json").read_text())
     hyp = hyp_segments(t)
-    ref_text = norm(" ".join(s["words"] for s in sorted(ref, key=lambda s: s["start_time"])))
-    hyp_text = norm(" ".join(w["w"] for w in sorted(t["words"], key=lambda w: w["s"])))
-    out = jiwer.process_words(ref_text, hyp_text)
-    res = {"ref_words": len(ref_text.split()), "wer": out.wer, "sub": out.substitutions, "del": out.deletions,
-           "ins": out.insertions}
     sid = ref[0]["session_id"]
-    r = {s: " ".join(norm(x["words"]) for x in ref if x["speaker"] == s) for s in {x["speaker"] for x in ref}}
-    h = {s: " ".join(norm(x["words"]) for x in hyp if x["speaker"] == s) for s in {x["speaker"] for x in hyp}}
-    cp = meeteval.wer.wer.cp.cp_word_error_rate_multifile({sid: r}, {sid: h})[sid]
-    res.update(cpwer=cp.error_rate, cp_errors=cp.errors, cp_length=cp.length,
-               ref_speakers=len(r), hyp_speakers=len(h), missed_speakers=cp.missed_speaker,
-               extra_speakers=cp.falarm_speaker)
+    r, h = seglst(ref, sid, norm), seglst(hyp, sid, norm)
+    orc = meeteval.wer.greedy_orcwer(reference=r, hypothesis=h)[sid]  # exact ORC needs too much memory for 4+ streams
+    cp = meeteval.wer.cpwer(reference=r, hypothesis=h)[sid]
+    res = {"ref_words": orc.length, "wer": orc.error_rate, "wer_errors": orc.errors, "sub": orc.substitutions,
+           "del": orc.deletions, "ins": orc.insertions,
+           "cpwer": cp.error_rate, "cp_errors": cp.errors, "cp_length": cp.length,
+           "ref_speakers": len({x["speaker"] for x in ref}), "hyp_speakers": len({x["speaker"] for x in hyp}),
+           "missed_speakers": cp.missed_speaker, "extra_speakers": cp.falarm_speaker}
     der = DiarizationErrorRate(collar=0.25, skip_overlap=False)
     uem = Timeline([Segment(0, t["duration_s"])])
     comp = der(annotation(read_rttm(ref_dir / "ref.rttm")), annotation(hyp), uem=uem, detailed=True)
@@ -128,7 +131,7 @@ def report(results):
         ok = [r for r in rows if "wer" in r]
         hours = sum(r["duration_s"] for r in rows) / 3600
         wall = sum(r["timings"].get("engine_wall_s", 0) for r in rows)
-        wer = (sum(r["wer"] * r["ref_words"] for r in ok) / sum(r["ref_words"] for r in ok)) if ok else None
+        wer = pooled(ok, "wer", "wer_errors", "ref_words")
         cp = pooled(ok, "cpwer", "cp_errors", "cp_length")
         dur = sum(r["duration_s"] for r in ok)
         der = sum(r["der"] * r["duration_s"] for r in ok) / dur if dur else None
