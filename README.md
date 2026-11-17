@@ -65,10 +65,10 @@ kernel 6.14 OEM, Mesa 25.2 RADV, ROCm 7.0.1, Docker 2x), as a user in the
    (`systemctl --user`, needs `loginctl enable-linger`). Build the engines once
    with `docker compose build engine-nemo engine-qwen` (engine B pulls about
    4 GB of ROCm wheels) and start them with `docker compose up -d`.
-5. GitHub (optional): a fine-grained token for
-   `brainbot-com/indie-recorder-sandbox` only, permission Issues read and
-   write, saved as `secrets/github_token` (mode 600). Without it the agent
-   only proposes meeting-log entries.
+5. Follow-ups: `.env.example` runs the follow-up loop against the mock
+   GitHub and Drive on the box (`FOLLOWUP_EXECUTOR=direct`). For the real
+   GitHub and Drive, set up the Agent Command Center agent (below) and switch
+   to `FOLLOWUP_EXECUTOR=agent`; the box itself holds no GitHub or Drive login.
 6. Check: `curl -s http://127.0.0.1:18000/api/v1/health` and
    `docker compose exec engine-nemo nemo-speech doctor` (must list the Radeon
    8060S on RADV).
@@ -205,8 +205,10 @@ It reads full transcripts, so it must run on aibox1 against aibox1's LLM.
 | Limits | one hour per request: longer audio is cut into 59 min windows with 60 s overlap | none in practice (the package chunks) |
 | Variants | `A-iq4` (AD-IQ4_NL decoder, 19.7 GB), `A-q8` (Q8_0, 35 GB) | `B` |
 
-`ENGINE` in `.env` sets the default; any meeting can be transcribed again with
-another engine from its page. Both engines run as small job services
+`ENGINE` in `.env` sets the default (`A-iq4`, see BENCHMARK.md); any meeting
+can be transcribed again with another engine from its page. `A-iq4-diar`
+(engine A without `--diarize`, speakers from Nemotron 3 Diarization) is kept
+for comparison only: it did worse in the benchmark. Both engines run as small job services
 (`engines/jobserver.py`) that run one job at a time, share one GPU lock (so
 two GPU jobs never overlap), never kill a running GPU process, and sample GTT
 use and GPU busy from sysfs during each job (rocm-smi shows no VRAM on this
