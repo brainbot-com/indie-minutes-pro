@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+data/
+models/
+secrets/
+bench/data/
+bench/runs/
+*.sqlite
+*.sqlite-*
+.env
