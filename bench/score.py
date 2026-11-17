@@ -92,6 +92,17 @@ def score_item(ref_dir, t):
     return res
 
 
+def agreement(t, base):
+    """Speaker-agnostic WER of one engine's words against another engine's
+    (no human reference): how far two engines agree, not how right they are."""
+    import meeteval
+    from meeteval.io import SegLST
+    norm = normalizer(t.get("language") or "en")
+    mk = lambda tr: SegLST([{"session_id": "x", "speaker": s["speaker"], "start_time": s["start_time"],
+                             "end_time": s["end_time"], "words": norm(s["words"])} for s in hyp_segments(tr)])
+    return meeteval.wer.greedy_orcwer(reference=mk(base), hypothesis=mk(t))["x"].error_rate
+
+
 def main():
     results = []
     for tf in sorted((ROOT / "runs").glob("*/*/*/transcript.json")):
@@ -104,7 +115,13 @@ def main():
                "timings": t.get("timings", {}), "resources": t.get("resources", {}),
                "speaker_scope": t.get("speaker_scope")}
         try:
-            row.update(score_item(ref_dir, t))
+            if (ref_dir / "ref.seglst.json").exists():
+                row.update(score_item(ref_dir, t))
+            else:
+                row["speakers_found"] = len(t["speakers"])
+                base = ROOT / "runs" / "A-iq4" / set_name / item / "transcript.json"
+                if engine != "A-iq4" and base.exists():
+                    row["agreement_wer_vs_A_iq4"] = agreement(t, json.loads(base.read_text()))
         except Exception as e:
             row["score_error"] = f"{type(e).__name__}: {e}"
         results.append(row)
@@ -127,7 +144,11 @@ def report(results):
         groups[(r["set"], r["engine"])].append(r)
     lines = ["| Set | Engine | Items | Audio h | WER | cpWER | DER | Wall s per audio h | RTF | Peak GTT delta GiB |",
              "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|"]
+    own = []
     for (set_name, engine), rows in sorted(groups.items()):
+        if all("speakers_found" in r for r in rows):
+            own += rows
+            continue
         ok = [r for r in rows if "wer" in r]
         hours = sum(r["duration_s"] for r in rows) / 3600
         wall = sum(r["timings"].get("engine_wall_s", 0) for r in rows)
@@ -140,6 +161,15 @@ def report(results):
         per_hour = f"{wall / hours:.0f} | {wall / (hours * 3600):.3f}" if hours else "n/a | n/a"
         lines.append(f"| {set_name} | {engine} | {len(rows)} | {hours:.2f} | {f(wer)} | {f(cp)} | {f(der)} | "
                      f"{per_hour} | {gtt:.1f} |")
+    if own:
+        lines += ["", "Own recordings without a human reference (agreement, not accuracy):", "",
+                  "| Recording | Engine | Minutes | Speakers found | RTF | Peak GTT delta GiB | WER against A-iq4's words |",
+                  "|---|---|---:|---:|---:|---:|---:|"]
+        for r in sorted(own, key=lambda r: (r["item"], r["engine"])):
+            ag = r.get("agreement_wer_vs_A_iq4")
+            lines.append(f"| {r['item']} | {r['engine']} | {r['duration_s'] / 60:.1f} | {r['speakers_found']} | "
+                         f"{r['timings'].get('rtf', 0):.3f} | {r['resources'].get('gtt_peak_delta_gib', 0):.1f} | "
+                         f"{f'{100 * ag:.1f}%' if ag is not None else 'base'} |")
     return "\n".join(lines) + "\n"
 
 

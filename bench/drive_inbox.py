@@ -72,7 +72,7 @@ def make_excerpts(limit, minutes):
         t = json.loads((Path(r["dir"]) / "transcript.json").read_text())
         start, key = best_window(t, minutes * 60)
         name = Path(r["dir"]).name[:24].replace(" ", "_") + f"-{int(start) // 60:02d}m"
-        excerpts.cut(Path(r["dir"]) / "audio.wav", int(start), minutes, name, "A-iq4")
+        excerpts.cut(Path(r["dir"]) / "audio.wav", int(start), minutes, name, "A-iq4", "de")
         made.append({"file": r["file"], "excerpt": name, "start_s": int(start),
                      "speakers_in_window": key[0], "speaker_changes": key[1]})
         print(json.dumps(made[-1]), flush=True)

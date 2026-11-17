@@ -30,6 +30,18 @@ transcripts in `data/bench/runs/`, LLM probe in `data/bench/runs/llm-probe.jsonl
 | ami-ihm-mix | the same meetings, headset mix: the clean upper bound | 5.1 h | same |
 | mls-de | 4 simulated German conversations (2, 2, 3, 4 speakers, about 6 min each) stitched from Multilingual LibriSpeech German test utterances with 0.25 to 0.9 s gaps | 0.4 h | exact (utterance text, speaker, times); sanity check only: read speech, no overlap |
 
+Our own recordings stay on aibox1 and are reported only as numbers:
+
+- own: whole recordings without a human reference (so far a 15-minute
+  excerpt of a retreat session recorded with a phone, 5 speakers). Reported:
+  speed, memory, speakers found, and how far the engines agree with engine A
+  (agreement, not accuracy).
+- own-ref: 5-minute excerpts with a reference a person corrected
+  (`bench/excerpts.py cut` and `import`). The drafts come from engine A, so a
+  reference corrected from them can lean towards A; correct while listening.
+  The Drive call recordings join both sets once they are on the box
+  (`bench/drive_inbox.py`).
+
 AMI audio from the CC BY 4.0 Hugging Face mirror `diarizers-community/ami`
 (the Edinburgh mirror refuses scripted downloads), references from AMI's
 annotation package and BUT's AMI-diarization-setup. Contains material from the
