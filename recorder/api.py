@@ -22,7 +22,7 @@ from .config import Settings
 from .db import DB
 from .engines import NAMES as ENGINE_NAMES, Engines
 from .followup import Followup
-from .render import display_name, local_time, render_summary_md
+from .render import display_name, local_time, render_summary_md, words_to_segments
 from .store import Store
 from .util import (fmt_duration, fmt_ts, hash_token, new_id, new_meeting_id, new_token, now_iso,
                    parse_iso, sha256_hex, write_bytes)
@@ -69,6 +69,11 @@ class SummaryIn(BaseModel):
 class ReprocessIn(BaseModel):
     kind: str = Field(default="transcribe", pattern="^(transcribe|summarize)$")
     engine: str | None = None
+
+
+class IssuesIn(BaseModel):
+    repo: str = Field(max_length=200)
+    issues: list[dict]
 
 
 class AckIn(BaseModel):
@@ -318,6 +323,10 @@ def create_app(settings=None):
     def ack(pid: str, body: AckIn, tok=Depends(need(*WRITERS))):
         return followup.ack(pid, body.url, body.note, who=tok["name"])
 
+    @app.put("/api/v1/issues-index")
+    def issues_index(body: IssuesIn, tok=Depends(need(*WRITERS))):
+        return followup.sync_issues(body.repo, body.issues)
+
     # -- web view ---------------------------------------------------------------
 
     @app.get("/login", response_class=HTMLResponse)
@@ -355,7 +364,8 @@ def create_app(settings=None):
             summary_md = render_summary_md(shown, store.names(mid), m, s.display_tz, store.link(mid))
         t = store.transcript(mid) or {}
         names = store.names(mid)
-        segs = [{**seg, "name": display_name(seg["spk"], names)} for seg in t.get("segments", [])]
+        segs = [{**seg, "name": display_name(seg["spk"], names)}
+                for seg in words_to_segments(t.get("words", [])) or t.get("segments", [])]
         proposals = {p["item_key"]: p for p in followup.list(meeting_id=mid)}
         mappings = {r["item_key"]: r for r in db.all("SELECT * FROM mappings WHERE meeting_id = ?", mid)}
         return page(request, "meeting.html", tok, m=m, t=t, segs=segs, names=names, summary_md=summary_md,
@@ -400,7 +410,9 @@ def create_app(settings=None):
         items = followup.list()
         titles = {m["id"]: m["title"] or m["id"] for m in store.list(limit=1000)}
         return page(request, "review.html", tok, items=items, titles=titles, auto=s.followup_auto,
-                    repo=s.github_repo, has_token=followup.github.available())
+                    repo=s.github_repo, executor=s.followup_executor,
+                    targets=("mock GitHub and Drive on this box" if s.followup_executor == "direct"
+                             else "the Agent Command Center agent (outbox)"))
 
     @app.post("/review/run")
     def review_run(tok=Depends(need(*READERS, html=True))):

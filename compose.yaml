@@ -22,6 +22,21 @@ services:
       - "host.docker.internal:host-gateway"
     networks: [rec]
 
+  # Mock GitHub and Drive for building and demos (FOLLOWUP_EXECUTOR=direct).
+  mock:
+    image: indie-recorder:latest
+    restart: unless-stopped
+    user: "1000:1000"
+    command: ["python", "-m", "mock.server"]
+    environment:
+      MOCK_STATE: /data/mock/state.json
+      MOCK_PUBLIC_URL: ${PUBLIC_URL}/mock
+    volumes:
+      - ./data:/data
+    ports:
+      - "127.0.0.1:18099:8099"
+    networks: [rec]
+
   caddy:
     image: caddy:2
     restart: unless-stopped

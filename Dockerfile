@@ -13,6 +13,7 @@ COPY pwa pwa
 COPY sim sim
 COPY bench bench
 COPY tests tests
+COPY mock mock
 
 ENV PYTHONUNBUFFERED=1 DATA_DIR=/data
 EXPOSE 8000

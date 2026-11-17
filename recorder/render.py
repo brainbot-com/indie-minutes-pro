@@ -59,20 +59,23 @@ def meeting_line(meta, n_speakers, lang, tz):
 
 
 def words_to_segments(words, max_gap=1.5, max_len=40.0):
-    """Group consecutive words of one speaker into readable segments."""
-    segs = []
-    for w in words:
+    """Group each speaker's words into utterances, ordered by start time. A
+    speaker's utterance continues across other speakers' words (crosstalk,
+    backchannels) as long as their own pauses stay short."""
+    segs, open_seg = [], {}
+    for w in sorted(words, key=lambda w: (w["s"], w["e"])):
         text = (w.get("w") or "").strip()
         if not text:
             continue
-        cur = segs[-1] if segs else None
-        if (cur and cur["spk"] == w.get("spk") and w["s"] - cur["e"] <= max_gap
-                and w["e"] - cur["s"] <= max_len):
+        spk = w.get("spk") or "Speaker 1"
+        cur = open_seg.get(spk)
+        if cur and w["s"] - cur["e"] <= max_gap and w["e"] - cur["s"] <= max_len:
             cur["text"] += ("" if _no_space_before(text) else " ") + text
             cur["e"] = max(cur["e"], w["e"])
         else:
-            segs.append({"spk": w.get("spk") or "Speaker 1", "s": w["s"], "e": w["e"], "text": text})
-    return segs
+            cur = open_seg[spk] = {"spk": spk, "s": w["s"], "e": w["e"], "text": text}
+            segs.append(cur)
+    return sorted(segs, key=lambda x: x["s"])
 
 
 def _no_space_before(token):
@@ -82,7 +85,7 @@ def _no_space_before(token):
 def render_transcript_md(transcript, names, meta, tz="Europe/Berlin"):
     lang = transcript.get("language") or meta.get("language") or "en"
     h = headings(lang)
-    segs = transcript.get("segments") or words_to_segments(transcript.get("words", []))
+    segs = words_to_segments(transcript.get("words", [])) or transcript.get("segments", [])
     title = meta.get("title") or meta.get("id")
     out = [f"# {h['transcript']}: {title}", "",
            meeting_line(meta, len(transcript.get("speakers", [])), lang, tz)

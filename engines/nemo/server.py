@@ -3,7 +3,7 @@ Nemotron 3.5 Transcribe 30B-A4B, plus `nemo-speech diarize` with Nemotron 3
 Diarization for engine B.
 
 ops:
-  transcribe  {audio, out, model: iq4|q8, language?, mode: diarize|instruction, device: vulkan|cpu}
+  transcribe  {audio, out, model: iq4|q8, language?, mode: diarize|instruction|plain, device: vulkan|cpu}
   diarize     {audio, out, device}
 The CLI is started per job, so nothing stays in GPU memory between meetings."""
 import json
@@ -68,10 +68,12 @@ def transcribe(params, job):
            "--format", "json", "-o", out, *SALM_ARGS]
     if params.get("language"):
         cmd += ["-l", params["language"]]
-    if params.get("mode", "diarize") == "diarize":
+    mode = params.get("mode", "diarize")
+    if mode == "diarize":
         cmd += ["--diarize"]
-    else:
+    elif mode == "instruction":
         cmd += ["--instruction", SPEAKER_INSTRUCTION]
+    # plain: the default transcription prompt, no speakers (a separate diarizer adds them)
     wall, resources, text = run(cmd, out + ".log", job)
     result = json.load(open(out))
     return {"words": result.get("words", []), "languages": result.get("languages"), "text": result.get("text", ""),

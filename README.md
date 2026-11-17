@@ -118,51 +118,81 @@ output and logs). The SQLite index is `data/index.sqlite`.
 
 `python -m recorder.followup run` (hourly via `indie-recorder-followup.timer`,
 and right after each meeting): for every meeting with a new summary version it
-reads `actions.json` and `summary.json`, fetches the sandbox repo's issues,
-lets the LLM on the box decide per item (comment on an existing issue, open a
-new one, or meeting log only), and adds one "Meeting log" entry per summary
-version. Bodies link back to the meeting on aibox1 and never quote the
-transcript.
+reads `actions.json` and `summary.json`, matches each action item against the
+repo's existing issues, lets the LLM on the box decide per item (comment on an
+existing issue, open a new one, or meeting log only), and adds one "Meeting
+log" entry per summary version. Bodies link back to the meeting on aibox1 and
+never quote the transcript.
 
 - Dry-run by default: proposals wait on `/review`. `FOLLOWUP_AUTO=1` (or
   `run --auto`) approves them at once.
+- The box holds no GitHub or Drive login. Who carries out approved proposals
+  is set by `FOLLOWUP_EXECUTOR`:
+  - `agent` (production): approved proposals go to the outbox; the Agent
+    Command Center agent, which has GitHub and Drive access, carries them out
+    and acknowledges each with its URL. It also keeps the box's copy of the
+    repo's issues fresh (`sync_issues`), which is what proposals are matched
+    against.
+  - `direct` (demo and tests, the default in `.env.example`): the box calls
+    the mock GitHub and Drive in `mock/server.py` itself, so the whole loop
+    runs without accounts. The mock's issues, comments and docs are at
+    `https://10.1.9.7:8443/mock/`.
 - Idempotent: one proposal per (meeting, item), a mapping (meeting, item) ->
   issue, comment or doc once done, and a hidden marker in every GitHub body
-  that is checked before posting, so a rerun or a lost database never
-  duplicates.
-- JSON in and out for routines (Agent Command Center, OpenClaw):
+  (checked before posting in direct mode; the agent posts bodies unchanged),
+  so a rerun or a lost database never duplicates.
+- JSON in and out for routines:
   `docker compose exec -T recorder python -m recorder.followup run --json-in - <<< '{"auto": false}'`,
   plus `list`, `approve ID`, `reject ID`, `outbox`, `ack ID --url URL`.
-- GitHub runs here; Drive does not (no Drive credential on the box). Approved
-  Drive entries go to the outbox (`data/outbox/` and the `list_drive_outbox`
-  tool) for the Command Center agent, which applies and acknowledges them.
 
-## Agent Command Center integration
+## Setting up the Agent Command Center agent
 
-Create an agent token on Devices (role agent) and register the MCP server
-`https://10.1.9.7:8443/mcp` with `Authorization: Bearer <token>` (or
-`http://127.0.0.1:18000/mcp` for an agent on aibox1 itself). Tools:
-`list_meetings`, `get_meeting` (with the full transcript), `update_summary`
-(new version, becomes current), `list_drive_outbox`, `ack_drive_item`. The
-same is available as JSON under `/api/v1/` (`GET /meetings`,
-`GET /meetings/<id>?transcript=true`, `POST /meetings/<id>/summary`,
-`GET /outbox`, `POST /outbox/<id>/ack`).
+The agent writes better summaries with its own context and memory, keeps the
+repo's issues in sync, and carries out approved GitHub and Drive follow-ups.
+It reads full transcripts, so it must run on aibox1 against aibox1's LLM.
 
-The agent must use aibox1's own LLM (qwen3.8:27b on aibox1's Ollama), because
-it reads transcripts. A routine prompt that works on its own:
+1. Token: on `https://10.1.9.7:8443/devices` create a token with role
+   "agent" (or `docker compose exec recorder python -m recorder.cli token add
+   --name "command center" --role agent`).
+2. MCP server: in Agent Command Center add an MCP server with URL
+   `http://127.0.0.1:18000/mcp` (the agent runs on aibox1; no TLS needed) and
+   header `Authorization: Bearer <token>`. From another machine it would be
+   `https://10.1.9.7:8443/mcp` with the box's CA trusted, but then
+   transcripts leave the box, so do not.
+   Tools: `list_meetings`, `get_meeting` (with the full transcript),
+   `update_summary` (new version, becomes current), `sync_issues`,
+   `list_outbox`, `ack_outbox_item`. The same as JSON under `/api/v1/`:
+   `GET /meetings`, `GET /meetings/<id>?transcript=true`,
+   `POST /meetings/<id>/summary`, `PUT /issues-index`, `GET /outbox`,
+   `POST /outbox/<id>/ack`.
+3. Model: pin the agent to aibox1's Ollama, `qwen3.8:27b-ctx65536`. Not
+   StudioLLM (aibox0) or any cloud model.
+4. Accounts: give the agent its GitHub connection (only
+   `brainbot-com/indie-recorder-sandbox` while testing) and its Drive
+   connection (only the test folder, `DRIVE_FOLDER` in `.env`).
+5. Switch the box to agent mode: `FOLLOWUP_EXECUTOR=agent` in `.env`, then
+   `docker compose up -d recorder`.
+6. Routine, hourly, with "start each run fresh" off so it remembers its last
+   run:
 
-> Every hour, call list_meetings with since set to the time of your last run.
-> For each meeting in state done whose summary_author starts with "recorder",
-> read it with get_meeting. Using what you know about the people, projects and
-> earlier meetings, write a better summary in the meeting's language: TL;DR,
-> decisions, action items with owner and due date when they were said, open
-> questions. Keep "Speaker N" labels unless names are set; if you recognise a
-> speaker, say so in the note instead of renaming. Store it with
-> update_summary, including action_items and a note on what you changed. Then
-> call list_drive_outbox; append each item's markdown to the Google Doc named
-> in "doc" inside the Drive folder named in "folder" (create it if missing),
-> and call ack_drive_item with the doc's URL. Touch nothing outside that
-> folder. If nothing is new, end without output.
+   > Every hour, using the indie-recorder MCP tools: (1) Read the open and
+   > recently closed issues of brainbot-com/indie-recorder-sandbox with your
+   > GitHub tools and send them with sync_issues. (2) Call list_meetings with
+   > since set to the time of your last run. For each meeting in state done
+   > whose summary_author starts with "recorder", read it with get_meeting and
+   > write a better summary in the meeting's language: TL;DR, decisions,
+   > action items with owner and due date when they were said, open questions,
+   > using what you know about the people and projects. Keep "Speaker N"
+   > labels unless names are set; if you recognise a speaker, say so in the
+   > note instead. Store it with update_summary, including action_items and a
+   > note on what you changed. (3) Call list_outbox and carry out each item
+   > exactly as described (issue, comment, or appending to the Google Doc in
+   > the named folder, creating it if missing), posting bodies unchanged, then
+   > call ack_outbox_item with the URL. Touch nothing outside the sandbox repo
+   > and the test folder. If nothing is new, end without output.
+
+7. Check: record a short meeting, approve its proposals on `/review`, and
+   after the next run the review page shows the issue, comment and doc URLs.
 
 ## Engines
 

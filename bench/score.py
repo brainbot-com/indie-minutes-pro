@@ -25,14 +25,17 @@ def normalizer(lang):
 
 
 def hyp_segments(t, gap=0.5):
-    segs = []
-    for w in t["words"]:
-        cur = segs[-1] if segs else None
-        if cur and cur["speaker"] == w["spk"] and w["s"] - cur["end_time"] <= gap:
+    """Each speaker's words merged across their own pauses up to `gap` seconds
+    (other speakers' words in between do not split a region)."""
+    segs, open_seg = [], {}
+    for w in sorted(t["words"], key=lambda w: w["s"]):
+        cur = open_seg.get(w["spk"])
+        if cur and w["s"] - cur["end_time"] <= gap:
             cur["words"] += " " + w["w"]
             cur["end_time"] = max(cur["end_time"], w["e"])
         else:
-            segs.append({"speaker": w["spk"], "start_time": w["s"], "end_time": w["e"], "words": w["w"]})
+            cur = open_seg[w["spk"]] = {"speaker": w["spk"], "start_time": w["s"], "end_time": w["e"], "words": w["w"]}
+            segs.append(cur)
     return segs
 
 

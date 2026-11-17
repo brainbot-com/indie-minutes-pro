@@ -22,9 +22,15 @@ SUMMARY = {"title": "Release planning", "tldr": "Speaker 2 sends the deck.", "de
 
 
 @pytest.fixture
-def app(tmp_path, monkeypatch):
+def executor():
+    return "direct"
+
+
+@pytest.fixture
+def app(tmp_path, monkeypatch, executor):
     s = Settings(data_dir=tmp_path / "data", worker="0", engine="fake", secure_cookies="0",
-                 public_url="https://box.test", github_token_file=tmp_path / "no-token", followup_on_done="0")
+                 public_url="https://box.test", github_token_file=tmp_path / "no-token", followup_on_done="0",
+                 followup_executor=executor, drive_api_url="")
     monkeypatch.setattr(wk, "summarize", lambda transcript, settings, log=print: dict(SUMMARY))
     return create_app(s)
 
@@ -169,3 +175,68 @@ def test_mcp_update_summary(app, client, tmp_path):
     assert "version 2 (agent (agent))" in (app.state.store.folder(mid) / "summary.md").read_text()
     phone = {"Authorization": f"Bearer {create_token(app.state.db, 'phone2', 'device')}"}
     assert client.post("/mcp", json={}, headers=phone).status_code == 401
+
+
+@pytest.mark.parametrize("executor", ["agent"])
+def test_agent_mode_uses_outbox_and_synced_issues(app, client, tmp_path, monkeypatch):
+    mid, _ = make_meeting(app, client, tmp_path)
+    f = app.state.followup
+    agent = {"Authorization": f"Bearer {create_token(app.state.db, 'cc-agent', 'agent')}"}
+    seen = {}
+
+    def decide(settings, system, user, schema, **kw):
+        seen["candidates"] = [c["number"] for x in json.loads(user)["action_items"] for c in x["candidates"]]
+        return {"decisions": [
+            {"item": 0, "action": "comment", "issue_number": 7, "title": "", "body": "Deck by Friday", "rationale": "same"},
+            {"item": 1, "action": "new_issue", "issue_number": 0, "title": "Security check", "body": "x", "rationale": "new"}]}, {}
+    monkeypatch.setattr(fu, "chat_json", decide)
+    issues = [{"number": 7, "title": "Release deck for the beta", "body": "Prepare the updated deck", "state": "open",
+               "html_url": "https://github.test/7"}]
+    r = client.put("/api/v1/issues-index", json={"repo": app.state.settings.github_repo, "issues": issues}, headers=agent)
+    assert r.json()["issues"] == 1
+    f.propose()
+    assert seen["candidates"] == [7]
+    for p in f.list(state="proposed"):
+        assert f.decide(p["id"], approve=True)["outbox"]
+    box = client.get("/api/v1/outbox", headers=agent).json()
+    assert sorted(p["kind"] for p in box) == ["drive_log", "github_comment", "github_issue"]
+    for p in box:
+        assert client.post(f"/api/v1/outbox/{p['id']}/ack", json={"url": f"https://done.test/{p['kind']}"},
+                           headers=agent).json()["state"] == "executed"
+    assert client.get("/api/v1/outbox", headers=agent).json() == []
+    assert f.propose()["proposed"] == []
+
+
+def test_direct_mode_against_the_mock_server(app, client, tmp_path, monkeypatch):
+    import threading
+    from http.server import ThreadingHTTPServer
+    monkeypatch.setenv("MOCK_STATE", str(tmp_path / "mock.json"))
+    import importlib
+    import mock.server as ms
+    importlib.reload(ms)
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), ms.Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    mid, _ = make_meeting(app, client, tmp_path)
+    f = app.state.followup
+    f.github.base, f.drive.base = base + "/github", base + "/drive"
+    monkeypatch.setattr(fu, "chat_json", lambda *a, **k: ({"decisions": [
+        {"item": 0, "action": "comment", "issue_number": 5, "title": "", "body": "Deck by Friday", "rationale": "same"},
+        {"item": 1, "action": "new_issue", "issue_number": 0, "title": "Security check", "body": "x", "rationale": "new"}]}, {}))
+    f.propose()
+    for p in f.list(state="proposed"):
+        f.decide(p["id"], approve=True)
+    assert sorted(p["state"] for p in f.list()) == ["executed"] * 3
+    state = json.loads((tmp_path / "mock.json").read_text())
+    issues = state["repos"]["brainbot-com/indie-recorder-sandbox"]["issues"]
+    assert issues[-1]["title"] == "Security check" and len(state["repos"]["brainbot-com/indie-recorder-sandbox"]["comments"]["5"]) == 1
+    assert len(state["docs"]["indie-recorder test/Meeting log"]) == 1
+    f.db.run("DELETE FROM mappings")  # a lost database must not cause duplicates
+    f.db.run("UPDATE proposals SET state = 'approved'")
+    for p in f.list():
+        if p["kind"] != "drive_log":
+            f.execute(p["id"])
+    state = json.loads((tmp_path / "mock.json").read_text())
+    assert len(state["repos"]["brainbot-com/indie-recorder-sandbox"]["issues"]) == 9
+    assert len(state["repos"]["brainbot-com/indie-recorder-sandbox"]["comments"]["5"]) == 1
+    srv.shutdown()

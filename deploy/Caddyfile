@@ -22,7 +22,13 @@ https://{$BIND_IP}:{$HTTPS_PORT} {
 		Referrer-Policy no-referrer
 		Permissions-Policy "microphone=(self)"
 	}
-	reverse_proxy 127.0.0.1:18000
+	# Mock GitHub and Drive pages (demo data only).
+	handle /mock* {
+		reverse_proxy 127.0.0.1:18099
+	}
+	handle {
+		reverse_proxy 127.0.0.1:18000
+	}
 }
 
 # Plain HTTP, only to hand the phone the CA certificate it must trust first.

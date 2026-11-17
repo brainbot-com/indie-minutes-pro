@@ -2,7 +2,9 @@
 AMI's human abstractive summary, for three meetings. The box's LLM marks which
 human actions our list covers (a rough recall, not a metric to quote alone).
 
-    python -m bench.spotcheck [--engine A-iq4] [--set ami-sdm] [--meetings ES2004a,IS1009b,TS3003c]
+    python -m bench.spotcheck [--engine A-iq4] [--set ami-sdm] [--meetings IS1009a,IS1009c,TS3003c]
+
+The default meetings are the three of our ten with the most human action items.
 
 Writes data/bench/spotcheck.md and spotcheck.json."""
 import argparse
@@ -28,14 +30,14 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--engine", default="A-iq4")
     ap.add_argument("--set", default="ami-sdm")
-    ap.add_argument("--meetings", default="ES2004a,IS1009b,TS3003c")
+    ap.add_argument("--meetings", default="IS1009a,IS1009c,TS3003c")
     a = ap.parse_args(argv)
     s = Settings()
     md, out = [f"# Action items: ours ({a.engine}, {a.set}) vs AMI's human summaries", ""], []
     for m in a.meetings.split(","):
         run = ROOT / "runs" / a.engine / a.set / m
         meta = json.loads((ROOT / "datasets" / a.set / m / "meta.json").read_text())
-        human = (meta.get("abstractive") or {}).get("actions") or []
+        human = [h for h in (meta.get("abstractive") or {}).get("actions") or [] if h.strip("* ").upper() != "NA"]
         cached = run / "summary.json"
         summary = json.loads(cached.read_text()) if cached.exists() else summarize(json.loads((run / "transcript.json").read_text()), s)
         cached.write_text(json.dumps(summary, ensure_ascii=False, indent=1))

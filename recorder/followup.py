@@ -1,13 +1,17 @@
-"""Follow-up agent: turns meeting action items into GitHub proposals and a
-"Meeting log" entry for Drive.
+"""Follow-up agent: turns meeting action items into GitHub proposals (comment
+on an existing issue or open a new one) and a "Meeting log" entry for Drive.
 
 Dry-run by default: every proposal waits on the review page (/review) until a
 person approves it. FOLLOWUP_AUTO=1 (or --auto) approves new proposals at once.
-GitHub proposals run here with the sandbox token; Drive proposals go to the
-outbox, which the Agent Command Center agent (it has Drive access) applies and
-acknowledges. Idempotent: one proposal per (meeting, item), one mapping per
-executed item, and a marker in every GitHub body so a lost database cannot
-cause duplicates.
+Who carries out approved proposals (FOLLOWUP_EXECUTOR):
+  agent   the outbox: the Agent Command Center agent, which has GitHub and Drive
+          access, applies them and acknowledges each with its URL. It also
+          syncs the repo's issues to the box (sync_issues) so proposals can
+          point at existing issues. Nothing here needs a GitHub or Drive login.
+  direct  this service calls GITHUB_API_URL and DRIVE_API_URL itself; used
+          with the mock GitHub and Drive (mock/server.py) for tests and demos.
+Idempotent: one proposal per (meeting, item), one mapping per executed item,
+and a marker in every GitHub body so a lost database cannot cause duplicates.
 
 CLI (JSON out; options can also come as JSON on stdin with --json-in -):
   python -m recorder.followup run [--auto] [--meeting ID ...]
@@ -26,7 +30,7 @@ from contextlib import contextmanager
 import httpx
 
 from .llm import chat_json
-from .util import new_id, now_iso, write_json
+from .util import new_id, now_iso, read_json, write_json
 
 DECIDE_SCHEMA = {
     "type": "object",
@@ -64,22 +68,29 @@ und der die das mit für von wird werden noch eine einen dass soll sollte bis"""
 
 
 class GitHub:
+    """GitHub's REST API, or the mock with the same shapes (no token needed)."""
+
     def __init__(self, settings):
         self.repo = settings.github_repo
+        self.base = settings.github_api_url
         self.token_file = settings.github_token_file
         self._issues = None
 
-    def available(self):
+    def _token(self):
         try:
-            return bool(self.token_file.read_text().strip())
+            return self.token_file.read_text().strip()
         except OSError:
-            return False
+            return ""
+
+    def available(self):
+        return bool(self._token()) or not self.base.startswith("https://api.github.com")
 
     def _client(self):
-        token = self.token_file.read_text().strip()
-        return httpx.Client(base_url="https://api.github.com", timeout=30, headers={
-            "Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "indie-recorder"})
+        headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28",
+                   "User-Agent": "indie-recorder"}
+        if self._token():
+            headers["Authorization"] = f"Bearer {self._token()}"
+        return httpx.Client(base_url=self.base, timeout=30, headers=headers)
 
     def issues(self):
         """Open and closed issues of the sandbox repo (pull requests left out)."""
@@ -120,6 +131,22 @@ class GitHub:
             return r.json()["html_url"]
 
 
+class Drive:
+    """Appends to a doc in a folder. Only the mock exists here; real Drive
+    updates are the Agent Command Center agent's job (outbox)."""
+
+    def __init__(self, settings):
+        self.base = settings.drive_api_url
+
+    def available(self):
+        return bool(self.base)
+
+    def append(self, folder, doc, markdown):
+        r = httpx.post(f"{self.base}/append", json={"folder": folder, "doc": doc, "markdown": markdown}, timeout=30)
+        r.raise_for_status()
+        return r.json()["url"]
+
+
 def _terms(text):
     return {w for w in re.findall(r"[a-zäöüß0-9][a-zäöüß0-9-]{2,}", (text or "").lower()) if w not in STOP}
 
@@ -147,6 +174,9 @@ class Followup:
         self.db = db
         self.store = store
         self.github = GitHub(settings)
+        self.drive = Drive(settings)
+        self.executor = settings.followup_executor
+        self.index_path = settings.data_dir / "github-issues.json"
 
     @contextmanager
     def _lock(self):
@@ -171,7 +201,25 @@ class Followup:
         return rows
 
     def outbox(self):
-        return [p for p in self.list(state="approved") if p["kind"] == "drive_log"]
+        """Approved proposals nobody has carried out yet."""
+        return self.list(state="approved")
+
+    def issues(self):
+        """Existing issues to match action items against: from the API (direct)
+        or from the copy the Command Center agent synced (agent)."""
+        if self.executor == "direct":
+            return self.github.issues() if self.github.available() else []
+        index = read_json(self.index_path, {}) or {}
+        return index.get("issues", []) if index.get("repo") == self.s.github_repo else []
+
+    def can_file_issues(self):
+        return self.executor == "agent" or self.github.available()
+
+    def sync_issues(self, repo, issues):
+        keep = ("number", "title", "body", "state", "html_url")
+        rows = [{k: (i.get(k) or "")[:2000] if k == "body" else i.get(k) for k in keep} for i in issues]
+        write_json(self.index_path, {"repo": repo, "synced_at": now_iso(), "issues": rows})
+        return {"repo": repo, "issues": len(rows)}
 
     # -- proposing -------------------------------------------------------------
 
@@ -219,8 +267,8 @@ class Followup:
         title = meta.get("title") or summary.get("title") or mid
         created = []
         new_items = [a for a in actions if not self._known(mid, a["key"])]
-        if new_items and self.github.available():
-            issues = self.github.issues()
+        if new_items and self.can_file_issues():
+            issues = self.issues()
             listing = []
             for i, a in enumerate(new_items):
                 cands = candidates(a["text"], issues)
@@ -256,8 +304,8 @@ class Followup:
                        "meeting_url": link, "summary_version": summary.get("version"),
                        "markdown": self._log_entry(meta, summary, actions, link)}
             why = "Every meeting gets an entry in the running meeting log."
-            if not self.github.available():
-                why += " No GitHub token yet, so no issue proposals."
+            if not self.can_file_issues():
+                why += " No GitHub access configured, so no issue proposals."
             pid = self._add(mid, log_key, "drive_log", payload, why)
             if pid:
                 created.append(pid)
@@ -307,14 +355,16 @@ class Followup:
         done = self.db.one("SELECT * FROM mappings WHERE meeting_id = ? AND item_key = ?", mid, key)
         if done:
             return self._executed(pid, done["target_kind"], done["target"], note="already mapped")
-        if p["kind"] == "drive_log":
+        direct = self.executor == "direct" and (
+            self.drive.available() if p["kind"] == "drive_log" else self.github.available())
+        if not direct:
             write_json(self.s.outbox_dir / f"{pid}.json", {**p, "state": "approved"})
             return {"id": pid, "state": "approved", "outbox": True}
-        if not self.github.available():
-            return {"id": pid, "state": "approved", "note": "waiting for secrets/github_token"}
         try:
             mark = marker(mid, key)
-            if p["kind"] == "github_comment":
+            if p["kind"] == "drive_log":
+                url = self.drive.append(payload["folder"], payload["doc"], payload["markdown"])
+            elif p["kind"] == "github_comment":
                 url = self.github.find_marker(mark, payload["issue_number"]) or \
                     self.github.comment(payload["issue_number"], payload["body"])
             else:
@@ -325,15 +375,15 @@ class Followup:
         return self._executed(pid, p["kind"], url)
 
     def ack(self, pid, url, note=None, who="agent"):
-        """The Drive agent reports that it applied a drive_log proposal."""
+        """The Command Center agent reports that it carried out a proposal."""
         p = self.db.one("SELECT * FROM proposals WHERE id = ?", pid)
-        if not p or p["kind"] != "drive_log":
-            return {"id": pid, "error": "no such drive proposal"}
+        if not p:
+            return {"id": pid, "error": "no such proposal"}
         if p["state"] == "executed":
             return {"id": pid, "state": "executed", "note": "already acknowledged"}
         if p["state"] != "approved":
             return {"id": pid, "error": f"proposal is {p['state']}, not approved"}
-        res = self._executed(pid, "drive_log", url, note=note, who=who)
+        res = self._executed(pid, p["kind"], url, note=note, who=who)
         (self.s.outbox_dir / f"{pid}.json").unlink(missing_ok=True)
         return res
 

@@ -49,7 +49,7 @@ SINGLE_CALL_CHARS = 120_000
 
 
 def transcript_lines(transcript):
-    segs = transcript.get("segments") or words_to_segments(transcript.get("words", []))
+    segs = words_to_segments(transcript.get("words", [])) or transcript.get("segments", [])
     return [f"[{fmt_ts(s['s'])}] {s['spk']}: {s['text']}" for s in segs]
 
 

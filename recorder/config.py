@@ -26,6 +26,12 @@ class Settings:
         self.max_chunk_bytes = int(get("MAX_CHUNK_MB", "64")) * 1024 * 1024
         self.github_repo = get("GITHUB_REPO", "brainbot-com/indie-recorder-sandbox")
         self.github_token_file = Path(get("GITHUB_TOKEN_FILE", "/secrets/github_token"))
+        # agent: approved follow-ups go to the outbox and the Agent Command Center
+        # agent (which has GitHub and Drive access) carries them out;
+        # direct: this service calls GITHUB_API_URL / DRIVE_API_URL itself (the mocks).
+        self.followup_executor = get("FOLLOWUP_EXECUTOR", "agent")
+        self.github_api_url = get("GITHUB_API_URL", "https://api.github.com").rstrip("/")
+        self.drive_api_url = get("DRIVE_API_URL", "").rstrip("/")
         self.followup_auto = get("FOLLOWUP_AUTO", "0") == "1"
         self.followup_on_done = get("FOLLOWUP_ON_DONE", "1") == "1"
         self.drive_log_doc = get("DRIVE_LOG_DOC", "Meeting log")

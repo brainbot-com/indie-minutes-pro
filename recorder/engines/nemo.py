@@ -2,12 +2,16 @@
 --diarize and word timestamps. The model takes at most one hour per request,
 so longer recordings are cut into 59-minute windows that overlap by 60 s;
 speaker labels are per window and are linked through the overlap (flagged in
-the transcript)."""
+the transcript).
+
+A-iq4-diar: the same words without --diarize (the default, punctuated prompt),
+speakers from Nemotron 3 Diarization over the whole file instead, so labels
+stay consistent across windows."""
 import os
 
 from ..audio import slice_wav, wav_duration
 from ..util import guess_language
-from .base import Engine, finish, merge_windows, plan_windows
+from .base import Engine, assign_speakers, finish, merge_windows, plan_windows
 from .remote import health, run_job
 
 MAX_S = 59 * 60
@@ -16,14 +20,17 @@ DECODER = {"iq4": "AD-IQ4_NL", "q8": "Q8_0"}
 
 
 class NemoEngine(Engine):
-    def __init__(self, settings, variant="iq4"):
+    def __init__(self, settings, variant="iq4", external_diarizer=False):
         self.s = settings
         self.variant = variant
-        self.name = f"A-{variant}"
+        self.diar = external_diarizer
+        self.name = f"A-{variant}" + ("-diar" if external_diarizer else "")
         # diarize: the CLI's speaker prompt (lowercase, no punctuation), as asked;
-        # instruction: the model card's punctuated speaker-tag prompt instead.
-        self.mode = os.environ.get("NEMO_MODE", "diarize")
-        self.label = f"Nemotron 3.5 Transcribe {DECODER[variant]} · NeMo-Speech.cpp · Vulkan"
+        # instruction: the model card's punctuated speaker-tag prompt instead;
+        # plain: default prompt without speakers (used with the external diarizer).
+        self.mode = "plain" if external_diarizer else os.environ.get("NEMO_MODE", "diarize")
+        self.label = f"Nemotron 3.5 Transcribe {DECODER[variant]} · NeMo-Speech.cpp · Vulkan" + (
+            " · Nemotron 3 Diarization" if external_diarizer else "")
 
     def transcribe(self, wav, workdir, language=None, log=print, device="vulkan"):
         duration = wav_duration(wav)
@@ -60,7 +67,21 @@ class NemoEngine(Engine):
             text.append(res.get("text") or "")
             langs += [x for x in (res.get("languages") or []) if x and x != "und"]
         notes, extra = [], {}
-        if len(parts) > 1:
+        if self.diar:
+            diar = run_job(self.s.nemo_url, {"op": "diarize", "audio": str(wav), "out": str(workdir / "diarization.json"),
+                                             "device": device}, log)
+            timings["diarize_s"] = diar["wall_s"]
+            timings["engine_wall_s"] += diar["wall_s"]
+            turns = [(seg["start"], seg["end"], f"d{seg['speaker']}") for seg in diar.get("segments", [])]
+            words = [w for _, _, ws in parts for w in ws]
+            if len(parts) > 1:  # keep each window's words up to the middle of the overlap
+                words, _ = merge_windows(parts)
+            words = assign_speakers(words, turns)
+            for w in words:
+                w["spk"] = w.get("spk") or "d1"
+            scope = "meeting"
+            extra["diarization_turns"] = len(turns)
+        elif len(parts) > 1:
             words, links = merge_windows(parts)
             extra["windows"] = links
             notes.append(f"This recording is longer than 59 minutes, so it was transcribed in {len(parts)} parts "

@@ -2,7 +2,8 @@
 plain JSON responses and no sessions, which MCP clients accept.
 
 The tools mirror the JSON API: list meetings, read one with its full
-transcript, store a better summary, and work the Drive outbox. Use it only
+transcript, store a better summary, sync the repo's issues, and work the
+outbox of approved GitHub and Drive follow-ups. Use it only
 from agents that run on aibox1 against aibox1's own LLM: the transcripts it
 returns must not leave the box."""
 import json
@@ -17,8 +18,10 @@ VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 INSTRUCTIONS = """Meetings recorded on aibox1. Each meeting has a transcript with speaker labels
 ("Speaker 1".."Speaker N", or the names people set), a first summary written by the recorder,
 and action items. Use update_summary to store a better summary with the context and memory you
-have; it becomes the current version and the follow-up agent re-reads it. Drive updates the
-people approved wait in list_drive_outbox; apply them, then call ack_drive_item."""
+have; it becomes the current version and the follow-up agent re-reads it. Keep the box's copy
+of the repo's issues fresh with sync_issues so new follow-ups can point at existing issues.
+Follow-ups people approved (GitHub issues and comments, Drive doc entries) wait in
+list_outbox: carry each out with your GitHub and Drive tools, then call ack_outbox_item."""
 
 TOOLS = [
     {"name": "list_meetings",
@@ -45,12 +48,23 @@ TOOLS = [
          "action_items": {"type": "array", "items": {"type": "object", "required": ["text"], "properties": {
              "text": {"type": "string"}, "owner": {"type": "string"}, "due": {"type": "string"}}}},
          "note": {"type": "string", "description": "what you changed and which context you used"}}}},
-    {"name": "list_drive_outbox",
-     "description": "Approved Drive updates waiting to be applied: target doc and folder, the markdown to "
-                    "append, and the meeting link.",
+    {"name": "sync_issues",
+     "description": "Send the repo's issues (open and recently closed) so the box's follow-up agent can match "
+                    "action items against them. Replaces the previous copy.",
+     "inputSchema": {"type": "object", "required": ["repo", "issues"], "properties": {
+         "repo": {"type": "string", "description": "owner/name, e.g. brainbot-com/indie-recorder-sandbox"},
+         "issues": {"type": "array", "items": {"type": "object", "required": ["number", "title"], "properties": {
+             "number": {"type": "integer"}, "title": {"type": "string"}, "body": {"type": "string"},
+             "state": {"type": "string"}, "html_url": {"type": "string"}}}}}}},
+    {"name": "list_outbox",
+     "description": "Approved follow-ups waiting to be carried out. kind github_issue: open an issue in "
+                    "payload.repo with payload.title and payload.body. kind github_comment: comment payload.body on "
+                    "issue payload.issue_number. kind drive_log: append payload.markdown to the Google Doc "
+                    "payload.doc in the Drive folder payload.folder (create it if missing). Bodies already "
+                    "contain a hidden marker; post them unchanged so reruns can be detected.",
      "inputSchema": {"type": "object", "properties": {}}},
-    {"name": "ack_drive_item",
-     "description": "Report that you applied a Drive update, with the URL of the doc you changed.",
+    {"name": "ack_outbox_item",
+     "description": "Report that you carried out an outbox item, with the URL of the issue, comment or doc.",
      "inputSchema": {"type": "object", "required": ["proposal_id", "url"], "properties": {
          "proposal_id": {"type": "string"}, "url": {"type": "string"}, "note": {"type": "string"}}}},
 ]
@@ -103,9 +117,12 @@ def mount_mcp(app, s, db, store, followup, token_row):
                                             "due": a.get("due", "")} for a in args["action_items"]]
             version = store.add_summary(mid, summary, author=f"agent ({tok['name']})")
             return {"meeting_id": mid, "version": version, "url": store.link(mid)}
-        if name == "list_drive_outbox":
-            return [{"proposal_id": p["id"], **p["payload"]} for p in followup.outbox()]
-        if name == "ack_drive_item":
+        if name == "sync_issues":
+            return followup.sync_issues(args.get("repo", ""), args.get("issues") or [])
+        if name == "list_outbox":
+            return [{"proposal_id": p["id"], "kind": p["kind"], "meeting_id": p["meeting_id"],
+                     "payload": p["payload"]} for p in followup.outbox()]
+        if name == "ack_outbox_item":
             res = followup.ack(args.get("proposal_id", ""), args.get("url", ""), args.get("note"), who=tok["name"])
             if res.get("error"):
                 raise ToolError(res["error"])
