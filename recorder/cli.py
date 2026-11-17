@@ -43,6 +43,7 @@ def main(argv=None):
     tr.add_argument("--engine", required=True, choices=NAMES)
     tr.add_argument("--out", type=Path, required=True)
     tr.add_argument("--language")
+    tr.add_argument("--cpu", action="store_true", help="run on the CPU (to prove the GPU path is really used)")
     a = ap.parse_args(argv)
 
     s = Settings()
@@ -73,7 +74,8 @@ def main(argv=None):
             audio.to_wav16k(a.file, wav)
         t0 = time.monotonic()
         result = Engines(s).get(a.engine).transcribe(wav, a.out, language=a.language,
-                                                     log=lambda m: print(m, file=sys.stderr, flush=True))
+                                                     log=lambda m: print(m, file=sys.stderr, flush=True),
+                                                     **({"device": "cpu"} if a.cpu else {}))
         result.setdefault("timings", {})["job_wall_s"] = round(time.monotonic() - t0, 2)
         write_json(a.out / "transcript.json", result)
         out = {"out": str(a.out / "transcript.json"), "words": len(result["words"]),
