@@ -11,7 +11,6 @@ from fastapi import Request
 from fastapi.responses import JSONResponse, Response
 
 from . import __version__
-from .util import hash_token
 
 VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 
@@ -63,10 +62,8 @@ class ToolError(Exception):
 
 def mount_mcp(app, s, db, store, followup, token_row):
     def agent(request):
+        # Header only: a token in the query string would end up in access logs.
         tok = token_row(request)
-        raw = request.query_params.get("token")
-        if not tok and raw:
-            tok = db.one("SELECT * FROM tokens WHERE token_hash = ? AND revoked_at IS NULL", hash_token(raw))
         return tok if tok and tok["role"] in ("agent", "admin") else None
 
     def call(name, args, tok):

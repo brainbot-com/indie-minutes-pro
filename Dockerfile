@@ -12,6 +12,7 @@ COPY recorder recorder
 COPY pwa pwa
 COPY sim sim
 COPY bench bench
+COPY tests tests
 
 ENV PYTHONUNBUFFERED=1 DATA_DIR=/data
 EXPOSE 8000

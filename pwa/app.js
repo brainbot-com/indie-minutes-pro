@@ -113,6 +113,7 @@ function stop() {
   if (audioCtx) audioCtx.close();
   audioCtx = analyser = null;
   $('level').style.width = '0';
+  $('warn').hidden = true;
   $('rec').classList.remove('on');
   $('rec').textContent = 'Record';
   $('title').disabled = false;
@@ -173,7 +174,7 @@ async function kick() {
     $('net').textContent = '';
   } catch (e) {
     if (e instanceof AuthError) { showPair('The box did not accept this phone\'s token. Pair it again.'); return; }
-    backoff = Math.min(60000, backoff ? backoff * 2 : 2000);
+    backoff = Math.min(30000, backoff ? backoff * 2 : 2000);  // VPN reconnects may not fire "online"
     $('net').textContent = (navigator.onLine ? 'Box not reachable' : 'Offline') +
       `, chunks stay on the phone. Retrying in ${Math.round(backoff / 1000)} s.`;
     retryTimer = setTimeout(kick, backoff);

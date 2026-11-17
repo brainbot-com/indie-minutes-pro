@@ -329,7 +329,8 @@ def create_app(settings=None):
         row = db.one("SELECT * FROM tokens WHERE token_hash = ? AND revoked_at IS NULL", hash_token(token.strip()))
         if not row or row["role"] not in READERS:
             return page(request, "login.html", None, next=next, error="Unknown or revoked token.")
-        resp = RedirectResponse(next if next.startswith("/") else "/", status_code=303)
+        safe = next.startswith("/") and not next.startswith("//") and "\\" not in next
+        resp = RedirectResponse(next if safe else "/", status_code=303)
         resp.set_cookie(COOKIE, token.strip(), httponly=True, secure=s.secure_cookies,
                         samesite="strict", max_age=180 * 86400)
         return resp
@@ -359,7 +360,7 @@ def create_app(settings=None):
         mappings = {r["item_key"]: r for r in db.all("SELECT * FROM mappings WHERE meeting_id = ?", mid)}
         return page(request, "meeting.html", tok, m=m, t=t, segs=segs, names=names, summary_md=summary_md,
                     versions=versions, shown=shown, actions=store.actions(mid).get("items", []),
-                    proposals=proposals, mappings=mappings, engines=ENGINE_NAMES,
+                    proposals=proposals, mappings=mappings, engines=[e for e in ENGINE_NAMES if e != "fake"],
                     has_audio=store.audio(mid).exists() or bool(store.original(mid)))
 
     @app.post("/m/{mid}/speakers")
