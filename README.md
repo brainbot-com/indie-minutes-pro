@@ -270,6 +270,10 @@ through the phone simulator into the running recorder, end to end.
   ComfyUI) are outside that lock. Prefer IQ4_NL (22 GB) over Q8_0 (36 GB).
 - Tokens are not per user: any phone or admin token can read every meeting
   (on top of the VPN).
+- Follow-up proposals are matched against existing issues, not against other
+  proposals still waiting for review: two meetings about the same work can
+  each propose a new issue. Once one is approved and carried out, later
+  meetings comment on it instead.
 - The phone must get the CA through Settings (user certificate store).
   Chrome on Android trusts user-installed CAs for websites without asking
   for Certificate Transparency; a CA placed in the system store (rooted

@@ -215,6 +215,53 @@ one (`data/bench/spotcheck.md`).
   lists small in-meeting asks. The Command Center agent's later summary,
   with its context, is the place to weed those out.
 
+### Our own recording (no human reference yet)
+
+A 15-minute excerpt of a retreat session, recorded with a phone voice
+recorder (AAC), and its busiest 5 minutes (from 10:00: five speakers, 136
+speaker changes in the engine-A draft). Only numbers left the box; the
+"differs" column is the speaker-agnostic WER of each engine's words against
+engine A's words, so it measures how far the engines agree, not who is right:
+
+| Recording | Engine | Speakers found | RTF | Differs from A-iq4 |
+|---|---|---:|---:|---:|
+| retreat, 15.4 min | A-iq4 | 6 | 0.067 | base |
+| retreat, 15.4 min | B | 5 | 0.50 (first run after a restart, model load included) | 52 % |
+| retreat-10m, 5 min | A-q8 | 6 | 0.11 | 17 % |
+| retreat-10m, 5 min | B | 5 | 0.19 | 50 % |
+
+- On real phone audio engine B writes about 40 % fewer words than engine A
+  (1,350 against about 2,250 for the 15 minutes), the same pattern as its
+  deletions on the AMI distant mic.
+- The engines disagree on the number of speakers (A 6 to 7, B 5). Which is
+  right needs the person who was there; the corrected excerpt
+  (`data/bench/datasets/own-ref/retreat-10m/ref.md`, then
+  `python -m bench.excerpts import retreat-10m`) turns this into WER, cpWER
+  and DER.
+- A-iq4 on the 5-minute excerpt ran during the GPU incident, so its timing
+  and its GTT peak (which counts every process on the box) are left out.
+
+### End to end through the phone path
+
+`bench/ami_e2e.sh` streamed the ten AMI distant-mic meetings through the
+phone simulator (WebM/Opus, 30 s chunks, the upload API over HTTPS through
+Caddy) into the running recorder with the default engine (A-iq4), one after
+another:
+
+- 5.2 h of audio in 633 chunks, uploaded in 151 s in total, no retries;
+- 110 to 330 s from finalize to finished summary per meeting (17 to 43 min
+  of audio each; transcription, then the summary with qwen3.8:27b);
+- the right number of speakers (4) in nine of ten meetings, five in one;
+- 2 to 5 action items per summary;
+- the follow-up agent ran on its own after every meeting: 25 proposals waiting
+  for review (10 meeting-log entries, 13 new issues, 2 comments on an existing
+  mock issue that tracks the same work). Two meetings proposed similar new
+  issues about voice-recognition cost: proposals are matched against existing
+  issues, not against other proposals still waiting for review.
+
+The first attempt of this run was cut short by the GPU reset described above
+and resumed (`OUT=<results file> bench/ami_e2e.sh`).
+
 ## Recommendation
 
 Make **engine A with the AD-IQ4_NL decoder (`A-iq4`)** the default:
