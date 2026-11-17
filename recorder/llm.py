@@ -1,9 +1,27 @@
 """The LLM on aibox1 (Ollama). Nothing here may call a cloud API: transcripts
-never leave the box."""
+never leave the box.
+
+Calls take the same GPU lock as the engines (data/.gpu.lock), so a summary
+never runs on the GPU next to a transcription job. On 2026-11-17 an Ollama
+runner hit a GPU page fault while it summarized next to a 36 GB engine job,
+and the driver reset the GPU for every service on the box."""
+import fcntl
 import json
 import time
+from contextlib import contextmanager
 
 import httpx
+
+
+@contextmanager
+def gpu_lock(settings):
+    path = settings.data_dir / ".gpu.lock"
+    with open(path, "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
 
 
 class LLMError(RuntimeError):
@@ -22,11 +40,12 @@ def chat_json(settings, system, user, schema, timeout=1800, temperature=0.2):
     }
     if not settings.llm_think:
         body["think"] = False
-    t0 = time.monotonic()
-    r = httpx.post(f"{settings.ollama_url}/api/chat", json=body, timeout=timeout)
-    if r.status_code == 400 and "think" in r.text and "think" in body:
-        body.pop("think")
+    with gpu_lock(settings):
+        t0 = time.monotonic()
         r = httpx.post(f"{settings.ollama_url}/api/chat", json=body, timeout=timeout)
+        if r.status_code == 400 and "think" in r.text and "think" in body:
+            body.pop("think")
+            r = httpx.post(f"{settings.ollama_url}/api/chat", json=body, timeout=timeout)
     if r.status_code != 200:
         raise LLMError(f"Ollama {r.status_code}: {r.text[:300]}")
     data = r.json()

@@ -64,8 +64,9 @@ def parse_timings(text):
 def transcribe(params, job):
     model = DECODERS[params.get("model", "iq4")]
     out = params["out"]
+    # --force: a meeting transcribed again writes to the same file.
     cmd = [BIN, "--verbose", "transcribe", params["audio"], "--model", model, "--device", device_arg(params),
-           "--format", "json", "-o", out, *SALM_ARGS]
+           "--format", "json", "-o", out, "--force", *SALM_ARGS]
     if params.get("language"):
         cmd += ["-l", params["language"]]
     mode = params.get("mode", "diarize")
@@ -84,7 +85,7 @@ def transcribe(params, job):
 def diarize(params, job):
     out = params["out"]
     cmd = [BIN, "--verbose", "diarize", params["audio"], "--model", DIAR_MODEL, "--device", device_arg(params),
-           "--format", "json", "-o", out, "--no-batching"]
+           "--format", "json", "-o", out, "--no-batching", "--force"]
     wall, resources, text = run(cmd, out + ".log", job)
     result = json.load(open(out))
     return {"segments": result.get("segments", []), "wall_s": wall, "timings": parse_timings(text),

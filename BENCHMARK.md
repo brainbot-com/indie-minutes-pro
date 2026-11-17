@@ -165,6 +165,18 @@ tokens once a minute (`data/bench/runs/llm-probe.jsonl`):
 Chat answers come about 30 % slower while a transcription runs; no request
 failed. Long prompts (prefill) were not measured.
 
+One GPU reset during the follow-up runs (2026-11-17 22:38:56 CET), after the
+benchmark itself: Ollama's ROCm runner hit GPU page faults while it wrote a
+summary, at a moment when an engine-A Q8_0 job (36 GB of GTT) ran next to it
+and the embedding and reranker models (21 GB) were resident, close to the
+102 GiB GTT limit; the kernel had logged ROCm memory evictions under that
+pressure earlier. The driver reset the GPU and recovered without a reboot,
+but every GPU process on the box lost its context: the running engine job
+failed (Vulkan "device lost"), the engine-B container and ComfyUI restarted,
+Ollama restarted its runners. Since then the recorder's own LLM calls take
+the same GPU lock as the engines, and heavy jobs run one at a time. In normal
+use (IQ4_NL, one meeting at a time, LLM afterwards) GTT stays around 70 GiB.
+
 ### More than one hour
 
 ES2004b and ES2004c joined into one 78-minute file (the same four people):

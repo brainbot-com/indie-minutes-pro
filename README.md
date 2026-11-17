@@ -234,6 +234,10 @@ through the phone simulator into the running recorder, end to end.
 - Do not stop or restart an engine container while it runs a job (check
   `curl -s` on its `/v1/health`: `current` must be null). On this box a
   killed Vulkan job once stalled the amdgpu driver.
+- After a GPU reset (`journalctl -k | grep "recovered through reset"`), check
+  `docker exec active-ollama-1 ollama ps`: models that clients keep loaded
+  ("Forever") may come back with the default 5 minutes until their client asks
+  again.
 - Server certificate: 397 days; renew with `deploy/make-ca.sh secrets/tls`
   (keeps the CA) and `docker compose restart caddy`. The CA lasts 10 years.
 - Tokens: `docker compose exec recorder python -m recorder.cli token add|list|revoke`.
@@ -257,6 +261,13 @@ through the phone simulator into the running recorder, end to end.
   settings in `compose.yaml` keep that small.
 - While a transcription runs, the box's main LLM answers more slowly (measured
   in BENCHMARK.md); summaries also wait for the LLM if it is busy.
+- GPU memory pressure can reset the GPU for the whole box: on 2026-11-17 an
+  Ollama runner hit page faults while it ran next to a 36 GB engine job with
+  GTT close to its 102 GiB limit, and the driver reset the GPU (recovered
+  without a reboot; ComfyUI and Ollama's runners restarted). The engines and
+  the recorder's LLM calls share one GPU lock so this service never runs two
+  GPU jobs at once; other services on the box (Ollama's other clients,
+  ComfyUI) are outside that lock. Prefer IQ4_NL (22 GB) over Q8_0 (36 GB).
 - Tokens are not per user: any phone or admin token can read every meeting
   (on top of the VPN).
 - The phone must get the CA through Settings (user certificate store).
