@@ -8,6 +8,7 @@ import json
 import os
 import secrets
 import time
+from urllib.parse import quote
 
 
 def _key(settings):
@@ -27,15 +28,31 @@ def _unb64(text):
     return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
 
 
+def _mac(settings, meeting_id, expires, name):
+    msg = json.dumps(["file", meeting_id, expires, name]).encode()
+    return _b64(hmac.new(_key(settings), msg, hashlib.sha256).digest()[:16])
+
+
 def sign(settings, meeting_id, name, ttl=7200):
-    body = _b64(json.dumps({"m": meeting_id, "f": name, "e": int(time.time()) + ttl}).encode())
-    mac = _b64(hmac.new(_key(settings), body.encode(), hashlib.sha256).digest())
-    return f"{body}.{mac}"
+    """The path of one file's link: "<meeting>/<expiry>/<mac>/<name>". Meeting,
+    expiry and name stay readable, so an agent that copies the link into curl
+    has only the 22 characters of the MAC to get right (a 132-character base64
+    link came back with a typo now and then)."""
+    expires = int(time.time()) + ttl
+    return f"{meeting_id}/{expires}/{_mac(settings, meeting_id, expires, name)}/{quote(name, safe='')}"
 
 
 def verify(settings, token):
-    """Return (meeting_id, name) for a valid, unexpired token, else None."""
+    """Return (meeting_id, name) for a valid, unexpired link path (decoded, as
+    the server routes it), else None."""
     try:
+        if "/" in token:
+            meeting_id, expires, mac, name = token.split("/", 3)
+            if not hmac.compare_digest(mac, _mac(settings, meeting_id, int(expires), name)) or int(expires) < time.time():
+                return None
+            return meeting_id, name
+        # the older "<base64 json>.<mac>" form: links handed out before the readable
+        # one, valid for their two hours
         body, mac = token.split(".", 1)
         good = _b64(hmac.new(_key(settings), body.encode(), hashlib.sha256).digest())
         if not hmac.compare_digest(mac, good):

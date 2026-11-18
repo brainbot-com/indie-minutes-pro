@@ -64,10 +64,10 @@ def tone(path, seconds):
     return path.read_bytes()
 
 
-def make_meeting(app, client, tmp_path, seconds=20, headers=None):
+def make_meeting(app, client, tmp_path, seconds=20, headers=None, client_id="client-meeting"):
     h = headers or {"Authorization": f"Bearer {create_token(app.state.db, 'phone', 'device')}"}
     data = tone(tmp_path / "m.wav", seconds)
-    rid = client.post("/api/v1/recordings", json={"client_id": "client-meeting", "mime": "audio/wav",
+    rid = client.post("/api/v1/recordings", json={"client_id": client_id, "mime": "audio/wav",
                                                  "title": "Test meeting"}, headers=h).json()["recording_id"]
     client.put(f"/api/v1/recordings/{rid}/chunks/0", content=data, headers=h)
     mid = client.post(f"/api/v1/recordings/{rid}/finalize", json={"total_chunks": 1}, headers=h).json()["meeting_id"]
@@ -539,10 +539,45 @@ def test_a_meeting_agent_gets_the_skill_and_the_files(app, client, tmp_path):
     mid, _ = make_meeting(app, client, tmp_path, headers=phone)
     files = call("meeting_files", {"meeting_id": mid}).json()["result"]["files"]
     link = next(f for f in files if f["name"] == "Transcript.md")
-    got = client.get(link["url"].replace("https://box.test", ""))
+    path = link["url"].replace("https://box.test", "")
+    got = client.get(path)
     assert got.status_code == 200 and got.content.decode() == read_text(app.state.store.folder(mid) / "transcript.md")
     assert link["bytes"] == len(got.content)                              # the plain size, not the encrypted one
+    # readable but not forgeable: only the 22 characters of the MAC are random
+    m = re.fullmatch(r"/api/v1/files/(?P<mid>[^/]+)/(?P<exp>\d+)/(?P<mac>[A-Za-z0-9_-]{22})/Transcript\.md", path)
+    assert m and m["mid"] == mid
+    typo = m["mac"][:5] + ("A" if m["mac"][5] != "A" else "B") + m["mac"][6:]
+    for bad in (path.replace(m["mac"], typo), path.replace("Transcript.md", "Summary.md"),
+                path.replace(m["exp"], str(int(m["exp"]) + 3600)), path.replace(mid, mid[:-1] + "x")):
+        assert client.get(bad).status_code == 403, bad
+    from recorder.signing import sign
+    assert client.get("/api/v1/files/" + sign(app.state.settings, mid, "Transcript.md", ttl=-1)).status_code == 403
     assert call("meeting_files", {"meeting_id": mid}, user="ext-ben-agent").status_code == 400
+
+
+def test_an_agent_gets_one_meeting_per_run(app, client, tmp_path):
+    """Transcripts fill an agent's context: pending_work hands out one meeting to
+    improve at a time, the one handed out least recently first."""
+    service = create_token(app.state.db, "brainbot:agent command", "agent", trusts_identity=True)
+
+    def work(caller="agent"):
+        h = {"Authorization": f"Bearer {service}", "X-Indie-User": "ext-dora", "X-Indie-Caller": caller}
+        return client.post("/api/v1/indiechat", json={"op": "pending_work", "args": {}}, headers=h).json()["result"]
+
+    h = {"Authorization": f"Bearer {service}", "X-Indie-User": "ext-dora", "X-Indie-Caller": "user"}
+    offer = client.post("/api/v1/indiechat", json={"op": "pair_phone", "args": {}}, headers=h).json()["result"]
+    phone = {"Authorization": "Bearer " + redeem(client, offer["url"]).json()["token"]}
+    first, _ = make_meeting(app, client, tmp_path, headers=phone, client_id="client-a")
+    second, _ = make_meeting(app, client, tmp_path, headers=phone, client_id="client-b")
+    got = work()
+    assert [m["meeting_id"] for m in got["summaries"]] == [first] and got["more_summaries"] == 1
+    assert [m["meeting_id"] for m in work()["summaries"]] == [second]          # not the unfinished one again
+    assert [m["meeting_id"] for m in work("user")["summaries"]] == [first]     # a person looking hands nothing out
+    assert [m["meeting_id"] for m in work()["summaries"]] == [first]
+    better = {"op": "update_summary", "args": {"meeting_id": first, "markdown": "## TL;DR\n\nBetter."}}
+    assert client.post("/api/v1/indiechat", json=better, headers={**h, "X-Indie-Caller": "agent"}).status_code == 200
+    got = work()
+    assert [m["meeting_id"] for m in got["summaries"]] == [second] and "more_summaries" not in got
 
 
 def test_hints_for_naming_speakers(app, client, tmp_path, monkeypatch):

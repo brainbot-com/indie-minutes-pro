@@ -388,7 +388,7 @@ def create_app(settings=None):
         if storage == "drive" and store.meta(mid)["state"] == "done":
             threading.Thread(target=followup.run, kwargs={"meeting_ids": [mid]}, daemon=True).start()
 
-    @app.get("/api/v1/files/{token}")
+    @app.get("/api/v1/files/{token:path}")
     def signed_file(token: str):
         """A file of a meeting, by a signed link from drive_files (no other auth)."""
         from .signing import verify

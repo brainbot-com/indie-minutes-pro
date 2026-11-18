@@ -6,6 +6,7 @@ transcript, store a better summary, choose local or Drive storage, sync the
 repo's issues, and work the outbox of Drive and GitHub follow-ups. Agents that
 read transcripts must use aibox1's own LLM, never another model host."""
 import json
+import time
 from pathlib import Path
 
 from fastapi import Request
@@ -32,9 +33,10 @@ ack_outbox_item."""
 
 TOOLS = [
     {"name": "pending_work",
-     "description": "What there is to do now: meetings whose current summary is still the recorder's first one "
-                    "(write a better one), and approved follow-ups waiting in the outbox (carry them out). Returns "
-                    "nothing at all when there is nothing to do, so a routine can use it as its precheck.",
+     "description": "What there is to do now: a meeting whose current summary is still the recorder's first one "
+                    "(write a better one; one per call, more_summaries says how many wait for later calls), and "
+                    "approved follow-ups waiting in the outbox (carry them out). Returns nothing at all when there "
+                    "is nothing to do, so a routine can use it as its precheck.",
      "inputSchema": {"type": "object", "properties": {}}},
     {"name": "list_meetings",
      "description": "Meetings on aibox1, newest first: id, title, start time, duration, language, state, "
@@ -178,16 +180,27 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
     def outbox(who):
         return [p for p in followup.outbox() if visible(who, p["meeting_id"])]
 
+    handed = {}          # meeting id -> when pending_work last gave it to an agent
+
     def call(name, args, who):
         if name == "pending_work":
             since = s.agent_since
+            todo = [m for m in store.list(limit=1000, who=who)
+                    if m["state"] == "done" and (m["summary_author"] or "").startswith("recorder")
+                    and (m["started_at"] or m["created_at"]) >= since]
+            # One meeting per call: a transcript fills much of an agent's context,
+            # and given six at once a first run compacted again and again and mixed
+            # meetings up. The one handed out least recently comes first, so a
+            # meeting an agent cannot finish does not hold up the others.
+            todo.sort(key=lambda m: (handed.get(m["id"], 0), m["started_at"] or m["created_at"]))
             summaries = [{"meeting_id": m["id"], "title": m["title"], "started_at": m["started_at"],
-                          "language": m["language"], "url": store.link(m["id"])}
-                         for m in store.list(limit=1000, who=who)
-                         if m["state"] == "done" and (m["summary_author"] or "").startswith("recorder")
-                         and (m["started_at"] or m["created_at"]) >= since]
+                          "language": m["language"], "url": store.link(m["id"])} for m in todo[:1]]
+            if summaries and author(who) == "agent":
+                handed[todo[0]["id"]] = time.time()
             box = [{"proposal_id": p["id"], "kind": p["kind"], "meeting_id": p["meeting_id"]} for p in outbox(who)]
-            return "" if not (summaries or box) else {"summaries": summaries, "outbox": box}
+            if not (summaries or box):
+                return ""
+            return {"summaries": summaries, "outbox": box} | ({"more_summaries": len(todo) - 1} if len(todo) > 1 else {})
         if name == "list_meetings":
             rows = store.list(limit=1000, who=who)
             if args.get("since"):

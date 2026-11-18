@@ -28,8 +28,10 @@ Drive is the person's own, through your Drive tools.
 ## Each run
 
 1. `{"op": "pending_work"}`. If it returns nothing, answer "[Nothing new]"
-   and stop.
-2. Better summaries, for each meeting under "summaries":
+   and stop. It hands you at most one meeting under "summaries" (a
+   transcript fills much of your context); "more_summaries" are for the next
+   runs, so do not look for them yourself.
+2. A better summary, for the meeting under "summaries":
    - `{"op": "get_meeting", "args": {"meeting_id": ID, "include_transcript": false}}`
      gives the current summary, the speaker names and the action items.
    - `{"op": "meeting_files", "args": {"meeting_id": ID}}` gives signed links
@@ -40,7 +42,8 @@ Drive is the person's own, through your Drive tools.
      more than 80,000 characters (`wc -c`), split it
      (`split -C 60000 transcript.md part-`), read one part at a time, write a
      few lines of notes per part into /workspace/meetings/ID/notes.md, and
-     write the summary from your notes and the recorder's summary.
+     write the summary from your notes and the recorder's summary. If you
+     lose track, read your notes again, not the transcript.
    - Write a better summary in the meeting's language with what you know
      about the people, projects and earlier meetings (your memory, the wiki,
      `list_meetings` and `get_meeting` for earlier ones): a short TL;DR,
