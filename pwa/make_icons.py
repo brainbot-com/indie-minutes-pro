@@ -1,12 +1,12 @@
-"""Draws the app icons (a record dot on a dark square) without any image library."""
+"""Draws the app icons (a white record dot on the Swiss red) without any image library."""
 import struct
 import zlib
 from pathlib import Path
 
 
 def png(size, path):
-    bg, dot = (32, 32, 30, 255), (239, 90, 79, 255)
-    c, r = size / 2, size * 0.30
+    bg, dot = (225, 37, 27, 255), (255, 255, 255, 255)
+    c, r = size / 2, size * 0.22   # inside the maskable safe zone
     rows = []
     for y in range(size):
         row = bytearray([0])
