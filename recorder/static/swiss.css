@@ -46,6 +46,10 @@ a { color: inherit; text-underline-offset: 3px; }
 .bar a, .bar button { background: none; border: 0; padding: 0; cursor: pointer; text-decoration: none; letter-spacing: inherit; text-transform: inherit; font-weight: inherit; }
 .bar a:hover, .bar button:hover { text-decoration: underline; }
 
+/* the mark: the red record dot before the name */
+.brand::before { content: ""; display: inline-block; width: .8em; height: .8em; border-radius: 50%; background: var(--red);
+  margin-right: .45em; vertical-align: -.08em; }
+
 /* type */
 .kicker { font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
 .kicker.live { color: var(--red); }
@@ -55,6 +59,7 @@ a { color: inherit; text-underline-offset: 3px; }
 .big { font-size: 104px; font-weight: 900; line-height: .9; letter-spacing: -.05em; font-variant-numeric: tabular-nums; }
 .ghost { color: var(--ghost); }
 .lead { margin: 0; font-size: 18px; font-weight: 500; line-height: 1.45; }
+.code { font-size: 40px; font-weight: 900; letter-spacing: .04em; line-height: 1; font-variant-numeric: tabular-nums; }
 .head { display: flex; flex-direction: column; gap: 6px; }
 
 /* a section: small caps label over a 3px rule, then rows with 1px rules */
@@ -138,4 +143,5 @@ details.fold > .inner { padding: 0 0 16px; }
 .note { margin: 0; font-size: 14px; line-height: 1.45; }
 .error { margin: 0; color: var(--red); font-size: 14px; font-weight: 700; }
 .qr { width: 232px; max-width: 100%; background: #ffffff; padding: 12px; border: 3px solid var(--ink); }
-.qr svg { width: 100%; height: auto; display: block; }
+.qr.big { width: 300px; }
+.qr svg { width: 100%; height: auto; aspect-ratio: 1; display: block; }   /* a code must stay square to scan */

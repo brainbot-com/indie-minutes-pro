@@ -76,8 +76,6 @@ th { font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: u
 pre { background: var(--faint); padding: 12px; white-space: pre-wrap; word-break: break-word; font-size: 14px; margin: 0; }
 code { background: var(--faint); padding: 1px 5px; font-size: 14px; }
 code.token { word-break: break-all; display: inline-block; padding: 6px 8px; }
-.qr svg { width: 220px; height: 220px; background: #ffffff; padding: 10px; border: 3px solid var(--ink); }
-.qr.big svg { width: 340px; height: 340px; max-width: 100%; }
 
 @media (max-width: 560px) {
   header.top, main, footer { padding-left: 16px; padding-right: 16px; }
@@ -85,3 +83,5 @@ code.token { word-break: break-all; display: inline-block; padding: 6px 8px; }
   .mrow { grid-template-columns: 30px minmax(0, 1fr) 70px 70px; gap: 10px; }
   .mrow .when { display: none; }
 }
+.connect { display: flex; flex-wrap: wrap; gap: 20px 28px; align-items: flex-start; }
+.connect h2 { flex-basis: 100%; }

@@ -45,6 +45,8 @@ def main(argv=None):
     u.add_argument("--name")
     u.add_argument("--token", action="append", default=[],
                    help="claim: give this token, and the meetings its phone recorded, to the person")
+    c = sub.add_parser("connect", help="a connect code for a person's next phone (once, within 15 minutes)")
+    c.add_argument("--user", help="the person (user id); without one, a phone of nobody in particular")
     sub.add_parser("meetings")
     d = sub.add_parser("delete", help="delete meetings with all their files, e.g. test meetings")
     d.add_argument("meeting_ids", nargs="+")
@@ -97,6 +99,12 @@ def main(argv=None):
                 out["meetings"] += db.run(
                     "UPDATE meetings SET owner_id = ? WHERE recording_id IN"
                     " (SELECT id FROM recordings WHERE token_id = ?)", a.id, tid)
+    elif a.cmd == "connect":
+        from .connect import Codes, shown
+        if a.user and not db.one("SELECT 1 FROM users WHERE id = ?", a.user):
+            raise SystemExit("no such person")
+        code, expires = Codes(db).create(a.user)
+        out = {"code": shown(code), "url": f"{s.connect_url}#{code}", "expires_at": expires}
     elif a.cmd == "meetings":
         out = Store(s, db).list()
     elif a.cmd == "delete":

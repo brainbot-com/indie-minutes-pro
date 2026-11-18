@@ -53,6 +53,10 @@ class Settings:
         # The app for phones: Caddy's CA port serves secrets/tls/public, VPN only.
         self.apk_file = Path(get("APK_FILE", "/secrets/tls/public/indie-recorder.apk"))
         self.apk_url = get("APK_URL", f"http://{urlsplit(self.public_url).hostname}:8480/indie-recorder.apk")
+        # Where a connect code leads: a page that hands it to the app or the web app. Behind a
+        # proxy with a certificate phones trust (brain-tls), no phone needs the box's CA for it.
+        self.connect_url = get("CONNECT_URL", self.public_url + "/connect")
+        self.webapp_url = get("WEBAPP_URL", self.public_url + "/app/")
         self.secure_cookies = get("SECURE_COOKIES", "1") == "1"
         self.worker = get("WORKER", "1") == "1"
 

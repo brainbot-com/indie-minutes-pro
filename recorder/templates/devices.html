@@ -1,42 +1,47 @@
 {% extends "base.html" %}
-{% block title %}Devices · indie recorder{% endblock %}
+{% block title %}Devices · Indie recorder{% endblock %}
 {% block main %}
 <h1>Devices and agents</h1>
+{% if offer %}
+<section class="card highlight connect">
+  <h2>Connect a phone{% if offer_for %} for {{ offer_for }}{% endif %}</h2>
+  <div class="qr big">{{ offer.qr|safe }}</div>
+  <div>
+    <p class="lead">Scan it with the phone's camera (VPN on), or type the code in the app:</p>
+    <p class="code">{{ offer.code }}</p>
+    <p class="note muted">Valid for {{ offer.minutes }} minutes, once. <a href="{{ offer.url }}">{{ offer.url }}</a></p>
+  </div>
+</section>
+{% endif %}
 {% if created %}
 <section class="card highlight">
-  <h2>New {{ created.role }} token for {{ created.name }}</h2>
+  <h2>New agent token for {{ created.name }}</h2>
   <p>Shown once. Copy it now.</p>
   <p><code class="token">{{ created.token }}</code></p>
-  {% if created.qr %}
-  <p>On the phone (on the VPN, with the CA certificate installed): scan this, or open the link.</p>
-  <div class="qr">{{ created.qr|safe }}</div>
-  <p class="small"><a href="{{ created.pair }}">{{ created.pair }}</a></p>
-  {% if created.android %}
-  <h3>Android app</h3>
-  <p>The app records with the screen off and keeps the recording on the phone until the box has it.
-  {% if created.apk_url %}Install it once from <a href="{{ created.apk_url }}">{{ created.apk_url }}</a> (VPN only; Android asks
-  to allow installs from the browser).{% endif %} Then scan this with the phone's camera, or open the link on the phone.
-  The app needs no CA certificate in the phone's settings: the code carries it.</p>
-  <div class="qr big">{{ created.android_qr|safe }}</div>
-  <p class="small"><a href="{{ created.android }}">Open in the app</a></p>
-  {% endif %}
-  {% else %}
   <p>Give it to the agent as <code>Authorization: Bearer &lt;token&gt;</code> for <code>{{ s.public_url }}/mcp</code> or the JSON API.</p>
-  {% endif %}
 </section>
 {% endif %}
 <section class="card">
-  <h2>Add</h2>
+  <h2>Connect a phone</h2>
+  <form method="post" action="/devices/connect" class="inline">
+    <select name="user_id" aria-label="Person">
+      <option value="">nobody (shared)</option>
+      {% for u in users %}<option value="{{ u.id }}">{{ u.name or u.email or u.ext_id }}</option>{% endfor %}
+    </select>
+    <button>Show a connect code</button>
+  </form>
+  <p class="muted">People connect their own phones in brainbot:agent command: Meetings, Settings, Connect a phone.</p>
+</section>
+<section class="card">
+  <h2>Token for an agent</h2>
   <form method="post" action="/devices" class="inline">
-    <input name="name" placeholder="Luis's phone" required>
-    <select name="role"><option value="device">phone or device</option><option value="agent">agent</option></select>
+    <input name="name" placeholder="Meeting agent" required>
     <select name="user_id" aria-label="Person">
       <option value="">nobody (shared)</option>
       {% for u in users %}<option value="{{ u.id }}">{{ u.name or u.email or u.ext_id }}</option>{% endfor %}
     </select>
     <button>Create token</button>
   </form>
-  <p class="muted">Phones need the box's CA certificate once: <a href="http://10.1.9.7:8480/ca.crt">http://10.1.9.7:8480/ca.crt</a> (VPN only). See the README for the Android steps and the fingerprint.</p>
 </section>
 <section class="card">
   <h2>Tokens</h2>

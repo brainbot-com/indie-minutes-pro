@@ -111,6 +111,14 @@ CREATE TABLE IF NOT EXISTS user_settings (
   value TEXT NOT NULL,
   PRIMARY KEY (user_id, key)
 );
+CREATE TABLE IF NOT EXISTS pair_codes (
+  code_hash TEXT PRIMARY KEY,
+  user_id TEXT,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  used_at TEXT,
+  token_id TEXT
+);
 CREATE INDEX IF NOT EXISTS jobs_state ON jobs (state, id);
 CREATE INDEX IF NOT EXISTS proposals_state ON proposals (state);
 """

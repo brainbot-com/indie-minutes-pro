@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from . import __version__, audio
 from .config import Settings
+from .connect import CODE_MINUTES, Codes, Guesses, shown
 from .db import DB
 from .engines import NAMES as ENGINE_NAMES, Engines
 from .followup import Followup
@@ -54,6 +55,11 @@ class SettingsIn(BaseModel):
     storage_default: str | None = Field(default=None, pattern="^(local|drive)$")
     drive_folder: str | None = Field(default=None, max_length=120)
     drive_include_audio: bool | None = None
+
+
+class PairIn(BaseModel):
+    code: str = Field(max_length=40)
+    device: str = Field("", max_length=80)
 
 
 class StorageIn(BaseModel):
@@ -535,41 +541,93 @@ def create_app(settings=None):
     @app.get("/devices", response_class=HTMLResponse)
     def devices(request: Request, tok=Depends(need("admin", html=True))):
         rows, users = token_rows()
-        return page(request, "devices.html", tok, rows=rows, users=users, created=None)
+        return page(request, "devices.html", tok, rows=rows, users=users)
 
     @app.post("/devices", response_class=HTMLResponse)
-    def add_device(request: Request, name: str = Form(...), role: str = Form("device"), user_id: str = Form(""),
-                   tok=Depends(need("admin", html=True))):
-        if role not in ("device", "agent"):
-            raise HTTPException(400)
+    def add_agent(request: Request, name: str = Form(...), user_id: str = Form(""),
+                  tok=Depends(need("admin", html=True))):
+        """A token for an agent (phones connect with a code instead)."""
         if user_id and not db.one("SELECT 1 FROM users WHERE id = ?", user_id):
             raise HTTPException(400, "no such person")
-        name = name.strip()[:80] or "device"
-        raw = create_token(db, name, role, user_id=user_id or None)
+        name = name.strip()[:80] or "agent"
+        raw = create_token(db, name, "agent", user_id=user_id or None)
         rows, users = token_rows()
-        return page(request, "devices.html", tok, rows=rows, users=users,
-                    created={"name": name, "role": role, "token": raw, **(pairing(raw, name) if role == "device" else {})})
+        return page(request, "devices.html", tok, rows=rows, users=users, created={"name": name, "token": raw})
 
-    def pairing(raw, name):
-        """What a phone needs: the PWA link, the Android link (with this box's CA) and their QR codes."""
-        pair = f"{s.public_url}/app/#pair={raw}"
-        android = android_link(raw, name)
-        svg = lambda text, scale: segno.make(text, error="l" if len(text) > 200 else "m").svg_inline(
-            scale=scale, dark="#111", light="#fff")
-        return {"pair": pair, "qr": svg(pair, 4), "android": android,
-                "android_qr": svg(android, 3) if android else None,
-                "apk_url": s.apk_url if s.apk_file.exists() else None}
+    @app.post("/devices/connect", response_class=HTMLResponse)
+    def connect_phone(request: Request, user_id: str = Form(""), tok=Depends(need("admin", html=True))):
+        if user_id and not db.one("SELECT 1 FROM users WHERE id = ?", user_id):
+            raise HTTPException(400, "no such person")
+        rows, users = token_rows()
+        return page(request, "devices.html", tok, rows=rows, users=users, offer=connect_offer(user_id or None),
+                    offer_for=person_name(user_id) if user_id else None)
 
-    def android_link(raw, name):
-        """The Android app's pairing link: address, token and this box's CA certificate."""
+    codes, guesses = Codes(db), Guesses()
+
+    def qr_svg(text):
+        # a viewBox instead of a fixed size, so the page can scale it and it stays square
+        return segno.make(text, error="m").svg_inline(scale=4, dark="#111", light="#fff", omitsize=True)
+
+    def ca_der():
+        """This box's CA certificate for the phone app to pin (public, not a secret)."""
         try:
             pem = s.ca_cert_file.read_text()
         except OSError:
             return None
         der = base64.b64decode("".join(ln for ln in pem.splitlines() if ln and not ln.startswith("-----")))
-        ca = base64.urlsafe_b64encode(der).decode().rstrip("=")
-        return (f"indierecorder://pair?u={quote(s.public_url, safe='')}&t={raw}&ca={ca}"
-                f"&n={quote(name, safe='')}")
+        return base64.urlsafe_b64encode(der).decode().rstrip("=")
+
+    def connect_offer(user_id):
+        """A connect code for a person's next phone: one link and its QR code."""
+        code, expires = codes.create(user_id)
+        url = f"{s.connect_url}#{code}"
+        return {"code": shown(code), "url": url, "qr": qr_svg(url), "expires_at": expires, "minutes": CODE_MINUTES,
+                "apk_url": s.apk_url if s.apk_file.exists() else None}
+
+    def phone_token(name, user_id):
+        raw = create_token(db, name, "device", user_id=user_id)
+        return raw, db.one("SELECT id FROM tokens WHERE token_hash = ?", hash_token(raw))["id"]
+
+    def person_name(user_id):
+        owner = db.one("SELECT * FROM users WHERE id = ?", user_id) if user_id else None
+        return (owner or {}).get("name") or (owner or {}).get("email")
+
+    @app.get("/connect", response_class=HTMLResponse)
+    def connect_page(request: Request):
+        """Where a connect code leads (the code stays in the fragment, the server never sees it)."""
+        return templates.TemplateResponse(request, "connect.html", {"s": s})
+
+    @app.get("/api/v1/pair/{code}")
+    def pair_peek(code: str):
+        """What a code would connect to, so the phone can ask before it spends it."""
+        if guesses.blocked():
+            raise HTTPException(429, "too many wrong codes, try again in a few minutes")
+        row = codes.peek(code)
+        if not row:
+            guesses.miss()
+            raise HTTPException(404, "unknown, used or expired code")
+        return {"person": person_name(row["user_id"]), "box": s.box_name, "box_url": s.public_url, "ca": ca_der(),
+                "expires_at": row["expires_at"], "webapp": s.webapp_url,
+                "apk_url": s.apk_url if s.apk_file.exists() else None}
+
+    @app.post("/api/v1/pair")
+    def pair_redeem(body: PairIn):
+        """Spends a code: the phone's own token, and where and how to reach the box."""
+        if guesses.blocked():
+            raise HTTPException(429, "too many wrong codes, try again in a few minutes")
+        name = " ".join(body.device.split())[:60] or "Phone"
+        raw, row = codes.redeem(body.code, phone_token, name)
+        if not raw:
+            guesses.miss()
+            raise HTTPException(404, "unknown, used or expired code")
+        return {"token": raw, "box_url": s.public_url, "ca": ca_der(), "person": person_name(row["user_id"]),
+                "device": name, "box": s.box_name}
+
+    @app.get("/indie-recorder.apk")
+    def apk():
+        if not s.apk_file.exists():
+            raise HTTPException(404)
+        return FileResponse(s.apk_file, media_type="application/vnd.android.package-archive", filename="indie-recorder.apk")
 
     @app.post("/devices/{tid}/revoke")
     def revoke(tid: str, tok=Depends(need("admin", html=True))):
@@ -631,9 +689,7 @@ def create_app(settings=None):
             elif op == "pair_phone":
                 if len(phones(who)) >= MAX_PHONES:
                     raise ToolError(f"at most {MAX_PHONES} phones: remove one first")
-                name = str(args.get("name") or "Phone").strip()[:60] or "Phone"
-                raw = create_token(db, name, "device", user_id=who.user_id)
-                result = {"name": name, **pairing(raw, name)}
+                result = connect_offer(who.user_id)
             elif op == "remove_phone":
                 n = db.run("UPDATE tokens SET revoked_at = ? WHERE id = ? AND user_id = ? AND role = 'device'"
                            " AND revoked_at IS NULL", now_iso(), str(args.get("id", "")), who.user_id)

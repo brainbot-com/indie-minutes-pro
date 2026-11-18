@@ -280,7 +280,13 @@ def test_local_meetings_stay_local_until_switched(app, client, tmp_path, monkeyp
     assert client.get(path[:-3] + "xyz").status_code == 403  # tampered link
 
 
-def test_devices_page_pairs_the_android_app(app, client, tmp_path):
+def redeem(client, url_or_code, device="Pixel 8"):
+    """What a phone does with a connect code: look, then spend it."""
+    code = url_or_code.split("#")[-1]
+    return client.post("/api/v1/pair", json={"code": code, "device": device})
+
+
+def test_devices_page_shows_one_connect_code(app, client, tmp_path):
     der = bytes(range(40))
     ca = tmp_path / "ca.crt"
     ca.write_text("-----BEGIN CERTIFICATE-----\n" + base64.b64encode(der).decode() + "\n-----END CERTIFICATE-----\n")
@@ -288,13 +294,42 @@ def test_devices_page_pairs_the_android_app(app, client, tmp_path):
     app.state.settings.apk_file = tmp_path / "missing.apk"
     admin = create_token(app.state.db, "admin", "admin")
     client.post("/login", data={"token": admin, "next": "/devices"})
-    page = client.post("/devices", data={"name": "Luis phone", "role": "device"}).text
-    link = re.search(r'href="(indierecorder://pair\?[^"]+)"', page).group(1).replace("&amp;", "&")
-    q = dict(part.split("=", 1) for part in link.split("?", 1)[1].split("&"))
-    assert unquote(q["u"]) == "https://box.test" and unquote(q["n"]) == "Luis phone"
-    assert base64.urlsafe_b64decode(q["ca"] + "=" * (-len(q["ca"]) % 4)) == der
-    assert client.get("/api/v1/settings", headers={"Authorization": f"Bearer {q['t']}"}).status_code == 200
-    assert "Install it once" not in page
+    page = client.post("/devices/connect", data={"user_id": ""}).text
+    assert page.count("<svg") == 1 and "indierecorder://" not in page and "irt_" not in page
+    assert re.search(r'<svg viewBox="0 0 \d+ \d+"', page)   # scales with the page and stays square
+    url = re.search(r'href="(https://box\.test/connect#[A-Z0-9]{8})"', page).group(1)
+    phone = redeem(client, url).json()
+    assert phone["box_url"] == "https://box.test" and phone["device"] == "Pixel 8"
+    assert base64.urlsafe_b64decode(phone["ca"] + "=" * (-len(phone["ca"]) % 4)) == der
+    assert client.get("/api/v1/settings", headers={"Authorization": f"Bearer {phone['token']}"}).status_code == 200
+    agent = client.post("/devices", data={"name": "Meeting agent"}).text
+    assert re.search(r"irt_[A-Za-z0-9_-]{20,}", agent)
+    assert client.get("/connect").status_code == 200
+
+
+def test_connect_codes_work_once_and_expire(app, client):
+    from recorder.connect import Codes
+    from recorder.people import add_person
+    db = app.state.db
+    ana = add_person(db, ext_id="ext-ana-code", name="Ana")
+    codes = Codes(db)
+    first, _ = codes.create(ana["id"])
+    code, _ = codes.create(ana["id"])
+    assert client.get(f"/api/v1/pair/{first}").status_code == 404   # the newer code replaced it
+    peek = client.get(f"/api/v1/pair/{code[:4]}-{code[4:].lower()}").json()
+    assert peek["person"] == "Ana" and peek["box"] == "aibox1" and peek["webapp"] == "https://box.test/app/"
+    phone = redeem(client, code, device="  Ana's   Pixel ").json()
+    assert phone["person"] == "Ana" and phone["device"] == "Ana's Pixel"
+    me = client.get("/api/v1/me", headers={"Authorization": f"Bearer {phone['token']}"}).json()
+    assert me == {"device": "Ana's Pixel", "role": "device", "person": "Ana"}
+    assert redeem(client, code).status_code == 404 and client.get(f"/api/v1/pair/{code}").status_code == 404
+    late, _ = codes.create(ana["id"])
+    db.run("UPDATE pair_codes SET expires_at = '2000-01-01T00:00:00Z'")
+    assert redeem(client, late).status_code == 404
+    for _ in range(30):
+        assert client.get("/api/v1/pair/ABCDEFGH").status_code in (404, 429)
+    fresh, _ = codes.create(ana["id"])
+    assert client.get(f"/api/v1/pair/{fresh}").status_code == 429   # too many wrong codes: nobody for a while
 
 
 def upload_tone(client, tmp_path, headers, client_id, seconds=5):
@@ -335,9 +370,9 @@ def test_brainbot_connector_speaks_for_the_person(app, client, tmp_path):
         return client.post("/api/v1/indiechat", json={"op": op, "args": args or {}}, headers=h)
 
     assert call("whoami").json()["result"]["meetings"] == 0
-    paired = call("pair_phone", {"name": "Ana's Pixel"}).json()["result"]
-    assert paired["android"].startswith("indierecorder://pair?") and "<svg" in paired["android_qr"]
-    phone = {"Authorization": f"Bearer {paired['android'].split('&t=')[1].split('&')[0]}"}
+    offer = call("pair_phone").json()["result"]
+    assert offer["url"].startswith("https://box.test/connect#") and "<svg" in offer["qr"] and len(offer["code"]) == 9
+    phone = {"Authorization": "Bearer " + redeem(client, offer["url"], device="Ana's Pixel").json()["token"]}
     mid = upload_tone(client, tmp_path, phone, "ana-meeting-2")
     assert [m["id"] for m in call("list_meetings").json()["result"]] == [mid]
     assert call("list_meetings", user="ext-ben").json()["result"] == []
@@ -374,8 +409,8 @@ def test_me_names_the_person_a_phone_records_for(app, client):
     # a person who came in through the connector has only an id until they pick a name
     service = create_token(db, "brainbot:agent command", "agent", trusts_identity=True)
     hdr = {"Authorization": f"Bearer {service}", "X-Indie-User": "ext-ben-me", "X-Indie-Caller": "user"}
-    pair = client.post("/api/v1/indiechat", json={"op": "pair_phone", "args": {"name": "Ben's phone"}}, headers=hdr).json()["result"]
-    phone = {"Authorization": "Bearer " + pair["pair"].split("#pair=")[1]}
+    offer = client.post("/api/v1/indiechat", json={"op": "pair_phone"}, headers=hdr).json()["result"]
+    phone = {"Authorization": "Bearer " + redeem(client, offer["url"], device="Ben's phone").json()["token"]}
     assert client.get("/api/v1/me", headers=phone).json()["person"] is None
     agent = dict(hdr, **{"X-Indie-Caller": "agent"})
     assert client.post("/api/v1/indiechat", json={"op": "set_name", "args": {"name": "Ben"}}, headers=agent).status_code == 400
