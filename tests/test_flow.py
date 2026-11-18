@@ -2,9 +2,12 @@
 speaker renames, follow-up idempotency, window merging and MCP.
 
     docker compose run --rm -T --no-deps recorder python -m pytest -q tests"""
+import base64
 import hashlib
 import json
+import re
 import subprocess
+from urllib.parse import unquote
 
 import pytest
 from fastapi.testclient import TestClient
@@ -273,3 +276,20 @@ def test_local_meetings_stay_local_until_switched(app, client, tmp_path, monkeyp
     r = client.get(path)
     assert r.status_code == 200 and "Speaker" in r.text
     assert client.get(path[:-3] + "xyz").status_code == 403  # tampered link
+
+
+def test_devices_page_pairs_the_android_app(app, client, tmp_path):
+    der = bytes(range(40))
+    ca = tmp_path / "ca.crt"
+    ca.write_text("-----BEGIN CERTIFICATE-----\n" + base64.b64encode(der).decode() + "\n-----END CERTIFICATE-----\n")
+    app.state.settings.ca_cert_file = ca
+    app.state.settings.apk_file = tmp_path / "missing.apk"
+    admin = create_token(app.state.db, "admin", "admin")
+    client.post("/login", data={"token": admin, "next": "/devices"})
+    page = client.post("/devices", data={"name": "Luis phone", "role": "device"}).text
+    link = re.search(r'href="(indierecorder://pair\?[^"]+)"', page).group(1).replace("&amp;", "&")
+    q = dict(part.split("=", 1) for part in link.split("?", 1)[1].split("&"))
+    assert unquote(q["u"]) == "https://box.test" and unquote(q["n"]) == "Luis phone"
+    assert base64.urlsafe_b64decode(q["ca"] + "=" * (-len(q["ca"]) % 4)) == der
+    assert client.get("/api/v1/settings", headers={"Authorization": f"Bearer {q['t']}"}).status_code == 200
+    assert "Install it once" not in page

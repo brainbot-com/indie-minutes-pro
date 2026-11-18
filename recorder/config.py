@@ -1,6 +1,7 @@
 """Settings, read from the environment once per process."""
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 class Settings:
@@ -46,6 +47,11 @@ class Settings:
         self.agent_since = get("AGENT_SUMMARIES_SINCE", "")
         self.drive_log_doc = get("DRIVE_LOG_DOC", "Meeting log")
         self.drive_folder = get("DRIVE_FOLDER", "indie-recorder test")
+        # The Android app's pairing link carries the box's CA, so the app trusts this box only.
+        self.ca_cert_file = Path(get("CA_CERT_FILE", "/secrets/tls/ca.crt"))
+        # The app for phones: Caddy's CA port serves secrets/tls/public, VPN only.
+        self.apk_file = Path(get("APK_FILE", "/secrets/tls/public/indie-recorder.apk"))
+        self.apk_url = get("APK_URL", f"http://{urlsplit(self.public_url).hostname}:8480/indie-recorder.apk")
         self.secure_cookies = get("SECURE_COOKIES", "1") == "1"
         self.worker = get("WORKER", "1") == "1"
 

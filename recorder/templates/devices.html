@@ -11,6 +11,15 @@
   <p>On the phone (on the VPN, with the CA certificate installed): scan this, or open the link.</p>
   <div class="qr">{{ created.qr|safe }}</div>
   <p class="small"><a href="{{ created.pair }}">{{ created.pair }}</a></p>
+  {% if created.android %}
+  <h3>Android app</h3>
+  <p>The app records with the screen off and keeps the recording on the phone until the box has it.
+  {% if created.apk_url %}Install it once from <a href="{{ created.apk_url }}">{{ created.apk_url }}</a> (VPN only; Android asks
+  to allow installs from the browser).{% endif %} Then scan this with the phone's camera, or open the link on the phone.
+  The app needs no CA certificate in the phone's settings: the code carries it.</p>
+  <div class="qr big">{{ created.android_qr|safe }}</div>
+  <p class="small"><a href="{{ created.android }}">Open in the app</a></p>
+  {% endif %}
   {% else %}
   <p>Give it to the agent as <code>Authorization: Bearer &lt;token&gt;</code> for <code>{{ s.public_url }}/mcp</code> or the JSON API.</p>
   {% endif %}

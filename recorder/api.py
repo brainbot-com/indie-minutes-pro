@@ -3,6 +3,7 @@
 Caddy terminates TLS on 10.1.9.7:8443 and lets in VPN clients only; this app
 listens on the host's loopback (published 127.0.0.1:18000) and on the internal
 Docker network, never on the LAN."""
+import base64
 import contextlib
 import shutil
 import threading
@@ -502,12 +503,28 @@ def create_app(settings=None):
                    tok=Depends(need("admin", html=True))):
         if role not in ("device", "agent"):
             raise HTTPException(400)
-        raw = create_token(db, name.strip()[:80] or "device", role)
+        name = name.strip()[:80] or "device"
+        raw = create_token(db, name, role)
         pair = f"{s.public_url}/app/#pair={raw}"
         qr = segno.make(pair, error="m").svg_inline(scale=4, dark="#111", light="#fff") if role == "device" else None
+        android = android_link(raw, name) if role == "device" else None
         rows = db.all("SELECT * FROM tokens ORDER BY created_at DESC")
         return page(request, "devices.html", tok, rows=rows,
-                    created={"name": name, "role": role, "token": raw, "pair": pair, "qr": qr})
+                    created={"name": name, "role": role, "token": raw, "pair": pair, "qr": qr, "android": android,
+                             "android_qr": segno.make(android, error="l").svg_inline(scale=3, dark="#111", light="#fff")
+                             if android else None,
+                             "apk_url": s.apk_url if s.apk_file.exists() else None})
+
+    def android_link(raw, name):
+        """The Android app's pairing link: address, token and this box's CA certificate."""
+        try:
+            pem = s.ca_cert_file.read_text()
+        except OSError:
+            return None
+        der = base64.b64decode("".join(ln for ln in pem.splitlines() if ln and not ln.startswith("-----")))
+        ca = base64.urlsafe_b64encode(der).decode().rstrip("=")
+        return (f"indierecorder://pair?u={quote(s.public_url, safe='')}&t={raw}&ca={ca}"
+                f"&n={quote(name, safe='')}")
 
     @app.post("/devices/{tid}/revoke")
     def revoke(tid: str, tok=Depends(need("admin", html=True))):

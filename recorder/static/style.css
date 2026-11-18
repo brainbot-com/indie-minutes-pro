@@ -81,3 +81,4 @@ pre { background: var(--code); padding: 10px 12px; border-radius: 2px; white-spa
 code { background: var(--code); padding: 1px 5px; border-radius: 2px; font-size: 14px; }
 code.token { word-break: break-all; display: inline-block; padding: 6px 8px; }
 .qr svg { width: 220px; height: 220px; background: #fff; padding: 8px; border-radius: 2px; }
+.qr.big svg { width: 340px; height: 340px; max-width: 100%; }
