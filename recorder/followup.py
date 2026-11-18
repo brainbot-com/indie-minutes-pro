@@ -29,6 +29,7 @@ from contextlib import contextmanager
 
 import httpx
 
+from .gdrive import Google, GoogleError
 from .llm import chat_json
 from .util import new_id, now_iso, read_bytes, read_json, write_json
 
@@ -183,12 +184,13 @@ def marker(mid, key):
 
 
 class Followup:
-    def __init__(self, settings, db, store):
+    def __init__(self, settings, db, store, google=None):
         self.s = settings
         self.db = db
         self.store = store
         self.github = GitHub(settings)
         self.drive = Drive(settings)
+        self.google = google or Google(settings, db)
         self.executor = settings.followup_executor
         self.index_path = settings.data_dir / "github-issues.json"
 
@@ -219,8 +221,13 @@ class Followup:
         return kind.split("_")[0] in self.s.followup_targets
 
     def outbox(self):
-        """Approved proposals nobody has carried out yet, for targets still enabled."""
-        return [p for p in self.list(state="approved") if self.enabled(p["kind"])]
+        """Approved proposals nobody has carried out yet, for targets still enabled.
+        Drive items of people who connected Google Drive here are the recorder's own."""
+        return [p for p in self.list(state="approved") if self.enabled(p["kind"])
+                and not (p["kind"].startswith("drive_") and self.google.connected(self._owner(p["meeting_id"])))]
+
+    def _owner(self, mid):
+        return (self.store.meta(mid) or {}).get("owner_id")
 
     def issues(self):
         """Existing issues to match action items against: from the API (direct)
@@ -356,6 +363,24 @@ class Followup:
                             now_iso(), json.dumps({**(p["result"] or {}), "superseded_by": version}), p["id"])
                 (self.s.outbox_dir / f"{p['id']}.json").unlink(missing_ok=True)
 
+    def _log(self, owner, payload):
+        """A person's whole meeting log in one Drive folder: the newest entry of
+        each of their meetings there, oldest meeting first. The recorder writes
+        the doc whole each time, so it never has to read it back."""
+        newest = {}
+        for r in self.db.all("SELECT p.payload, p.meeting_id, COALESCE(m.started_at, m.created_at) AS at FROM proposals p"
+                             " JOIN meetings m ON m.id = p.meeting_id WHERE p.kind = 'drive_log'"
+                             " AND p.state IN ('approved', 'executed') AND m.owner_id = ?", owner):
+            d = json.loads(r["payload"])
+            if (d.get("folder"), d.get("doc")) != (payload["folder"], payload["doc"]):
+                continue
+            have = newest.get(r["meeting_id"])
+            if not have or d.get("summary_version", 1) > have[1].get("summary_version", 1):
+                newest[r["meeting_id"]] = (r["at"] or "", d)
+        head = (f"# {payload['doc']}\n\nOne entry per meeting kept in Google Drive, written by the indie recorder on "
+                f"{self.s.box_name}. It writes this document whole with each meeting, so changes made here do not last.")
+        return "\n\n".join([head] + [d["markdown"].strip() for _, d in sorted(newest.values(), key=lambda x: x[0])]) + "\n"
+
     def _log_entry(self, meta, summary, actions, link):
         date = (meta.get("started_at") or meta.get("created_at") or "")[:10]
         lines = [f"## {date} · {meta.get('title') or summary.get('title') or meta['id']}", "",
@@ -402,6 +427,19 @@ class Followup:
         done = self.db.one("SELECT * FROM mappings WHERE meeting_id = ? AND item_key = ?", mid, key)
         if done:
             return self._executed(pid, done["target_kind"], done["target"], note="already mapped")
+        owner = self._owner(mid)
+        if p["kind"].startswith("drive_") and self.google.connected(owner):
+            # the person connected Google Drive here: no agent in between
+            try:
+                if p["kind"] == "drive_store":
+                    url = self.google.store(owner, payload["folder"], payload["subfolder"], self.store.drive_files(mid))
+                else:
+                    url = self.google.write_doc(owner, payload["folder"], payload["doc"], self._log(owner, payload))
+            except (GoogleError, httpx.HTTPError) as e:
+                self.db.run("UPDATE proposals SET error = ? WHERE id = ?", str(e)[:300], pid)
+                return {"id": pid, "state": "approved", "error": str(e)[:300]}
+            (self.s.outbox_dir / f"{pid}.json").unlink(missing_ok=True)
+            return self._executed(pid, p["kind"], url, who="recorder")
         direct = self.executor == "direct" and (
             self.drive.available() if p["kind"].startswith("drive_") else self.github.available())
         if not direct:

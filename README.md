@@ -226,8 +226,27 @@ for the targets in `FOLLOWUP_TARGETS` (default `drive`):
 
 - Dry-run by default: proposals wait on `/review`. `FOLLOWUP_AUTO=1` (or
   `run --auto`) approves them at once.
-- The box holds no GitHub or Drive login. Who carries out approved proposals
-  is set by `FOLLOWUP_EXECUTOR`:
+- Google Drive, by the recorder itself: each person connects their own
+  Google Drive once in the indie-recorder app (Settings, Storage, Connect
+  Google Drive). That opens Google's sign-in in a tab of its own (OAuth with
+  PKCE through `/oauth/google/start` and `/oauth/google/callback`, routed by
+  brain-tls), asking only for `drive.file`: the files the recorder makes,
+  nothing else in their Drive. An account with an email address on the box
+  takes that Google account only. From then on that person's `drive_store`
+  and `drive_log` items are carried out right away by the box (`gdrive.py`),
+  with no agent in between: a folder per meeting in their Drive folder, a
+  file that changed moves into "Older versions" first, and the "Meeting log"
+  is a Google Doc written whole each time (one entry per meeting, the
+  newest). The refresh token sits in the encrypted index; access tokens only
+  in memory; Disconnect revokes it at Google. The OAuth client is the one
+  brainbot:agent command uses (`secrets/google_oauth.json`,
+  `{"client_id", "client_secret"}`), with the redirect address
+  `https://ai-knowledge.mz.brainbot.com/indie-recorder/oauth/google/callback`
+  added to it in the Google Cloud console. Without the file the app shows no
+  Connect button and Drive stays the agent's (below). A newer summary sets
+  aside Drive items an older one still waited for ("superseded").
+- Otherwise the box holds no GitHub or Drive login. Who carries out approved
+  proposals is set by `FOLLOWUP_EXECUTOR`:
   - `agent` (production): approved proposals go to the outbox; the Agent
     Command Center agent, which has GitHub and Drive access, carries them out
     and acknowledges each with its URL. It also keeps the box's copy of the

@@ -188,6 +188,7 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 24px 48px; display: flex;
 .steps .done { color: var(--red); font-weight: 700; font-size: 14px; }
 .setting { align-items: center; }
 .setting .line { width: 260px; max-width: 45vw; text-align: right; }
+.setting .gstate { display: block; margin-top: 2px; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
 .phone { grid-template-columns: 40px minmax(0, 1fr) auto auto; gap: 14px; }
 /* connect: the code to scan, the code to type, and what the phone did */
 .connect { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 24px 28px; align-items: start; }
@@ -312,10 +313,12 @@ pre.tr { margin: 0; white-space: pre-wrap; font: 14px/1.6 "Inter", "Helvetica Ne
     <div>
       <h2 class="section" data-t="storage"></h2>
       <div class="rows">
+        <div class="row plain setting" id="gRow" hidden><span><span data-t="gdrive"></span><span class="gstate" id="gState"></span></span><button class="btn" id="gBtn"></button></div>
         <div class="row plain setting"><span id="lDefDrive" data-t="defaultDrive"></span><button class="switch" role="switch" aria-checked="false" id="defDrive" aria-labelledby="lDefDrive"></button></div>
         <label class="row plain setting"><span data-t="folder"></span><input class="line" id="folder" maxlength="120"></label>
         <div class="row plain setting"><span id="lAudio" data-t="audio"></span><button class="switch" role="switch" aria-checked="false" id="audio" aria-labelledby="lAudio"></button></div>
       </div>
+      <p class="error" id="gErr" hidden></p>
       <p class="note muted" data-t="storageNote" style="margin-top: 10px"></p>
     </div>
   </section>
@@ -382,16 +385,21 @@ const STR = {
     waiting: 'Waiting for your phone', connectedNow: (n) => `Connected: ${n}`, expired: 'This code has expired.',
     newCode: 'Make a new code', done: 'Done',
     agentHead: 'Meeting agent',
-    agentWhat: 'Your own agent in brainbot:agent command puts the meetings you keep in Drive into your Google Drive and writes better summaries, once an hour, on aibox1.',
+    agentWhat: 'Your own agent in brainbot:agent command writes better summaries with what it knows about your work and suggests who the speakers are, once an hour, on aibox1.',
     agent1: 'Give this app an agent: on the right, New agent for this app.',
     agent2: "In that agent's settings, set the engine to aibox1 Ollama (64k): transcripts stay on aibox1.",
-    agent3: 'Press the button. The agent asks you to confirm Google Drive and its hourly routine.',
+    agent3: 'Press the button. The agent asks you to confirm its hourly routine.',
     agentBtn: 'Set up my meeting agent',
     agentAsk: 'Set up my meeting follow-up: read the meeting-follow-up skill with data_connector (connector "indie-recorder", params {"op":"agent_setup"}) and do its set-up part.',
     agentNone: 'This app has no agent yet: step 01 first.',
     agentSent: 'Sent to your agent: confirm its questions in the chat beside this app.',
     nudge: (n) => (n === 1 ? '1 meeting waits for Google Drive: your meeting agent puts it there.' : `${n} meetings wait for Google Drive: your meeting agent puts them there.`),
     nudgeBtn: 'Set it up',
+    nudgeGoogle: (n) => (n === 1 ? '1 meeting waits for Google Drive. Connect your Google Drive and the recorder puts it there.' : `${n} meetings wait for Google Drive. Connect your Google Drive and the recorder puts them there.`),
+    gdrive: 'Google Drive', gConnected: (e) => `Connected: ${e}`, gNot: 'Not connected: meetings set to Drive wait.',
+    gExpired: 'Access ended: connect again.', gConnect: 'Connect Google Drive', gDisconnect: 'Disconnect',
+    gFinish: 'Finish the sign-in in the new tab.',
+    gDisconnectAsk: 'Disconnect Google Drive? Meetings set to Drive then wait until you connect again.',
   },
   de: {
     brand: 'Indie recorder', title: 'Meetings', back: 'Zurück', settings: 'Einstellungen', private: 'Ihre Meetings sehen nur Sie',
@@ -424,16 +432,21 @@ const STR = {
     waiting: 'Warte auf Ihr Telefon', connectedNow: (n) => `Verbunden: ${n}`, expired: 'Dieser Code ist abgelaufen.',
     newCode: 'Neuen Code erstellen', done: 'Fertig',
     agentHead: 'Meeting-Agent',
-    agentWhat: 'Ihr eigener Agent in brainbot:agent command legt die Meetings, die Sie in Drive behalten, in Ihr Google Drive und schreibt bessere Zusammenfassungen, einmal pro Stunde, auf aibox1.',
+    agentWhat: 'Ihr eigener Agent in brainbot:agent command schreibt mit dem, was er über Ihre Arbeit weiß, bessere Zusammenfassungen und schlägt vor, wer die Sprecher sind, einmal pro Stunde, auf aibox1.',
     agent1: 'Geben Sie dieser App einen Agenten: rechts, Neuer Agent für diese App.',
     agent2: 'Stellen Sie in den Einstellungen dieses Agenten das Modell auf aibox1 Ollama (64k): Transkripte bleiben auf aibox1.',
-    agent3: 'Drücken Sie den Knopf. Der Agent bittet Sie, Google Drive und seine stündliche Routine zu bestätigen.',
+    agent3: 'Drücken Sie den Knopf. Der Agent bittet Sie, seine stündliche Routine zu bestätigen.',
     agentBtn: 'Meeting-Agent einrichten',
     agentAsk: 'Richte mein Meeting-Follow-up ein: lies den Skill meeting-follow-up mit data_connector (Connector "indie-recorder", params {"op":"agent_setup"}) und führe den Teil "Set up" aus.',
     agentNone: 'Diese App hat noch keinen Agenten: zuerst Schritt 01.',
     agentSent: 'An Ihren Agenten geschickt: bestätigen Sie seine Fragen im Chat neben dieser App.',
     nudge: (n) => (n === 1 ? '1 Meeting wartet auf Google Drive: Ihr Meeting-Agent legt es dort ab.' : `${n} Meetings warten auf Google Drive: Ihr Meeting-Agent legt sie dort ab.`),
     nudgeBtn: 'Einrichten',
+    nudgeGoogle: (n) => (n === 1 ? '1 Meeting wartet auf Google Drive. Verbinden Sie Ihr Google Drive, dann legt der Recorder es dort ab.' : `${n} Meetings warten auf Google Drive. Verbinden Sie Ihr Google Drive, dann legt der Recorder sie dort ab.`),
+    gdrive: 'Google Drive', gConnected: (e) => `Verbunden: ${e}`, gNot: 'Nicht verbunden: Meetings für Drive warten.',
+    gExpired: 'Zugriff abgelaufen: bitte neu verbinden.', gConnect: 'Google Drive verbinden', gDisconnect: 'Trennen',
+    gFinish: 'Melden Sie sich im neuen Tab bei Google an.',
+    gDisconnectAsk: 'Google Drive trennen? Meetings für Drive warten dann, bis Sie wieder verbinden.',
   },
 };
 const t = (k) => (STR[LANG][k] !== undefined ? STR[LANG][k] : STR.en[k]);
@@ -443,6 +456,7 @@ const pad = (n) => String(n).padStart(2, '0');
 document.querySelectorAll('[data-t]').forEach((el) => { el.textContent = t(el.dataset.t); });
 
 let SERVER = null, VIA = null, meetings = [], current = null, settings = null, view = 'home', backTo = 'home', phoneList = null;
+let google = null, googleWait = null;
 
 /* The deployment's "indie-recorder" connector names the person to the recorder,
    so everyone sees only their own meetings. Without it (another deployment),
@@ -648,8 +662,12 @@ async function load() {
     if (!meetings.length && VIA === 'connector' && phoneList === null) phoneList = await call('phones').catch(() => []);
     $('status').textContent = t('status')(st);
     $('statusExtra').textContent = st.pending_drive ? t('forDrive')(st.pending_drive) : '';
-    $('nudge').hidden = !st.pending_drive || VIA !== 'connector';
-    $('nudgeText').textContent = st.pending_drive ? t('nudge')(st.pending_drive) : '';
+    renderGoogle(st.google);
+    // Drive is the recorder's once the person connects it; without a sign-in on the box it is the agent's
+    const g = st.google || {};
+    $('nudge').hidden = !st.pending_drive || VIA !== 'connector' || !!g.connected;
+    $('nudgeText').textContent = st.pending_drive ? (g.available ? t('nudgeGoogle') : t('nudge'))(st.pending_drive) : '';
+    $('nudgeBtn').textContent = g.available ? t('gConnect') : t('nudgeBtn');
     $('status').classList.toggle('red', !st.worker);
     setOn($('defDrive'), settings.storage_default === 'drive');
     if (document.activeElement !== $('folder')) $('folder').value = settings.drive_folder || '';
@@ -753,8 +771,39 @@ $('agentBtn').addEventListener('click', async () => {
   }
 });
 $('nudgeBtn').addEventListener('click', () => {
+  if (google && google.available && !google.connected) { connectGoogle(); return; }
   show('settings'); loadPhones();
   $('agentBox').scrollIntoView({ block: 'start' });
+});
+
+/* Google Drive: each person connects their own once, in a tab of its own
+   (Google's sign-in cannot run in this frame); the recorder then uploads. */
+function renderGoogle(g) {
+  google = g || null;
+  $('gRow').hidden = !(g && g.available) || VIA !== 'connector';     // connecting goes through the connector
+  if (!g || !g.available) return;
+  $('gState').textContent = g.connected ? t('gConnected')(g.email || '') : g.problem === 'expired' ? t('gExpired') : t('gNot');
+  $('gBtn').textContent = g.connected ? t('gDisconnect') : t('gConnect');
+  $('gBtn').classList.toggle('go', !g.connected);
+}
+async function connectGoogle() {
+  $('gErr').hidden = true;
+  try {
+    const r = await call('drive_connect');
+    window.open(r.url, '_blank', 'noopener');
+    $('gState').textContent = t('gFinish');
+    clearInterval(googleWait);
+    let n = 0;
+    googleWait = setInterval(async () => {
+      const st = await call('status').catch(() => null);
+      if ((st && st.google && st.google.connected) || ++n >= 60) { clearInterval(googleWait); load(); }
+    }, 5000);
+  } catch (e) { $('gErr').textContent = e.message || String(e); $('gErr').hidden = false; }
+}
+$('gBtn').addEventListener('click', async () => {
+  if (!google || !google.connected) { connectGoogle(); return; }
+  if (!confirm(t('gDisconnectAsk'))) return;
+  try { renderGoogle(await call('drive_disconnect')); load(); } catch (e) { fail(e); }
 });
 $('newCode').addEventListener('click', () => openConnect(backTo));
 $('connectDone').addEventListener('click', () => $('back').click());

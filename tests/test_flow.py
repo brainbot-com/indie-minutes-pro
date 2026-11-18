@@ -8,7 +8,9 @@ import json
 import os
 import re
 import subprocess
-from urllib.parse import unquote
+from urllib.parse import parse_qs, parse_qsl, unquote, urlsplit
+
+import httpx
 
 import pytest
 from fastapi.testclient import TestClient
@@ -645,3 +647,184 @@ def test_a_speaker_is_not_whom_they_address():
     assert plausible("Speaker 1", "Anna", "[00:00:02] Speaker 1: Hallo, ich bin Anna")
     assert plausible("Speaker 2", "Luis", "[00:00:12] Speaker 1: Luis, can you send it?")
     assert plausible("Speaker 2", "Luis", "calendar: invited")
+
+
+class FakeGoogle:
+    """Google's sign-in and Drive, as far as the recorder uses them (gdrive.py)."""
+
+    def __init__(self, email):
+        self.email, self.files, self.revoked, self.sessions, self.n = email, {}, [], {}, 0
+
+    def ls(self, parent):
+        return {f["name"]: f for f in self.files.values() if parent in f["parents"]}
+
+    def path(self, *names):
+        f = {"id": "root"}
+        for name in names:
+            f = self.ls(f["id"]).get(name)
+            if not f:
+                return None
+        return f
+
+    def _new(self, meta, data=b""):
+        self.n += 1
+        fid = f"f{self.n}"
+        self.files[fid] = {"id": fid, "name": meta["name"], "mimeType": meta.get("mimeType", "application/octet-stream"),
+                           "parents": list(meta.get("parents", ["root"])), "data": data,
+                           "modifiedTime": f"2026-11-18T17:{self.n:02d}:00.000Z", "webViewLink": f"https://drive.test/{fid}"}
+        return self._out(self.files[fid])
+
+    def _out(self, f):
+        out = {k: v for k, v in f.items() if k not in ("data", "parents")}
+        if not f["mimeType"].startswith("application/vnd.google-apps."):
+            out["md5Checksum"] = hashlib.md5(f["data"]).hexdigest()
+        return out
+
+    def __call__(self, req):
+        url, m = req.url, req.method
+        if url.host == "oauth2.googleapis.com" and url.path == "/token":
+            form = dict(parse_qsl(req.content.decode()))
+            if form["grant_type"] == "authorization_code":
+                assert form["code"] == "the-code" and len(form["code_verifier"]) >= 43
+                claims = base64.urlsafe_b64encode(json.dumps({"email": self.email}).encode()).decode().rstrip("=")
+                return httpx.Response(200, json={"access_token": "at-1", "expires_in": 3600, "refresh_token": "rt-1",
+                                                 "scope": "openid https://www.googleapis.com/auth/drive.file",
+                                                 "id_token": f"h.{claims}.s"})
+            assert form["grant_type"] == "refresh_token" and form["refresh_token"] == "rt-1"
+            return httpx.Response(200, json={"access_token": "at-2", "expires_in": 3600})
+        if url.host == "oauth2.googleapis.com" and url.path == "/revoke":
+            self.revoked.append(dict(parse_qsl(req.content.decode()))["token"])
+            return httpx.Response(200)
+        if url.host == "upload.test":                                  # a resumable upload's session
+            sess = self.sessions[url.path.rsplit("/", 1)[1]]
+            a, b, total = map(int, re.match(r"bytes (\d+)-(\d+)/(\d+)", req.headers["content-range"]).groups())
+            assert a == len(sess["data"]) and b - a + 1 == len(req.content)
+            sess["data"] += req.content
+            if len(sess["data"]) < total:
+                return httpx.Response(308, headers={"Range": f"bytes=0-{len(sess['data']) - 1}"})
+            return httpx.Response(200, json=self._new(sess["meta"], sess["data"]))
+        assert req.headers["authorization"] in ("Bearer at-1", "Bearer at-2")
+        if url.path == "/drive/v3/files" and m == "GET":
+            q = url.params["q"]
+            name = re.search(r"name = '((?:[^'\\]|\\.)*)'", q).group(1).replace("\\'", "'")
+            parent = re.search(r"'([^']+)' in parents", q).group(1)
+            kind = re.search(r"mimeType = '([^']+)'", q)
+            return httpx.Response(200, json={"files": [self._out(f) for f in self.files.values() if f["name"] == name
+                                                       and parent in f["parents"] and (not kind or f["mimeType"] == kind[1])]})
+        if url.path == "/drive/v3/files" and m == "POST":
+            return httpx.Response(200, json=self._new(json.loads(req.content)))
+        if url.path.startswith("/drive/v3/files/") and m == "PATCH":
+            f = self.files[url.path.rsplit("/", 1)[1]]
+            f["parents"] = [x for x in f["parents"] if x != url.params["removeParents"]] + [url.params["addParents"]]
+            f["name"] = json.loads(req.content or b"{}").get("name", f["name"])
+            return httpx.Response(200, json=self._out(f))
+        if url.path.startswith("/upload/drive/v3/files") and url.params["uploadType"] == "resumable":
+            sid = f"s{len(self.sessions)}"
+            self.sessions[sid] = {"meta": json.loads(req.content), "data": b""}
+            return httpx.Response(200, headers={"Location": f"https://upload.test/{sid}"})
+        if url.path.startswith("/upload/drive/v3/files"):
+            boundary = req.headers["content-type"].split("boundary=")[1]
+            parts = req.content.split(f"--{boundary}".encode())
+            meta = json.loads(parts[1].split(b"\r\n\r\n", 1)[1].rsplit(b"\r\n", 1)[0])
+            data = parts[2].split(b"\r\n\r\n", 1)[1].rsplit(b"\r\n", 1)[0]
+            if m == "PATCH":
+                f = self.files[url.path.rsplit("/", 1)[1]]
+                f["data"] = data
+                return httpx.Response(200, json=self._out(f))
+            return httpx.Response(200, json=self._new(meta, data))
+        return httpx.Response(404, json={"error": {"code": 404, "message": "not in the stand-in"}})
+
+
+def google_box(app, tmp_path, email):
+    """The box with an OAuth client and the stand-in in place of Google."""
+    google = FakeGoogle(email)
+    app.state.settings.google_oauth_file = tmp_path / "google_oauth.json"
+    app.state.settings.google_oauth_file.write_text(json.dumps({"client_id": "cid", "client_secret": "secret"}))
+    app.state.google.http = httpx.Client(transport=httpx.MockTransport(google))
+    service = create_token(app.state.db, "brainbot:agent command", "agent", trusts_identity=True)
+    return google, service
+
+
+def connect_google(client, call):
+    """What the app's Connect Google Drive does, and the person at Google's sign-in."""
+    start = call("drive_connect")["result"]["url"]
+    go = client.get(start.replace("https://box.test", ""), follow_redirects=False)
+    assert go.status_code == 302
+    q = parse_qs(urlsplit(go.headers["location"]).query)
+    return q, client.get("/oauth/google/callback", params={"state": q["state"][0], "code": "the-code"})
+
+
+def test_the_recorder_puts_meetings_into_a_connected_google_drive(app, client, tmp_path, monkeypatch):
+    """A person connects their own Google Drive once; from then on the recorder
+    stores what they keep in Drive itself, with no agent in between."""
+    monkeypatch.setattr(fu, "chat_json", lambda *a, **k: ({"decisions": []}, {}))
+    google, service = google_box(app, tmp_path, "ana@example.com")
+
+    def call(op, args=None, caller="user"):
+        h = {"Authorization": f"Bearer {service}", "X-Indie-User": "ext-ana-drive", "X-Indie-Caller": caller}
+        return client.post("/api/v1/indiechat", json={"op": op, "args": args or {}}, headers=h).json()
+
+    assert call("status")["result"]["google"] == {"available": True, "connected": False, "email": None,
+                                                    "since": None, "problem": None}
+    assert call("drive_connect", caller="agent")["ok"] is False             # a person connects, never an agent
+    q, back = connect_google(client, call)
+    assert q["scope"] == ["openid email https://www.googleapis.com/auth/drive.file"] and q["code_challenge_method"] == ["S256"]
+    assert q["redirect_uri"] == ["https://box.test/oauth/google/callback"] and q["access_type"] == ["offline"]
+    assert back.status_code == 200 and "ana@example.com" in back.text
+    again = client.get("/oauth/google/callback", params={"state": q["state"][0], "code": "the-code"})
+    assert again.status_code == 400                                          # a sign-in counts once
+    assert call("status")["result"]["google"]["connected"] is True
+
+    offer = call("pair_phone")["result"]
+    phone = {"Authorization": "Bearer " + redeem(client, offer["url"]).json()["token"]}
+    mid, _ = make_meeting(app, client, tmp_path, headers=phone)
+    app.state.followup.run(meeting_ids=[mid])
+    folder = google.path("indie-recorder test", app.state.store.drive_folder_name(mid))
+    assert folder and app.state.store.meta(mid)["drive_url"] == folder["webViewLink"]
+    files = google.ls(folder["id"])
+    assert sorted(files) == ["Action items.md", "Summary.md", "Transcript.md"]
+    assert files["Transcript.md"]["data"].decode() == read_text(app.state.store.folder(mid) / "transcript.md")
+    log = google.path("indie-recorder test", "Meeting log")
+    assert log["mimeType"] == "application/vnd.google-apps.document" and log["data"].count(b"Test meeting") == 1
+    work = call("pending_work", caller="agent")["result"]
+    assert not work or not [p for p in work["outbox"] if p["kind"].startswith("drive_")]   # nothing left for an agent
+
+    better = {"meeting_id": mid, "markdown": "## TL;DR\n\nBetter, with names.", "note": "test"}
+    assert call("update_summary", better, caller="agent")["ok"]
+    app.state.followup.run(meeting_ids=[mid])
+    files = google.ls(folder["id"])
+    assert sorted(files) == ["Action items.md", "Older versions", "Summary.md", "Transcript.md"]
+    older = google.ls(files["Older versions"]["id"])
+    assert [n.endswith(" Summary.md") for n in older] == [True]               # only what changed moved aside
+    assert b"Better, with names." in files["Summary.md"]["data"]
+    assert google.path("indie-recorder test", "Meeting log")["data"].count(b"Test meeting") == 1   # the newest entry only
+
+    assert call("drive_disconnect", caller="agent")["ok"] is False
+    assert call("drive_disconnect")["result"]["connected"] is False and google.revoked == ["rt-1"]
+
+
+def test_google_drive_takes_only_the_persons_own_account(app, client, tmp_path):
+    google, service = google_box(app, tmp_path, "mallory@example.com")
+
+    def call(op, args=None):
+        h = {"Authorization": f"Bearer {service}", "X-Indie-User": "ext-bea", "X-Indie-Caller": "user"}
+        return client.post("/api/v1/indiechat", json={"op": op, "args": args or {}}, headers=h).json()
+
+    call("whoami")
+    app.state.db.run("UPDATE users SET email = ? WHERE ext_id = ?", "Bea@example.com", "ext-bea")
+    q, back = connect_google(client, call)
+    assert q["login_hint"] == ["bea@example.com"]
+    assert back.status_code == 400 and "mallory@example.com" in back.text and "bea@example.com" in back.text
+    assert call("status")["result"]["google"]["connected"] is False and google.revoked == ["rt-1"]
+    assert client.get("/oauth/google/start?s=nonsense", follow_redirects=False).status_code == 400
+
+
+def test_a_large_file_goes_to_drive_in_parts(app, client, tmp_path):
+    google, service = google_box(app, tmp_path, "ana@example.com")
+    h = {"Authorization": f"Bearer {service}", "X-Indie-User": "ext-cleo-drive", "X-Indie-Caller": "user"}
+    client.post("/api/v1/indiechat", json={"op": "whoami", "args": {}}, headers=h)
+    uid = app.state.db.one("SELECT id FROM users WHERE ext_id = ?", "ext-cleo-drive")["id"]
+    app.state.db.set_user_setting(uid, "google_refresh", "rt-1")             # connected earlier: a new access token first
+    data = os.urandom(9 * 1024 * 1024 + 123)
+    got = app.state.google.upload(uid, "Audio.m4a", data, "audio/mp4", parent="root")
+    assert google.files[got["id"]]["data"] == data and google.files[got["id"]]["name"] == "Audio.m4a"

@@ -1,8 +1,9 @@
 # indie-recorder in brainbot:agent command
 
 The recorder on aibox1 in brainbot:agent command (indie-chat on ai-knowledge): the
-indie-recorder app to read and steer your meetings, and a meeting agent that writes
-better summaries with what it knows and stores meetings in Google Drive.
+indie-recorder app to read and steer your meetings, Google Drive for the
+meetings you keep there, and a meeting agent that writes better summaries with
+what it knows.
 
 - `indie-recorder.html`: the app (named indie-recorder in the sidebar), one shared app for everyone. Each
   person sees only their own meetings: list by day, a meeting's summary,
@@ -42,11 +43,20 @@ better summaries with what it knows and stores meetings in Google Drive.
 - Each meeting is either local or in Drive (your choice per meeting; the
   default for new recordings is a setting). A local meeting stays on aibox1:
   the indie-recorder app shows it through brainbot:agent command's server to your browser,
-  nothing is stored on the way. A Drive meeting is uploaded by your meeting
-  agent: `Summary.md`, `Action items.md`, `Transcript.md` (and the recording,
-  if you switch that on) into a folder per meeting, plus an entry in the
-  running "Meeting log" doc. Without a meeting agent of your own, a Drive
-  meeting waits ("Waiting for the Drive upload") and stays on aibox1.
+  nothing is stored on the way. A Drive meeting goes to your own Google
+  Drive once you connect it (Settings, Storage, "Connect Google Drive", or
+  the button on the main screen when meetings wait for Drive): Google asks
+  you once, in a tab of its own, for the files the recorder makes, nothing
+  else. The recorder then uploads by itself, right after each meeting:
+  `Summary.md`, `Action items.md`, `Transcript.md` (and the recording, if
+  you switch that on) into a folder per meeting, and an entry in the
+  running "Meeting log" doc. Until you connect it, a Drive meeting waits
+  ("Waiting for the Drive upload") and stays on aibox1. Needs the OAuth
+  client in `secrets/google_oauth.json` on aibox1 (brainbot:agent command's
+  own, with the redirect address
+  `https://ai-knowledge.mz.brainbot.com/indie-recorder/oauth/google/callback`
+  added in the Google Cloud console); without it Drive is the meeting
+  agent's job, as before.
 - The meeting agent reads full transcripts, and an agent's run history keeps
   what its tools returned. It is your private agent, so that history is
   yours, on ai-knowledge. Give it aibox1's model (below), never StudioLLM:
@@ -109,9 +119,8 @@ The indie-recorder app is in everyone's sidebar. To record:
    app" or "Record in the browser"), or type the code in the app. Remove a
    phone under Settings, Phones to lock it out.
 
-For Drive and the better summaries, each person sets up their own meeting
-agent from the app (Settings, Meeting agent, or "Set it up" on the main
-screen when meetings wait for Drive):
+For the better summaries and speaker names, each person sets up their own
+meeting agent from the app (Settings, Meeting agent):
 
 1. In indie-recorder, on the right: New agent for this app (or link one of
    theirs).
@@ -119,8 +128,11 @@ screen when meetings wait for Drive):
    **qwen3.8:27b-ctx65536** (that exact tag: the box keeps it loaded for other
    work). Each run reads whole transcripts, and they stay on aibox1.
 3. "Set up my meeting agent". The button asks the agent to read the skill
-   and do its set-up part: it asks for Google Drive (with changes) and
-   creates the hourly routine "Meeting follow-up"; the person confirms both.
+   and do its set-up part: it creates the hourly routine "Meeting
+   follow-up" (keeping no app: the app is shared, and a routine tied to it
+   gets none of the person's own accounts) and the person confirms it.
+   "Start each run fresh" in the routine keeps one run's conclusions out of
+   the next.
 
 The skill is [recorder/skills/meeting-follow-up/SKILL.md](../../recorder/skills/meeting-follow-up/SKILL.md),
 served by the recorder as the connector's `agent_setup`, so it ships with the
@@ -149,6 +161,8 @@ connector's ops.
 ### Check
 
 Record a short meeting with the phone (or `sim/phone_sim.py`), with "Save to
-Google Drive" on. When the recorder is done, "Run now" on the routine: the
+Google Drive" on and Google Drive connected. When the recorder is done, the
 meeting's folder appears in Drive, the meeting log gets an entry, and
-indie-recorder shows summary version 2 and "Open folder".
+indie-recorder shows "Open folder". "Run now" on the routine: indie-recorder
+shows summary version 2, and its new Summary.md replaces the old one in
+Drive (which moves into "Older versions").

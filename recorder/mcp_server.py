@@ -226,6 +226,7 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
                     # meetings, not tasks: each meeting has two (store the files, log it)
                     "pending_drive": len({p["meeting_id"] for p in box if p["kind"].startswith("drive_")}),
                     "settings": store.settings(who.user_id), "followup": followup.executor,
+                    "google": followup.google.account(who.user_id),
                     "targets": sorted(s.followup_targets)}
         if name == "get_settings":
             return store.settings(who.user_id)

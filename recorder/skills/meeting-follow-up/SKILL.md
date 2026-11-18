@@ -16,12 +16,11 @@ Drive is the person's own, through your Drive tools.
    aibox1. Ask the person (ask_person) whether your engine is "aibox1 Ollama
    (64k)" with the model qwen3.8:27b-ctx65536. If it is not, tell them to
    change it in your settings under Engine, and go on when they confirm.
-2. Google Drive. Ask with connection_request (Google Drive, with changes):
-   it shows the person a card when Drive is missing and tells you when you
-   have it already. Next to the indie-recorder app you may see no drive_*
-   tools even then: that app is shared by everyone, so a turn beside it gets
-   none of the person's own accounts. The routine runs without the app and
-   gets them.
+2. Google Drive is the recorder's job: once the person connects their
+   Google Drive in the indie-recorder app (Settings, Storage, Connect Google
+   Drive), the recorder puts the meetings they keep in Drive there itself.
+   If `{"op": "status"}` shows "google" not connected, tell them where to
+   connect it. You need no Drive tools for it.
 3. The routine. Create it with routine_create: title "Meeting follow-up",
    schedule every hour, quiet "[Nothing new]", appId "" (no app: a routine
    that keeps the shared app up to date gets none of the person's own
@@ -68,7 +67,9 @@ Drive is the person's own, through your Drive tools.
    the person's calendar if you have it (who was invited at that time). Say
    in "why" what you based it on. Never rename anyone: the person decides in
    the app, with your suggestion and a clip of the voice in front of them.
-4. Google Drive, for each item under "outbox":
+4. Google Drive, for each item under "outbox". There are such items only
+   while the person has not connected Google Drive in the app; say once that
+   connecting it there is the easier way, then:
    - drive_store: `{"op": "drive_files", "args": {"proposal_id": PID}}`. Find
      or create the folder "folder" in My Drive and in it the subfolder
      "subfolder". Download each file with curl into

@@ -57,6 +57,15 @@ class Settings:
         # proxy with a certificate phones trust (brain-tls), no phone needs the box's CA for it.
         self.connect_url = get("CONNECT_URL", self.public_url + "/connect")
         self.webapp_url = get("WEBAPP_URL", self.public_url + "/app/")
+        # where people's browsers reach the recorder (brain-tls), for pages like Google's sign-in
+        self.browser_url = get("BROWSER_URL", self.connect_url.rsplit("/connect", 1)[0]).rstrip("/")
+        # Google Drive, put there by the recorder for each person who connects it (gdrive.py)
+        self.google_oauth_file = Path(get("GOOGLE_OAUTH_FILE", "/secrets/google_oauth.json"))
+        self.google_redirect_uri = get("GOOGLE_REDIRECT_URI", self.browser_url + "/oauth/google/callback")
+        self.google_auth_url = get("GOOGLE_AUTH_URL", "https://accounts.google.com/o/oauth2/v2/auth")
+        self.google_token_url = get("GOOGLE_TOKEN_URL", "https://oauth2.googleapis.com/token")
+        self.google_revoke_url = get("GOOGLE_REVOKE_URL", "https://oauth2.googleapis.com/revoke")
+        self.google_api_url = get("GOOGLE_API_URL", "https://www.googleapis.com").rstrip("/")
         # Encryption at rest (recorder/vault.py) with the keys deploy/make-keys.sh makes once;
         # phones seal their chunks for SEAL_KEY_FILE. ENCRYPT_AT_REST=0 keeps files plain.
         self.encrypt_at_rest = get("ENCRYPT_AT_REST", "1") == "1"

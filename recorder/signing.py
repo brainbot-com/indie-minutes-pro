@@ -63,3 +63,23 @@ def verify(settings, token):
         return data["m"], data["f"]
     except (ValueError, KeyError, json.JSONDecodeError):
         return None
+
+
+def sign_value(settings, kind, value, ttl):
+    """A short-lived signed token that carries a value (a person's id in a
+    Google sign-in link, the state that comes back from Google)."""
+    body = _b64(json.dumps([kind, value, int(time.time()) + ttl]).encode())
+    return f"{body}.{_b64(hmac.new(_key(settings), b'value:' + body.encode(), hashlib.sha256).digest()[:16])}"
+
+
+def verify_value(settings, kind, token):
+    """The value of a valid, unexpired token of that kind, else None."""
+    try:
+        body, mac = str(token).split(".", 1)
+        good = _b64(hmac.new(_key(settings), b"value:" + body.encode(), hashlib.sha256).digest()[:16])
+        if not hmac.compare_digest(mac, good):
+            return None
+        k, value, expires = json.loads(_unb64(body))
+        return value if k == kind and expires >= time.time() else None
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return None

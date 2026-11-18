@@ -12,7 +12,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 import segno
-from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response,
                                StreamingResponse)
 from fastapi.staticfiles import StaticFiles
@@ -26,6 +26,7 @@ from .connect import CODE_MINUTES, Codes, Guesses, shown
 from .db import open_index
 from .engines import NAMES as ENGINE_NAMES, Engines
 from .followup import Followup
+from .gdrive import Google, GoogleError
 from .people import label, resolve
 from .render import display_name, local_time, render_summary_md, words_to_segments
 from .store import Store
@@ -115,7 +116,8 @@ def create_app(settings=None):
     db = open_index(s)                       # also loads the keys (vault.configure)
     store = Store(s, db)
     engines = Engines(s)
-    followup = Followup(s, db, store)
+    google = Google(s, db)
+    followup = Followup(s, db, store, google)
     worker = Worker(s, db, store, engines, followup)
     md = MarkdownIt("commonmark", {"html": False}).enable("table")
     templates = Jinja2Templates(directory=HERE / "templates")
@@ -144,6 +146,7 @@ def create_app(settings=None):
     app = FastAPI(title="indie-recorder", version=__version__, lifespan=lifespan,
                   docs_url=None, redoc_url=None, openapi_url="/api/v1/openapi.json")
     app.state.settings, app.state.db, app.state.store = s, db, store
+    app.state.google = google
     app.state.worker, app.state.followup, app.state.engines = worker, followup, engines
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     app.mount("/app", StaticFiles(directory=PWA_DIR, html=True), name="app")
@@ -645,6 +648,32 @@ def create_app(settings=None):
         """Where a connect code leads (the code stays in the fragment, the server never sees it)."""
         return templates.TemplateResponse(request, "connect.html", {"s": s})
 
+    # -- Google Drive: each person connects their own (gdrive.py) ---------------
+
+    def google_page(request, ok, error=None, email=None, status_code=200):
+        lang = "de" if request.headers.get("accept-language", "").lower().startswith("de") else "en"
+        return templates.TemplateResponse(request, "google.html", {"s": s, "lang": lang, "ok": ok, "email": email,
+                                          "error": error}, status_code=status_code)
+
+    @app.get("/oauth/google/start")
+    def google_start(request: Request, start: str = Query("", alias="s")):
+        """Where the app's Connect Google Drive leads: on to Google's own sign-in."""
+        try:
+            return RedirectResponse(google.authorize_url(start), status_code=302)
+        except GoogleError as e:
+            return google_page(request, False, e, status_code=400)
+
+    @app.get("/oauth/google/callback", response_class=HTMLResponse)
+    def google_callback(request: Request, state: str = "", code: str = "", error: str = ""):
+        try:
+            if error:
+                raise GoogleError("denied" if error == "access_denied" else "google", error)
+            done = google.finish(state, code)
+        except GoogleError as e:
+            return google_page(request, False, e, status_code=400)
+        threading.Thread(target=followup.run, daemon=True).start()     # what waited for Drive goes now
+        return google_page(request, True, email=done["email"])
+
     @app.get("/api/v1/pair/{code}")
     def pair_peek(code: str):
         """What a code would connect to, so the phone can ask before it spends it."""
@@ -721,8 +750,9 @@ def create_app(settings=None):
             return JSONResponse({"ok": False, "error": "send {op, args}"}, status_code=400)
         op, args = body["op"], body.get("args") if isinstance(body.get("args"), dict) else {}
         try:
-            if op in ("pair_phone", "phones", "remove_phone", "set_name") and who.caller != "user":
-                raise ToolError("only a person can pair or remove phones or set their name, not an agent")
+            if op in ("pair_phone", "phones", "remove_phone", "set_name", "drive_connect", "drive_disconnect") \
+                    and who.caller != "user":
+                raise ToolError("only a person can pair or remove phones, set their name or connect Google Drive, not an agent")
             if op == "whoami":
                 me = db.one("SELECT name FROM users WHERE id = ?", who.user_id)
                 result = {"meetings": len(store.list(limit=10000, who=who)), "caller": who.caller,
@@ -734,6 +764,13 @@ def create_app(settings=None):
                 result = {"name": name}
             elif op == "phones":
                 result = phones(who)
+            elif op == "drive_connect":
+                try:
+                    result = {"url": google.start_link(who.user_id)}
+                except GoogleError:
+                    raise ToolError("this box has no Google sign-in set up")
+            elif op == "drive_disconnect":
+                result = google.disconnect(who.user_id)
             elif op == "pair_phone":
                 if len(phones(who)) >= MAX_PHONES:
                     raise ToolError(f"at most {MAX_PHONES} phones: remove one first")
