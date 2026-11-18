@@ -1,0 +1,340 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meetings</title>
+<meta name="indie-app-name" lang="en" content="Meetings">
+<meta name="indie-app-name" lang="de" content="Meetings">
+<style>
+:root { --bg: #f4f4f2; --card: #fff; --ink: #1a1a1a; --muted: #6f6f6a; --line: #e2e2df; --hover: #efefec; --ok: #2f7d4f; --warn: #a86a00; --err: #b3261e; }
+[data-theme="dark"] { --bg: #161615; --card: #1f1f1d; --ink: #ecebe6; --muted: #a3a29b; --line: #34332f; --hover: #262624; --ok: #5cbf86; --warn: #e0a640; --err: #f2847c; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 720px; margin: 0 auto; padding: 20px 16px 40px; }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
+a { color: inherit; }
+.top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+h1 { font-size: 22px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+.tools { display: flex; align-items: center; gap: 14px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); display: inline-block; }
+.dot.ok { background: var(--ok); } .dot.busy { background: var(--warn); } .dot.err { background: var(--err); }
+.icon { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 2px; color: var(--muted); }
+.icon:hover { background: var(--hover); color: var(--ink); }
+.panel { background: var(--card); border: 1px solid var(--line); border-radius: 2px; padding: 16px 18px; margin-bottom: 18px; }
+.field { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; }
+.field + .field { border-top: 1px solid var(--line); }
+.field input[type=text] { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 2px; padding: 5px 9px; width: 220px; max-width: 55%; }
+.muted { color: var(--muted); } .small { font-size: 13px; }
+.day { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin: 22px 0 6px; }
+.list { list-style: none; margin: 0; padding: 0; background: var(--card); border: 1px solid var(--line); border-radius: 2px; }
+.item { display: flex; align-items: center; gap: 12px; padding: 12px 16px; cursor: pointer; }
+.item + .item { border-top: 1px solid var(--line); }
+.item:hover { background: var(--hover); }
+.item .main { flex: 1; min-width: 0; }
+.item .title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.item .sub { font-size: 13px; color: var(--muted); }
+.chip { font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 99px; padding: 1px 9px; white-space: nowrap; }
+.chip.busy { color: var(--warn); border-color: currentColor; } .chip.err { color: var(--err); border-color: currentColor; }
+.back { color: var(--muted); font-size: 14px; margin-bottom: 14px; }
+.back:hover { color: var(--ink); }
+.detail h2 { font-size: 22px; font-weight: 600; margin: 0 0 4px; line-height: 1.3; }
+.store { display: flex; align-items: center; gap: 12px; margin: 16px 0 6px; }
+.store a { font-size: 14px; color: var(--muted); }
+.note { font-size: 13px; color: var(--muted); margin: 0 0 18px; }
+.switch { position: relative; width: 36px; height: 20px; flex: none; }
+.switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+.switch span { position: absolute; inset: 0; background: var(--line); border-radius: 99px; transition: background .15s; cursor: pointer; }
+.switch span::after { content: ""; position: absolute; width: 16px; height: 16px; left: 2px; top: 2px; background: var(--card); border-radius: 50%; transition: transform .15s; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+.switch input:checked + span { background: var(--ink); }
+.switch input:checked + span::after { transform: translateX(16px); }
+.switch input:focus-visible + span { outline: 2px solid var(--muted); outline-offset: 2px; }
+.lead { font-size: 16px; margin: 0 0 18px; }
+.sum h3 { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin: 20px 0 6px; }
+.sum ul { margin: 0; padding-left: 18px; } .sum li { margin: 3px 0; } .sum p { margin: 6px 0; }
+.sum .who { color: var(--muted); font-size: 13px; }
+details { border-top: 1px solid var(--line); margin-top: 22px; padding-top: 12px; }
+details + details { margin-top: 0; }
+summary { cursor: pointer; color: var(--muted); font-size: 14px; list-style: none; }
+summary::-webkit-details-marker { display: none; }
+summary::before { content: "›"; display: inline-block; width: 14px; transition: transform .15s; }
+details[open] summary::before { transform: rotate(90deg); }
+.names { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin: 12px 0; }
+.names label { font-size: 12px; color: var(--muted); display: grid; gap: 3px; }
+.names input { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 2px; padding: 5px 8px; }
+.btn { border: 1px solid var(--line); border-radius: 2px; padding: 5px 12px; background: var(--card); font-size: 14px; }
+.btn:hover { background: var(--hover); }
+pre { white-space: pre-wrap; font: 13px/1.6 system-ui, sans-serif; margin: 12px 0 0; max-height: 460px; overflow: auto; }
+.more { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-top: 12px; font-size: 14px; }
+.more a { color: var(--muted); }
+.empty { color: var(--muted); padding: 30px 0; text-align: center; }
+.error { color: var(--err); font-size: 13px; margin: 0 0 12px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="top">
+    <h1 data-t="title"></h1>
+    <div class="tools">
+      <span class="dot" id="dot"></span>
+      <button class="icon" id="gear" aria-label="Settings">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <p class="error" id="error" hidden></p>
+
+  <section class="panel" id="setup" hidden>
+    <p data-t="setupText"></p>
+    <ol class="small muted"><li data-t="setup1"></li><li data-t="setup2"></li></ol>
+  </section>
+
+  <section class="panel" id="settings" hidden>
+    <div class="field"><span data-t="defaultDrive"></span><label class="switch"><input type="checkbox" id="defDrive"><span></span></label></div>
+    <div class="field"><span data-t="folder"></span><input type="text" id="folder" maxlength="120"></div>
+    <div class="field"><span data-t="audio"></span><label class="switch"><input type="checkbox" id="audio"><span></span></label></div>
+  </section>
+
+  <section id="home"></section>
+
+  <article class="detail" id="detail" hidden>
+    <button class="back" id="back"></button>
+    <h2 id="dTitle"></h2>
+    <div class="muted small" id="dMeta"></div>
+    <div class="store">
+      <label class="switch"><input type="checkbox" id="dDrive"><span></span></label>
+      <span data-t="storeInDrive"></span>
+      <a id="dLink" target="_blank" rel="noopener" hidden data-t="openFolder"></a>
+    </div>
+    <p class="note" id="dNote"></p>
+    <div class="sum" id="dSum"></div>
+    <details id="dSpkBox">
+      <summary data-t="speakers"></summary>
+      <div class="names" id="dSpk"></div>
+      <button class="btn" id="dSave" data-t="saveNames"></button>
+    </details>
+    <details id="dTrBox">
+      <summary data-t="transcript"></summary>
+      <pre id="dTr"></pre>
+    </details>
+    <details>
+      <summary data-t="more"></summary>
+      <div class="more">
+        <button class="btn" id="dRedo" data-t="newSummary"></button>
+        <a id="dBox" target="_blank" rel="noopener" data-t="openBox"></a>
+      </div>
+    </details>
+  </article>
+</main>
+<script>
+'use strict';
+const LANG = document.documentElement.lang === 'de' ? 'de' : 'en';
+const STR = {
+  en: {
+    title: 'Meetings', back: '← Meetings', defaultDrive: 'Store new recordings in Google Drive', folder: 'Drive folder',
+    audio: 'Include the audio', storeInDrive: 'Store in Google Drive', openFolder: 'Open folder', speakers: 'Speakers',
+    saveNames: 'Save names', transcript: 'Transcript', more: 'More', newSummary: 'Write a new summary',
+    openBox: 'Open on aibox1 (VPN)', none: 'No meetings yet. Record one with the phone app.', today: 'Today', yesterday: 'Yesterday',
+    drive: 'Drive', local: 'Local', processing: 'Processing', failed: 'Failed', speakersN: (n) => `${n} speakers`,
+    noteLocal: 'Stays on aibox1.', noteWaiting: 'Waiting for the Drive upload.', noteDone: 'Stored in Drive.',
+    queued: 'A new summary is on its way.', saved: 'Saved.',
+    tldr: 'Summary', decisions: 'Decisions', actions: 'Action items', questions: 'Open questions',
+    setupText: 'Connect the meeting recorder on aibox1 to use this app:',
+    setup1: 'Settings, MCP, add server "indie-recorder": https://ai-knowledge.mz.brainbot.com/indie-recorder/mcp with header Authorization: Bearer <token>.',
+    setup2: 'The token: ssh aibox1 cat ~/indie-recorder/secrets/command_center_token',
+    status: (s) => (s.worker ? (s.current_job ? 'Working' : 'Ready') : 'Recorder offline') + (s.pending_drive ? ` · ${s.pending_drive} waiting for Drive` : ''),
+  },
+  de: {
+    title: 'Meetings', back: '← Meetings', defaultDrive: 'Neue Aufnahmen in Google Drive ablegen', folder: 'Drive-Ordner',
+    audio: 'Audio mit ablegen', storeInDrive: 'In Google Drive ablegen', openFolder: 'Ordner öffnen', speakers: 'Sprecher',
+    saveNames: 'Namen speichern', transcript: 'Transkript', more: 'Mehr', newSummary: 'Neue Zusammenfassung schreiben',
+    openBox: 'Auf aibox1 öffnen (VPN)', none: 'Noch keine Meetings. Nimm eines mit der Handy-App auf.', today: 'Heute', yesterday: 'Gestern',
+    drive: 'Drive', local: 'Lokal', processing: 'In Arbeit', failed: 'Fehler', speakersN: (n) => `${n} Sprecher`,
+    noteLocal: 'Bleibt auf aibox1.', noteWaiting: 'Wartet auf das Hochladen nach Drive.', noteDone: 'In Drive abgelegt.',
+    queued: 'Eine neue Zusammenfassung ist unterwegs.', saved: 'Gespeichert.',
+    tldr: 'Zusammenfassung', decisions: 'Entscheidungen', actions: 'Aufgaben', questions: 'Offene Fragen',
+    setupText: 'Verbinde den Meeting-Recorder auf aibox1, um diese App zu nutzen:',
+    setup1: 'Einstellungen, MCP, Server "indie-recorder" hinzufügen: https://ai-knowledge.mz.brainbot.com/indie-recorder/mcp mit Header Authorization: Bearer <Token>.',
+    setup2: 'Das Token: ssh aibox1 cat ~/indie-recorder/secrets/command_center_token',
+    status: (s) => (s.worker ? (s.current_job ? 'Arbeitet' : 'Bereit') : 'Recorder nicht erreichbar') + (s.pending_drive ? ` · ${s.pending_drive} warten auf Drive` : ''),
+  },
+};
+const t = (k) => (STR[LANG][k] !== undefined ? STR[LANG][k] : STR.en[k]);
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+document.querySelectorAll('[data-t]').forEach((el) => { el.textContent = t(el.dataset.t); });
+$('back').textContent = t('back');
+
+let SERVER = null, meetings = [], current = null, settings = null;
+
+async function findServer() {
+  const list = await IndieApp.fetch('mcp', { op: 'list' });
+  const s = (list.servers || []).find((x) => !x.error && (x.toolDefs || []).some((d) => /(^|_)pending_work$/.test(d.name)));
+  if (!s) throw new Error('NO_SERVER');
+  return s.name;
+}
+async function call(tool, args) {
+  if (!SERVER) SERVER = await findServer();
+  const r = await IndieApp.fetch('mcp', { op: 'call', server: SERVER, tool, args: args || {} });
+  if (!r || r.isError) throw new Error((r && r.text) || tool + ' failed');
+  return r.text ? JSON.parse(r.text) : null;
+}
+function fail(e) {
+  if (String(e && e.message) === 'NO_SERVER') { $('setup').hidden = false; $('home').innerHTML = ''; return; }
+  $('error').hidden = false; $('error').textContent = String((e && e.message) || e);
+}
+
+const dayKey = (d) => d.toISOString().slice(0, 10);
+function dayLabel(d) {
+  const today = new Date(), y = new Date(Date.now() - 864e5);
+  if (dayKey(d) === dayKey(today)) return t('today');
+  if (dayKey(d) === dayKey(y)) return t('yesterday');
+  return d.toLocaleDateString(LANG, { weekday: 'long', day: 'numeric', month: 'long' });
+}
+const time = (d) => d.toLocaleTimeString(LANG, { hour: '2-digit', minute: '2-digit' });
+const mins = (s) => { const m = Math.max(1, Math.round((s || 0) / 60)); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${m % 60} min`; };
+
+function chip(m) {
+  if (m.state === 'failed') return `<span class="chip err">${t('failed')}</span>`;
+  if (m.state !== 'done') return `<span class="chip busy">${t('processing')}</span>`;
+  return m.storage === 'drive' ? `<span class="chip">${t('drive')}</span>` : '';
+}
+
+function renderHome() {
+  $('detail').hidden = true; $('home').hidden = false;
+  if (!meetings.length) { $('home').innerHTML = `<p class="empty">${esc(t('none'))}</p>`; return; }
+  let html = '', open = null;
+  for (const m of meetings) {
+    const d = new Date(m.started_at || m.updated_at);
+    const key = dayKey(d);
+    if (key !== open) { if (open) html += '</ul>'; html += `<div class="day">${esc(dayLabel(d))}</div><ul class="list">`; open = key; }
+    const sub = [time(d), mins(m.duration_s), m.speakers ? t('speakersN')(m.speakers) : ''].filter(Boolean).join(' · ');
+    html += `<li class="item" data-id="${esc(m.id)}"><div class="main"><div class="title">${esc(m.title || m.id)}</div><div class="sub">${esc(sub)}</div></div>${chip(m)}</li>`;
+  }
+  $('home').innerHTML = html + '</ul>';
+  $('home').querySelectorAll('.item').forEach((li) => li.addEventListener('click', () => openMeeting(li.dataset.id)));
+}
+
+/* The recorder's summary as sections; tables of action items become a list. */
+function renderSummary(markdown) {
+  const lines = String(markdown || '').split('\n').filter((l) => !/^# |^_.*_$|^https?:\/\/\S+$/.test(l.trim()));
+  const inline = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  const names = { 'tl;dr': 'tldr', kurzfassung: 'tldr', decisions: 'decisions', entscheidungen: 'decisions',
+    'action items': 'actions', aufgaben: 'actions', 'open questions': 'questions', 'offene fragen': 'questions' };
+  let out = '', list = false, first = true, inTldr = false;
+  const close = () => { if (list) { out += '</ul>'; list = false; } };
+  for (const raw of lines) {
+    const line = raw.trim();
+    let m;
+    if ((m = /^#{2,4}\s+(.*)/.exec(line))) {
+      close();
+      const key = names[m[1].toLowerCase()];
+      inTldr = key === 'tldr';
+      if (!inTldr) out += `<h3>${esc(key ? t(key) : m[1])}</h3>`;
+      continue;
+    }
+    if (/^\|[\s:|-]+\|$/.test(line) || /^\|\s*#\s*\|/.test(line)) continue;
+    if ((m = /^\|(.*)\|$/.exec(line))) {
+      const c = m[1].split('|').map((x) => x.trim());
+      if (!list) { out += '<ul>'; list = true; }
+      const who = [c[2], c[3]].filter(Boolean).join(' · ');
+      out += `<li>${inline(c[1] || c[0])}${who ? ` <span class="who">${esc(who)}</span>` : ''}</li>`;
+      continue;
+    }
+    if ((m = /^[-*]\s+(.*)/.exec(line))) { if (!list) { out += '<ul>'; list = true; } out += `<li>${inline(m[1])}</li>`; continue; }
+    close();
+    if (line) { out += (inTldr || first) ? `<p class="lead">${inline(line)}</p>` : `<p>${inline(line)}</p>`; first = false; }
+  }
+  close();
+  return out;
+}
+
+async function openMeeting(id, keepOpen) {
+  try {
+    const m = await call('get_meeting', { meeting_id: id, include_transcript: false });
+    current = m;
+    $('home').hidden = true; $('settings').hidden = true; $('detail').hidden = false;
+    $('dTitle').textContent = m.title || m.id;
+    const d = new Date(m.started_at || m.created_at);
+    $('dMeta').textContent = [dayLabel(d) + ', ' + time(d), mins(m.duration_s), m.speakers ? t('speakersN')(m.speakers) : ''].filter(Boolean).join(' · ');
+    $('dDrive').checked = m.storage === 'drive';
+    $('dLink').hidden = !m.drive_url; if (m.drive_url) $('dLink').href = m.drive_url;
+    $('dNote').textContent = m.storage !== 'drive' ? t('noteLocal') : (m.drive_url ? t('noteDone') : t('noteWaiting'));
+    $('dSum').innerHTML = renderSummary(m.summary_md);
+    $('dSpk').innerHTML = Object.entries(m.speaker_names || {}).map(([label, name]) =>
+      `<label>${esc(label)}<input data-label="${esc(label)}" value="${esc(name)}"></label>`).join('');
+    $('dBox').href = m.url;
+    if (!keepOpen) { $('dTrBox').open = false; $('dTr').textContent = ''; window.scrollTo(0, 0); }
+    IndieApp.setState({ open: id }).catch(() => {});
+  } catch (e) { fail(e); }
+}
+
+async function load() {
+  try {
+    const [st, list] = await Promise.all([call('status'), call('list_meetings')]);
+    $('setup').hidden = true; $('error').hidden = true;
+    settings = st.settings; meetings = list || [];
+    $('dot').className = 'dot ' + (st.worker ? (st.current_job ? 'busy' : 'ok') : 'err');
+    $('dot').title = t('status')(st);
+    $('defDrive').checked = settings.storage_default === 'drive';
+    if (document.activeElement !== $('folder')) $('folder').value = settings.drive_folder || '';
+    $('audio').checked = !!settings.drive_include_audio;
+    if (current) await openMeeting(current.id, true); else renderHome();
+  } catch (e) { fail(e); }
+}
+
+async function setStorage(id, storage) {
+  await call('set_storage', { meeting_id: id, storage });
+  const m = meetings.find((x) => x.id === id); if (m) m.storage = storage;
+  if (current && current.id === id) await openMeeting(id, true);
+  return storage;
+}
+async function updateSettings(patch) { settings = await call('update_settings', patch); return settings; }
+async function rename(id, names) { await call('rename_speakers', { meeting_id: id, names }); await openMeeting(id, true); }
+
+$('gear').addEventListener('click', () => { $('settings').hidden = !$('settings').hidden; });
+$('defDrive').addEventListener('change', () => updateSettings({ storage_default: $('defDrive').checked ? 'drive' : 'local' }).catch(fail));
+$('audio').addEventListener('change', () => updateSettings({ drive_include_audio: $('audio').checked }).catch(fail));
+$('folder').addEventListener('change', () => updateSettings({ drive_folder: $('folder').value }).catch(fail));
+$('back').addEventListener('click', () => { current = null; IndieApp.setState({ open: null }).catch(() => {}); renderHome(); });
+$('dDrive').addEventListener('change', () => setStorage(current.id, $('dDrive').checked ? 'drive' : 'local').catch(fail));
+$('dSave').addEventListener('click', () => {
+  const names = {};
+  $('dSpk').querySelectorAll('input').forEach((i) => { names[i.dataset.label] = i.value; });
+  rename(current.id, names).catch(fail);
+});
+$('dTrBox').addEventListener('toggle', async () => {
+  if (!$('dTrBox').open || $('dTr').textContent) return;
+  try { const m = await call('get_meeting', { meeting_id: current.id, include_transcript: true }); $('dTr').textContent = m.transcript_md || ''; }
+  catch (e) { fail(e); }
+});
+$('dRedo').addEventListener('click', async () => {
+  try { await call('new_summary', { meeting_id: current.id }); $('dNote').textContent = t('queued'); } catch (e) { fail(e); }
+});
+
+if (navigator.modelContext && navigator.modelContext.provideContext) {
+  navigator.modelContext.provideContext({ tools: [
+    { name: 'list_meetings', description: 'The meetings: id, title, start, state, storage (local or drive)', inputSchema: { type: 'object', properties: {} },
+      async execute() { await load(); return JSON.stringify(meetings.map((m) => ({ id: m.id, title: m.title, started_at: m.started_at, state: m.state, storage: m.storage, drive_url: m.drive_url }))); } },
+    { name: 'open_meeting', description: 'Show one meeting', inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+      async execute(a) { await openMeeting(a.id); return 'Opened ' + a.id; } },
+    { name: 'set_storage', description: 'Keep a meeting local or store it in Google Drive',
+      inputSchema: { type: 'object', properties: { id: { type: 'string' }, storage: { type: 'string', enum: ['local', 'drive'] } }, required: ['id', 'storage'] },
+      async execute(a) { return a.id + ': ' + await setStorage(a.id, a.storage); } },
+    { name: 'set_default_storage', description: 'Where new recordings go by default', inputSchema: { type: 'object', properties: { storage: { type: 'string', enum: ['local', 'drive'] } }, required: ['storage'] },
+      async execute(a) { await updateSettings({ storage_default: a.storage }); await load(); return 'Default: ' + a.storage; } },
+    { name: 'rename_speakers', description: 'Name speaker labels, e.g. {"Speaker 1": "Luis"}',
+      inputSchema: { type: 'object', properties: { id: { type: 'string' }, names: { type: 'object' } }, required: ['id', 'names'] },
+      async execute(a) { await rename(a.id, a.names); return 'Saved'; } },
+  ] });
+}
+
+(async () => {
+  try { const st = await IndieApp.getState(); if (st && st.open) current = { id: st.open }; } catch (e) { /* first start */ }
+  await load();
+  setInterval(() => { if (document.visibilityState === 'visible' && !current) load(); }, 30000);
+})();
+</script>
+</body>
+</html>
