@@ -364,7 +364,7 @@ private fun HomeScreen(cfg: BoxConfig, onOpen: (String) -> Unit, onSettings: () 
                 Text(clock(now - a.startedMs), fontSize = 44.sp, fontWeight = FontWeight.Light)
                 Spacer(Modifier.height(12.dp))
                 LinearProgressIndicator(progress = { level }, modifier = Modifier.fillMaxWidth().height(6.dp),
-                    color = RecRed, trackColor = MaterialTheme.colorScheme.outline)
+                    color = RecRed, trackColor = MaterialTheme.colorScheme.outline, gapSize = 0.dp, drawStopIndicator = {})
                 if (micMuted) {
                     Spacer(Modifier.height(8.dp))
                     Text(stringResource(R.string.notif_muted), color = MaterialTheme.colorScheme.error)
@@ -401,6 +401,8 @@ private fun RecordingRow(r: LocalRecording, meetingState: String?, onClick: () -
     val status = when {
         r.state == LocalRecording.RECORDING -> stringResource(R.string.st_recording)
         r.state == LocalRecording.STOPPED && r.error == "rejected" -> stringResource(R.string.box_rejected)
+        r.state == LocalRecording.STOPPED && r.uploaded < r.chunks && r.error == "unreachable" ->
+            stringResource(R.string.st_waiting) + " · ${r.uploaded}/${r.chunks}"
         r.state == LocalRecording.STOPPED && r.uploaded < r.chunks ->
             stringResource(R.string.st_uploading, r.uploaded, r.chunks)
         r.state == LocalRecording.STOPPED -> stringResource(R.string.st_waiting)

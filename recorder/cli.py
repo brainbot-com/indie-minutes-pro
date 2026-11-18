@@ -34,6 +34,8 @@ def main(argv=None):
     t.add_argument("--name", default="device")
     t.add_argument("--role", default="device", choices=["device", "agent", "admin"])
     sub.add_parser("meetings")
+    d = sub.add_parser("delete", help="delete meetings with all their files, e.g. test meetings")
+    d.add_argument("meeting_ids", nargs="+")
     r = sub.add_parser("reprocess")
     r.add_argument("meeting_id")
     r.add_argument("--engine", choices=NAMES)
@@ -61,6 +63,16 @@ def main(argv=None):
                                      now_iso(), a.id)}
     elif a.cmd == "meetings":
         out = Store(s, db).list()
+    elif a.cmd == "delete":
+        store, out = Store(s, db), {}
+        for mid in a.meeting_ids:
+            if not store.meta(mid):
+                out[mid] = "no such meeting"
+            elif db.one("SELECT 1 FROM jobs WHERE meeting_id = ? AND state = 'running'", mid):
+                out[mid] = "a job is running for it, try again later"
+            else:
+                store.delete(mid)
+                out[mid] = "deleted"
     elif a.cmd == "reprocess":
         kind = "summarize" if a.summary_only else "transcribe"
         db.run("INSERT INTO jobs (meeting_id, kind, engine, created_at) VALUES (?, ?, ?, ?)",

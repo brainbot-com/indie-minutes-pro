@@ -120,7 +120,7 @@ shot 5-after-kill
 
 say "the meetings on the box"
 MID=$(recording_of "Emulator test" | awk '{print $3}')
-for _ in $(seq 120); do
+for _ in $(seq "${WAIT_STEPS:-120}"); do        # 10 s each; the box may be busy with other GPU jobs
 	S=$(box "
 import json; from recorder.config import Settings; from recorder.store import Store; from recorder.db import DB
 s = Settings(); m = Store(s, DB(s.db_path)).meta('$MID'); print(m['state'])")
