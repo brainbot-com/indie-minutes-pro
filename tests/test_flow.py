@@ -494,3 +494,27 @@ def test_a_plain_index_is_encrypted_once(tmp_path):
     assert not (data / "index.sqlite").read_bytes().startswith(b"SQLite format 3")
     assert db.one("SELECT name FROM users WHERE id = 'usr_1'")["name"] == "Ana"
     assert open_index(s).one("SELECT COUNT(*) AS n FROM users")["n"] == 1     # a second open leaves it as it is
+
+
+def test_encrypt_and_back(app, client, tmp_path, monkeypatch):
+    """recorder.cli encrypt seals older plain files; decrypt is the way back."""
+    from recorder import cli
+    mid, h = make_meeting(app, client, tmp_path)
+    s = app.state.settings
+    summary = s.meetings_dir / mid / "summary.md"
+    text = read_text(summary)
+    keys = {k: str(v) for k, v in make_keys_like(s).items()}
+    env = {"DATA_DIR": str(s.data_dir), "DATA_KEY_FILE": keys["data_key_file"], "SEAL_KEY_FILE": keys["seal_key_file"],
+           "SCRATCH_DIR": str(s.scratch_dir)}
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    summary.write_text(text)                                   # as written before encryption at rest
+    cli.main(["encrypt"])
+    assert summary.read_bytes().startswith(vault.MAGIC) and read_text(summary) == text
+    cli.main(["decrypt"])
+    assert summary.read_text() == text and s.db_path.read_bytes().startswith(b"SQLite format 3")
+    assert not (s.data_dir / ".vault").exists()
+
+
+def make_keys_like(s):
+    return {"data_key_file": s.data_key_file, "seal_key_file": s.seal_key_file}

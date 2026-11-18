@@ -211,6 +211,13 @@ class DB:
         for side in ("-wal", "-shm"):
             Path(self.path + side).unlink(missing_ok=True)
 
+    def export_plain(self, dst):
+        """A plain copy of an encrypted index (recorder.cli decrypt, the way back)."""
+        with self.connect() as con:
+            con.execute(f"ATTACH DATABASE '{dst}' AS plain KEY ''")
+            con.execute("SELECT sqlcipher_export('plain')")
+            con.execute("DETACH DATABASE plain")
+
     @contextmanager
     def connect(self):
         con = self.lib.connect(self.path, timeout=30, isolation_level=None)

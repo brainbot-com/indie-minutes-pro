@@ -247,6 +247,19 @@ class Vault:
         os.replace(tmp, path)
         return True
 
+    def unseal_in_place(self, path):
+        """The way back (recorder.cli decrypt): a plain file again, written whole."""
+        path = Path(path)
+        if not self.is_sealed(path):
+            return False
+        tmp = path.with_name(path.name + ".unsealing")
+        with open(tmp, "wb") as out:
+            for block in self.stream(path):
+                out.write(block)
+        os.chmod(tmp, os.stat(path).st_mode & 0o777)
+        os.replace(tmp, path)
+        return True
+
     # -- inside ------------------------------------------------------------------
 
     def _header(self, path):

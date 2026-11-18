@@ -12,6 +12,7 @@ benchmark uses it). Everything prints JSON except `token add`, which prints
 only the new token so it can be piped into a file."""
 import argparse
 import json
+import pathlib
 import sys
 import time
 from pathlib import Path
@@ -46,6 +47,7 @@ def main(argv=None):
     u.add_argument("--token", action="append", default=[],
                    help="claim: give this token, and the meetings its phone recorded, to the person")
     sub.add_parser("encrypt", help="encrypt the files of meetings from before encryption at rest (checked, in place)")
+    sub.add_parser("decrypt", help="the way back: plain files and a plain index (then set ENCRYPT_AT_REST=0)")
     c = sub.add_parser("connect", help="a connect code for a person's next phone (once, within 15 minutes)")
     c.add_argument("--user", help="the person (user id); without one, a phone of nobody in particular")
     sub.add_parser("meetings")
@@ -114,6 +116,28 @@ def main(argv=None):
                     out["encrypted" if v.seal_in_place(f) else "already"] += 1
                 except Exception as e:
                     out["failed"].append(f"{f}: {e}")
+    elif a.cmd == "decrypt":
+        from . import vault
+        v = vault.VAULT
+        if not v.on:
+            raise SystemExit("encryption at rest is off already")
+        out = {"decrypted": 0, "failed": []}
+        for root in v.roots:
+            for f in sorted(root.rglob("*")) if root.exists() else []:
+                if f.is_file() and not f.name.endswith((".sealing", ".unsealing")):
+                    try:
+                        out["decrypted"] += v.unseal_in_place(f)
+                    except Exception as e:
+                        out["failed"].append(f"{f}: {e}")
+        if not out["failed"]:
+            plain = s.db_path.with_name("index.plain.sqlite")
+            plain.unlink(missing_ok=True)
+            db.export_plain(plain)
+            plain.replace(s.db_path)
+            for side in ("-wal", "-shm"):
+                pathlib.Path(str(s.db_path) + side).unlink(missing_ok=True)
+            (s.data_dir / ".vault").unlink(missing_ok=True)
+            out["index"] = "plain"
     elif a.cmd == "connect":
         from .connect import Codes, shown
         if a.user and not db.one("SELECT 1 FROM users WHERE id = ?", a.user):
