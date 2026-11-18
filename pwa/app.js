@@ -10,10 +10,10 @@ const LANG = (navigator.language || 'en').toLowerCase().startsWith('de') ? 'de' 
 const STR = {
   en: {
     brand: 'Indie recorder', back: 'Back', notConnected: 'Not connected', setUp: 'Set up', connectTitle: 'Connect to your recorder',
-    pair1: 'In brainbot:agent command, open Meetings, then Settings, then Connect a phone.',
+    pair1: 'In brainbot:agent command, open indie-recorder, then Connect a phone.',
     pair2: "Scan the code with this phone's camera and choose Record in the browser.",
     pair3: 'No camera at hand? Type the code here.',
-    pairLabel: 'Code', connect: 'Connect', pairUsed: 'This code is used or expired. Make a new one in Meetings.',
+    pairLabel: 'Code', connect: 'Connect', pairUsed: 'This code is used or expired. Make a new one in indie-recorder.',
     pairSlow: 'Too many wrong codes. Wait a few minutes.',
     pairNote: 'This page talks only to the box, over the VPN. Recordings go to this box and nowhere else.',
     pairBad: 'The box did not accept this token.', pairNoBox: 'Cannot reach the box. Is the VPN on?',
@@ -36,10 +36,10 @@ const STR = {
   },
   de: {
     brand: 'Indie recorder', back: 'Zurück', notConnected: 'Nicht verbunden', setUp: 'Einrichten', connectTitle: 'Mit Ihrem Recorder verbinden',
-    pair1: 'Öffnen Sie in brainbot:agent command Meetings, dann Einstellungen, dann Telefon verbinden.',
+    pair1: 'Öffnen Sie in brainbot:agent command indie-recorder, dann Telefon verbinden.',
     pair2: 'Scannen Sie den Code mit der Kamera dieses Telefons und wählen Sie Im Browser aufnehmen.',
     pair3: 'Keine Kamera zur Hand? Geben Sie den Code hier ein.',
-    pairLabel: 'Code', connect: 'Verbinden', pairUsed: 'Dieser Code ist benutzt oder abgelaufen. Erstellen Sie in Meetings einen neuen.',
+    pairLabel: 'Code', connect: 'Verbinden', pairUsed: 'Dieser Code ist benutzt oder abgelaufen. Erstellen Sie in indie-recorder einen neuen.',
     pairSlow: 'Zu viele falsche Codes. Bitte einige Minuten warten.',
     pairNote: 'Diese Seite spricht nur mit der Box, über das VPN. Aufnahmen gehen an diese Box und nirgendwo sonst hin.',
     pairBad: 'Die Box hat dieses Token nicht angenommen.', pairNoBox: 'Die Box ist nicht erreichbar. Ist das VPN an?',
@@ -616,7 +616,7 @@ async function boot() {
   document.documentElement.lang = LANG;
   document.querySelectorAll('[data-t]').forEach(el => { el.textContent = t(el.dataset.t); });
   document.querySelectorAll('[data-tp]').forEach(el => { el.placeholder = t(el.dataset.tp); });
-  // "/" is the box's own pages here, or brainbot:agent command (with the Meetings app) behind brain-tls
+  // "/" is the box's own pages here, or brainbot:agent command (with the indie-recorder app) behind brain-tls
   $('webView').textContent = onBox ? t('webView') : t('webViewCommand');
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   $('pairForm').onsubmit = async e => {

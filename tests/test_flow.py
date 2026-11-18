@@ -64,8 +64,8 @@ def tone(path, seconds):
     return path.read_bytes()
 
 
-def make_meeting(app, client, tmp_path, seconds=20):
-    h = {"Authorization": f"Bearer {create_token(app.state.db, 'phone', 'device')}"}
+def make_meeting(app, client, tmp_path, seconds=20, headers=None):
+    h = headers or {"Authorization": f"Bearer {create_token(app.state.db, 'phone', 'device')}"}
     data = tone(tmp_path / "m.wav", seconds)
     rid = client.post("/api/v1/recordings", json={"client_id": "client-meeting", "mime": "audio/wav",
                                                  "title": "Test meeting"}, headers=h).json()["recording_id"]
@@ -518,3 +518,27 @@ def test_encrypt_and_back(app, client, tmp_path, monkeypatch):
 
 def make_keys_like(s):
     return {"data_key_file": s.data_key_file, "seal_key_file": s.seal_key_file}
+
+
+def test_a_meeting_agent_gets_the_skill_and_the_files(app, client, tmp_path):
+    """What a person's agent in brainbot:agent command does through the connector."""
+    db = app.state.db
+    service = create_token(db, "brainbot:agent command", "agent", trusts_identity=True)
+
+    def call(op, args=None, user="ext-ana-agent", caller="agent"):
+        h = {"Authorization": f"Bearer {service}", "X-Indie-User": user, "X-Indie-Caller": caller}
+        return client.post("/api/v1/indiechat", json={"op": op, "args": args or {}}, headers=h)
+
+    setup = call("agent_setup").json()["result"]
+    assert "## Set up" in setup["skill"] and "routine_create" in setup["skill"]
+    assert setup["each_run"].startswith("1.") and setup["routine"]["quiet"] == "[Nothing new]"
+    # a meeting of Ana's, recorded with her phone
+    offer = call("pair_phone", caller="user").json()["result"]
+    phone = {"Authorization": "Bearer " + redeem(client, offer["url"]).json()["token"]}
+    mid, _ = make_meeting(app, client, tmp_path, headers=phone)
+    files = call("meeting_files", {"meeting_id": mid}).json()["result"]["files"]
+    link = next(f for f in files if f["name"] == "Transcript.md")
+    got = client.get(link["url"].replace("https://box.test", ""))
+    assert got.status_code == 200 and got.content.decode() == read_text(app.state.store.folder(mid) / "transcript.md")
+    assert link["bytes"] == len(got.content)                              # the plain size, not the encrypted one
+    assert call("meeting_files", {"meeting_id": mid}, user="ext-ben-agent").status_code == 400

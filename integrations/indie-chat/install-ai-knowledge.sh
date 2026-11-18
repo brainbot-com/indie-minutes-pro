@@ -193,9 +193,9 @@ if python3 - $CFG/app-templates.json <<'PY'
 import json, sys
 p = sys.argv[1]
 t = json.load(open(p))
-want = {"file": "indie-recorder.html", "key": "indie-recorder", "name": "Meetings", "icon": "🔴",
-        "description": "Your meetings from the indie recorder on aibox1: summaries, action items, speakers, Drive or local, your phones. Each person sees only their own.",
-        "refresh": True, "seed": {"id": "indie-recorder", "state": {}}}
+want = {"file": "indie-recorder.html", "key": "indie-recorder", "name": "indie-recorder", "icon": "🔴",
+        "description": "Your meetings from the indie recorder on aibox1: summaries, action items, speakers, Drive or local, your phones and your meeting agent. Each person sees only their own.",
+        "refresh": True, "seed": {"id": "indie-recorder", "state": {}, "adopt": ["Meetings"]}}
 have = next((e for e in t if e.get("key") == "indie-recorder"), None)
 if have == want:
     sys.exit(1)

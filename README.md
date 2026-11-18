@@ -7,7 +7,7 @@ own LLM. Per meeting the person chooses where it lives: only on the box, or
 also in Google Drive (summary, action items, transcript, optionally the
 audio). A meeting agent in brainbot:agent command does the
 Drive part and writes a better summary from its own context and memory; the
-Meetings app in brainbot:agent command shows and steers it all. Everyone has
+indie-recorder app in brainbot:agent command shows and steers it all. Everyone has
 their own account there: a person's phones record into it, and each person
 sees only their own meetings.
 
@@ -26,7 +26,7 @@ phone (Android app or PWA, VPN)                 aibox1 (10.1.9.7)
        follow-up agent: meeting set to Drive -> outbox -> meeting agent (brainbot:agent command) -> Google Drive
                         GitHub (optional): /review -> approved -> outbox -> agent -> issue or comment
        meeting agent (MCP) -> better summary v2, v3 ... (its context and memory)
-       Meetings app in brainbot:agent command (connector, per person) -> meetings, summaries, speakers, phones
+       indie-recorder app in brainbot:agent command (connector, per person) -> meetings, summaries, speakers, phones
 ```
 
 ## What stays on the box
@@ -37,7 +37,7 @@ phone (Android app or PWA, VPN)                 aibox1 (10.1.9.7)
   stay on aibox1. Drive: the meeting agent copies `Summary.md`,
   `Action items.md` and `Transcript.md` (and the recording when
   `drive_include_audio` is on) into a Drive folder per meeting. The person
-  decides per meeting (web view, Meetings app, phone app); the default for new
+  decides per meeting (web view, indie-recorder app, phone app); the default for new
   recordings starts as `STORAGE_DEFAULT` and is a setting after that.
 - Everything listens on the box only: Caddy binds 10.1.9.7 and admits only
   `ALLOW_CIDRS` (the VPN client pools, ai-knowledge for
@@ -46,7 +46,7 @@ phone (Android app or PWA, VPN)                 aibox1 (10.1.9.7)
   no VPN interface of its own; VPN clients reach its LAN address unNATed,
   which is why the allowlist works.
 - brainbot:agent command reaches the recorder through a route on ai-knowledge that
-  passes only what the Meetings app, meeting agents and phones need (tokens,
+  passes only what the indie-recorder app, meeting agents and phones need (tokens,
   connect codes, signed file links); see
   [integrations/indie-chat](integrations/indie-chat/README.md).
 - Encrypted wherever it waits: on the phone, on the way and on the box (see
@@ -85,7 +85,7 @@ phone (Android app or PWA, VPN)                 aibox1 (10.1.9.7)
 - Limits: root on the running box holds the key. The web app served through
   ai-knowledge is only as trustworthy as ai-knowledge, which delivers its
   code; the Android app talks to aibox1 directly and pins it. Drive copies are
-  plain in Drive (the person chose Drive). The Meetings app and the meeting
+  plain in Drive (the person chose Drive). The indie-recorder app and the meeting
   agent read summaries and transcripts in brainbot:agent command, which keeps
   its own data encrypted. Phones that do not seal yet (Android up to 0.3.0)
   are still accepted, over TLS.
@@ -152,7 +152,7 @@ to exercise the resume path.
 
 ## Connecting a phone
 
-One code for every phone and both apps. In brainbot:agent command, Meetings,
+One code for every phone and both apps. In brainbot:agent command, indie-recorder,
 Connect a phone (on the empty list, or in Settings) shows a QR code and the
 same code to type, for example `K7Q4-M2XB`:
 
@@ -163,12 +163,12 @@ same code to type, for example `K7Q4-M2XB`:
    "Open the app" (or "Install the app" first, then "Open the app"); the app
    asks once more, "Record into Luis's account", and connects. On any phone:
    "Record in the browser" opens the web app, which connects at once.
-3. The Meetings app shows "Connected: Pixel 8" (the phone names itself) and
+3. The indie-recorder app shows "Connected: Pixel 8" (the phone names itself) and
    lists the phone under Settings, Phones, where "Remove" locks it out.
 
 Without a camera at hand, type the code in the Android app's or the web app's
 first screen. On the phone that shows brainbot:agent command itself, the
-Meetings app offers "Connect this phone" instead of the QR code.
+indie-recorder app offers "Connect this phone" instead of the QR code.
 
 - A code works once, for 15 minutes, and a new one replaces the person's
   older ones. It carries no token, address or certificate: the phone gets
@@ -245,10 +245,10 @@ for the targets in `FOLLOWUP_TARGETS` (default `drive`):
   `docker compose exec -T recorder python -m recorder.followup run --json-in - <<< '{"auto": false}'`,
   plus `list`, `approve ID`, `reject ID`, `outbox`, `ack ID --url URL`.
 
-## brainbot:agent command (meeting agent and Meetings app)
+## brainbot:agent command (meeting agent and indie-recorder app)
 
 Setup, step by step: [integrations/indie-chat](integrations/indie-chat/README.md)
-(a script for ai-knowledge, your own MCP server, the Meetings app, the meeting
+(a script for ai-knowledge, your own MCP server, the indie-recorder app, the meeting
 agent with its instructions and hourly routine). In short:
 
 - The recorder's MCP endpoint (`/mcp`, streamable HTTP, plain JSON, no
@@ -258,7 +258,7 @@ agent with its instructions and hourly routine). In short:
   `set_storage`, `rename_speakers`, `new_summary`, `drive_files` (signed
   download links for a `drive_store` item), `list_outbox`, `ack_outbox_item`,
   `sync_issues`.
-- The Meetings app is one shared app for everyone. It uses the deployment's
+- The indie-recorder app is one shared app for everyone. It uses the deployment's
   "indie-recorder" connector (`/api/v1/indiechat`): brainbot:agent command
   sends the recorder's service token and names the signed-in person, so the
   recorder scopes everything to that person (their meetings, settings,
@@ -338,7 +338,7 @@ through the phone simulator into the running recorder, end to end.
 - Tokens: `docker compose exec recorder python -m recorder.cli token add|list|revoke`
   (phones connect with codes, see above; tokens are for agents).
 - People: `recorder.cli user add|list|claim|remove`. A person appears on their
-  first visit to the Meetings app; `claim` gives a token, and the meetings its
+  first visit to the indie-recorder app; `claim` gives a token, and the meetings its
   phone recorded, to a person; `remove` revokes their phones and deletes them
   (refused while meetings still belong to them).
 - Delete meetings (folder, index, follow-ups): `docker compose exec recorder
@@ -373,7 +373,7 @@ through the phone simulator into the running recorder, end to end.
   GPU jobs at once; other services on the box (Ollama's other clients,
   ComfyUI) are outside that lock. Prefer IQ4_NL (22 GB) over Q8_0 (36 GB).
 - brainbot:agent command passes only a person's id to the recorder, no name or
-  email. Each person picks the name their phones show (Meetings, Settings,
+  email. Each person picks the name their phones show (indie-recorder, Settings,
   Your name); until then the phone shows only its own name.
 - New people start with the box's defaults for storage (on aibox1: Google
   Drive, folder "indie-recorder test"). Drive uploads need a meeting agent of
@@ -409,7 +409,7 @@ Settings; it connects with a connect code (see "Connecting a phone"), scanned
 <person>'s account" before it connects, and names itself ("Pixel 8"). Typed
 codes are looked up at `CONNECT_BASE` (set when it is built, default the
 brain-tls address); old token links still work. Disconnect on the phone
-forgets the token; remove the phone in Meetings to lock it out.
+forgets the token; remove the phone in indie-recorder to lock it out.
 
 - Records in a foreground service of type microphone (a notification with a
   timer, Pause or Resume, and Stop; a partial wake lock): 16 kHz mono from the speech
@@ -464,7 +464,7 @@ Build and test, on aibox1 from `~/indie-recorder`:
 
 Not in the app yet: a VPN of its own (it shows "Box not reachable (VPN?)" and
 waits), choosing the microphone (an external one is used when Android routes
-to it), editing speaker names (the web view and the Meetings app have it).
+to it), editing speaker names (the web view and the indie-recorder app have it).
 
 ## Design
 
@@ -474,7 +474,7 @@ Every face of the recorder shares one look, direction 5 of the design canvas
 sections and 1px rules between numbered rows, square switches and buttons.
 
 - `recorder/static/swiss.css`: the tokens and components; the PWA and the web
-  view load it from the box. The Meetings app gets it inlined, with the font,
+  view load it from the box. The indie-recorder app gets it inlined, with the font,
   by `integrations/indie-chat/inline_assets.py`. The Android app has the same
   tokens in its Compose theme and the same Inter cuts in `res/font`.
 - Inter 4.1, subset to Latin (`recorder/static/Inter.woff2`, 53 KB), SIL Open

@@ -1,10 +1,10 @@
-# Meetings in brainbot:agent command
+# indie-recorder in brainbot:agent command
 
 The recorder on aibox1 in brainbot:agent command (indie-chat on ai-knowledge): the
-Meetings app to read and steer your meetings, and a meeting agent that writes
+indie-recorder app to read and steer your meetings, and a meeting agent that writes
 better summaries with what it knows and stores meetings in Google Drive.
 
-- `indie-recorder.html`: the Meetings app, one shared app for everyone. Each
+- `indie-recorder.html`: the app (named indie-recorder in the sidebar), one shared app for everyone. Each
   person sees only their own meetings: list by day, a meeting's summary,
   decisions, action items and transcript, speaker names, "Google Drive" per
   meeting. Settings: the person's name (their phones show it), the storage
@@ -41,7 +41,7 @@ better summaries with what it knows and stores meetings in Google Drive.
   person, not an agent, can connect or remove phones or set their name.
 - Each meeting is either local or in Drive (your choice per meeting; the
   default for new recordings is a setting). A local meeting stays on aibox1:
-  the Meetings app shows it through brainbot:agent command's server to your browser,
+  the indie-recorder app shows it through brainbot:agent command's server to your browser,
   nothing is stored on the way. A Drive meeting is uploaded by your meeting
   agent: `Summary.md`, `Action items.md`, `Transcript.md` (and the recording,
   if you switch that on) into a folder per meeting, plus an entry in the
@@ -100,97 +100,55 @@ delete `/opt/kb/indiechat-config/app-templates/indie-recorder.html` and run
 
 ## For each person
 
-The Meetings app is in everyone's sidebar. To record:
+The indie-recorder app is in everyone's sidebar. To record:
 
-1. **Your name.** Meetings, Settings, Your name: your phones show it, so you
+1. **Your name.** indie-recorder, Settings, Your name: your phones show it, so you
    can see whose account they record into.
-2. **A phone.** Meetings, Connect a phone: scan the code with the phone's
+2. **A phone.** indie-recorder, Connect a phone: scan the code with the phone's
    camera (VPN on) and follow the page it opens ("Open the app", "Install the
    app" or "Record in the browser"), or type the code in the app. Remove a
    phone under Settings, Phones to lock it out.
 
-For Drive and the better summaries, a person also needs a meeting agent:
+For Drive and the better summaries, each person sets up their own meeting
+agent from the app (Settings, Meeting agent, or "Set it up" on the main
+screen when meetings wait for Drive):
 
-1. **A recorder token.** On aibox1, `cd ~/indie-recorder && docker compose
-   exec -T recorder python -m recorder.cli token add --name "agent command
-   <name>" --role agent --user <their user id> < /dev/null` prints one
-   (`recorder.cli user list` shows the ids; a person appears there after
-   their first visit to the Meetings app). Luis's is in
-   `~/indie-recorder/secrets/command_center_token`.
-2. **Your own MCP server.** brainbot:agent command's form for MCP servers has no field
-   for a header yet, so add it once from the browser console: open
-   https://ai-knowledge.mz.brainbot.com, press F12, Console, and run
+1. In indie-recorder, on the right: New agent for this app (or link one of
+   theirs).
+2. In that agent's settings: engine **aibox1 Ollama (64k)**, model
+   **qwen3.8:27b-ctx65536** (that exact tag: the box keeps it loaded for other
+   work). Each run reads whole transcripts, and they stay on aibox1.
+3. "Set up my meeting agent". The button asks the agent to read the skill
+   and do its set-up part: it asks for Google Drive (with changes) and
+   creates the hourly routine "Meeting follow-up"; the person confirms both.
 
-   ```js
-   await IndieLib.McpServersAPI.create({
-     name: "indie-recorder", scope: "user",
-     url: "https://ai-knowledge.mz.brainbot.com/indie-recorder/mcp",
-     headers: { Authorization: "Bearer PASTE-THE-TOKEN-HERE" },
-   })
-   ```
+The skill is [recorder/skills/meeting-follow-up/SKILL.md](../../recorder/skills/meeting-follow-up/SKILL.md),
+served by the recorder as the connector's `agent_setup`, so it ships with the
+recorder. The agent reaches the recorder through the deployment's connector
+as that person (`data_connector`, connector `indie-recorder`): no recorder
+token and no MCP server of its own. It downloads transcripts through signed
+links (`meeting_files`), since a connector answer is cut at 12,000
+characters. An admin can also add the SKILL.md as a skill for everyone
+(Settings, Skills), so any agent knows it.
 
-   Reload the page. Settings, Integrations lists `indie-recorder` as yours:
-   only your own agents get it.
-3. **The meeting agent** (needed for Drive and for the better summaries):
-   - New agent, name it "Meeting follow-up". Engine **aibox1 Ollama (64k)**,
-     model **qwen3.8:27b-ctx65536** (that exact tag: the box keeps it loaded
-     for other work, another tag loads a second copy).
-   - Connections: Google Drive, with changes ("write"), for the account the
-     meetings should go to.
-   - Instructions: the text below.
-   - Schedule: hourly (for example minute 17), "Start each run fresh" on,
-     notifications as you like. Prompt: `Run the meeting follow-up.`
-   - The pre-check (skip the hour without a model call when there is nothing
-     to do) has no field in the editor yet. In the console:
+Limits in brainbot:agent command today: an agent cannot pick its own engine
+(step 2 is the person's) and cannot give its routine a precheck, so each
+hourly run asks the model once even when there is nothing to do; it answers
+"[Nothing new]" and sends no notification.
 
-     ```js
-     const r = (await IndieLib.RoutinesAPI.list()).routines.find(x => x.title === "Meeting follow-up");
-     await IndieLib.RoutinesAPI.update(r.id, { precheck: { tool: "pending_work", args: {} }, quiet: "[Nothing new]" });
-     ```
-
-     (Use the routine's title as you named it.)
-
-### Agent instructions
-
-> You look after the meetings recorded with the indie recorder on aibox1. You
-> reach them with the indie-recorder tools and Google Drive with the drive
-> tools.
->
-> Start every run with pending_work. If it returns nothing, answer
-> "[Nothing new]" and stop.
->
-> 1. Better summaries. For each meeting under "summaries", read it with
->    get_meeting. Write a better summary in the meeting's language with what
->    you know about the people, projects and earlier meetings (your memory,
->    the wiki, list_meetings and get_meeting for earlier ones): a short TL;DR,
->    decisions, action items (owner and due date only where they were said),
->    open questions. Speakers are "Speaker 1", "Speaker 2" unless someone set
->    names: keep those labels; if you are fairly sure who a speaker is, say so
->    in the note, do not rename. Never invent decisions, owners or dates.
->    Store it with update_summary: markdown without a title line,
->    action_items as a list of {text, owner, due}, and a note on what you
->    changed and which context you used.
-> 2. Drive. For each item under "outbox", carry it out:
->    - drive_store: call drive_files with its proposal_id. Find or create the
->      folder named "folder" in My Drive and in it the subfolder named
->      "subfolder". For each file, download it with
->      `curl -fsS -o "/workspace/meetings/<subfolder>/<name>" "<url>"`
->      (make the directory first), then put it into the subfolder with
->      drive_upload. If the subfolder already holds a file of that name, move
->      the old one into a subfolder "Older versions" first (create it if
->      missing). Then ack_outbox_item with the subfolder's link.
->    - drive_log: find the Google Doc named payload.doc in the folder
->      payload.folder (create it with drive_create if missing), add
->      payload.markdown at the end and keep what is there, then
->      ack_outbox_item with the doc's link.
->    If one fails, leave it for the next run and say why.
->
-> Never copy transcript text into this chat or anywhere but the files you
-> were given. End with one short line per meeting and per item you handled.
+Without the connector (another deployment), a person's agent can use the
+recorder as an MCP server instead: a token from `recorder.cli token add
+--role agent --user <id>`, added from the browser console with
+`IndieLib.McpServersAPI.create({name: "indie-recorder", scope: "user", url:
+"https://ai-knowledge.mz.brainbot.com/indie-recorder/mcp", headers:
+{Authorization: "Bearer <token>"}})`; the routine's precheck can then be
+`pending_work` (`IndieLib.RoutinesAPI.update(id, {precheck: {tool:
+"pending_work", args: {}}, quiet: "[Nothing new]"})`). The MCP tools are the
+connector's ops.
 
 ### Check
 
 Record a short meeting with the phone (or `sim/phone_sim.py`), with "Save to
 Google Drive" on. When the recorder is done, "Run now" on the routine: the
-meeting's folder appears in Drive, the meeting log gets an entry, and the
-Meetings app shows summary version 2 and "Open folder".
+meeting's folder appears in Drive, the meeting log gets an entry, and
+indie-recorder shows summary version 2 and "Open folder".

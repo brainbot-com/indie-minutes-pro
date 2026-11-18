@@ -6,13 +6,16 @@ transcript, store a better summary, choose local or Drive storage, sync the
 repo's issues, and work the outbox of Drive and GitHub follow-ups. Agents that
 read transcripts must use aibox1's own LLM, never another model host."""
 import json
+from pathlib import Path
 
 from fastapi import Request
 from fastapi.responses import JSONResponse, Response
 
-from . import __version__
+from . import __version__, vault
 from .people import resolve
 from .util import read_text
+
+SKILL = Path(__file__).parent / "skills" / "meeting-follow-up" / "SKILL.md"
 
 VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 
@@ -107,6 +110,15 @@ TOOLS = [
                     "payload.issue_number. GitHub bodies contain a hidden marker; post them unchanged so reruns "
                     "can be detected.",
      "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "meeting_files",
+     "description": "Signed download links (valid two hours) for a meeting's Summary.md, Action items.md and "
+                    "Transcript.md. Download a long transcript with curl -o and read the file: it never has to "
+                    "pass through the conversation, which would cut it.",
+     "inputSchema": {"type": "object", "required": ["meeting_id"], "properties": {"meeting_id": {"type": "string"}}}},
+    {"name": "agent_setup",
+     "description": "The meeting-follow-up skill (SKILL.md): how a person's own agent sets itself up to write "
+                    "better summaries and store meetings in Google Drive, and what each run does.",
+     "inputSchema": {"type": "object", "properties": {}}},
     {"name": "ack_outbox_item",
      "description": "Report that you carried out an outbox item, with the URL of the Drive folder, doc, issue "
                     "or comment.",
@@ -186,12 +198,21 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
             from .signing import sign
             mid = p["meeting_id"]
             return {"folder": p["payload"]["folder"], "subfolder": p["payload"]["subfolder"],
-                    "files": [{"name": n, "bytes": path.stat().st_size,
+                    "files": [{"name": n, "bytes": vault.VAULT.size(path),
                                "url": f"{s.files_base_url}/{sign(s, mid, n)}"} for n, path in store.drive_files(mid)]}
+        if name == "agent_setup":
+            text = SKILL.read_text()
+            return {"skill": text, "each_run": text.split("## Each run", 1)[1].strip(),
+                    "routine": {"title": "Meeting follow-up", "schedule": "every hour", "quiet": "[Nothing new]"}}
         mid = args.get("meeting_id", "")
-        if name in ("get_meeting", "update_summary", "set_storage", "rename_speakers", "new_summary") \
+        if name in ("get_meeting", "update_summary", "set_storage", "rename_speakers", "new_summary", "meeting_files") \
                 and not visible(who, mid):
             raise ToolError(f"no meeting {mid!r}")
+        if name == "meeting_files":
+            from .signing import sign
+            return {"meeting_id": mid, "files": [{"name": n, "bytes": vault.VAULT.size(path),
+                                                  "url": f"{s.files_base_url}/{sign(s, mid, n)}"}
+                                                 for n, path in store.drive_files(mid) if not n.startswith("Audio")]}
         if name == "set_storage":
             try:
                 store.set_storage(mid, args.get("storage"))
