@@ -13,17 +13,14 @@
   <a class="brand" href="/"><span class="dot"></span>indie recorder</a>
   {% if tok %}
   <nav>
-    <a href="/">Meetings</a>
-    <a href="/review">Review</a>
-    {% if tok.role == 'admin' %}<a href="/devices">Devices</a>{% endif %}
     <a href="/app/">Record</a>
-    <a href="/logout" class="muted">Log out</a>
+    {% if tok.role == 'admin' %}<a href="/devices" class="muted">Devices</a>{% endif %}
   </nav>
   {% endif %}
 </header>
 <main>
 {% block main %}{% endblock %}
 </main>
-<footer>indie-recorder {{ version }} · audio and transcripts stay on this box</footer>
+<footer>indie recorder {{ version }} · <a href="/review">follow-ups</a> · <a href="/logout">log out</a></footer>
 </body>
 </html>

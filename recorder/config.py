@@ -30,6 +30,13 @@ class Settings:
         # agent (which has GitHub and Drive access) carries them out;
         # direct: this service calls GITHUB_API_URL / DRIVE_API_URL itself (the mocks).
         self.followup_executor = get("FOLLOWUP_EXECUTOR", "agent")
+        # Where follow-ups may go: "drive" for now; "drive,github" adds issue proposals.
+        self.followup_targets = {t.strip() for t in get("FOLLOWUP_TARGETS", "drive").split(",") if t.strip()}
+        # Initial defaults; the app or the web view can change them later (settings table).
+        self.storage_default = get("STORAGE_DEFAULT", "local")
+        # Base of the signed file links handed to the agent; it downloads from
+        # there. Default: this service's own address (VPN clients).
+        self.files_base_url = get("FILES_BASE_URL", self.public_url + "/api/v1/files").rstrip("/")
         self.github_api_url = get("GITHUB_API_URL", "https://api.github.com").rstrip("/")
         self.drive_api_url = get("DRIVE_API_URL", "").rstrip("/")
         self.followup_auto = get("FOLLOWUP_AUTO", "0") == "1"

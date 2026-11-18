@@ -43,6 +43,17 @@ class NewRecording(BaseModel):
     title: str | None = Field(default=None, max_length=200)
     language: str | None = Field(default=None, max_length=8)
     started_at: str | None = Field(default=None, max_length=40)
+    storage: str | None = Field(default=None, pattern="^(local|drive)$")
+
+
+class SettingsIn(BaseModel):
+    storage_default: str | None = Field(default=None, pattern="^(local|drive)$")
+    drive_folder: str | None = Field(default=None, max_length=120)
+    drive_include_audio: bool | None = None
+
+
+class StorageIn(BaseModel):
+    storage: str = Field(pattern="^(local|drive)$")
 
 
 class Finalize(BaseModel):
@@ -93,7 +104,18 @@ def create_app(settings=None):
     templates = Jinja2Templates(directory=HERE / "templates")
     templates.env.globals.update(fmt_ts=fmt_ts, fmt_duration=fmt_duration, version=__version__,
                                  local_time=lambda iso: local_time(iso, s.display_tz))
-    templates.env.filters["md"] = lambda text: md.render(text or "")
+    def page_md(text):
+        # The meeting page shows title, date and Drive link itself: skip the header
+        # lines render_summary_md writes (title, byline, link) and keep the rest.
+        lines, i = (text or "").splitlines(), 0
+        for is_header in (lambda ln: ln.startswith("# "), lambda ln: ln.startswith("_") and ln.endswith("_"),
+                          lambda ln: ln.startswith(("https://", "http://"))):
+            while i < len(lines) and not lines[i].strip():
+                i += 1
+            if i < len(lines) and is_header(lines[i]):
+                i += 1
+        return md.render("\n".join(lines[i:]))
+    templates.env.filters["md"] = page_md
 
     @contextlib.asynccontextmanager
     async def lifespan(app):
@@ -163,10 +185,10 @@ def create_app(settings=None):
     def create_recording(body: NewRecording, tok=Depends(need(*READERS))):
         row = db.one("SELECT * FROM recordings WHERE token_id = ? AND client_id = ?", tok["id"], body.client_id)
         if not row:
-            db.run("INSERT OR IGNORE INTO recordings (id, token_id, client_id, mime, title, language, started_at, created_at)"
-                   " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            db.run("INSERT OR IGNORE INTO recordings (id, token_id, client_id, mime, title, language, started_at,"
+                   " created_at, storage) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                    new_id("rec"), tok["id"], body.client_id, body.mime, body.title, body.language,
-                   body.started_at or now_iso(), now_iso())
+                   body.started_at or now_iso(), now_iso(), body.storage)
             row = db.one("SELECT * FROM recordings WHERE token_id = ? AND client_id = ?", tok["id"], body.client_id)
         (s.uploads_dir / row["id"]).mkdir(parents=True, exist_ok=True)
         return recording_status(row)
@@ -216,7 +238,8 @@ def create_app(settings=None):
             started = parse_iso(row["started_at"])
             mid = new_meeting_id(started)
             store.create(mid, title=body.title or row["title"], started_at=row["started_at"] or now_iso(),
-                         source=f"device:{tok['name']}", recording_id=rid, language=row["language"])
+                         source=f"device:{tok['name']}", recording_id=rid, language=row["language"],
+                         storage=row["storage"])
             dst = store.folder(mid) / f"original.{audio.ext_for_mime(row['mime'])}"
             tmp = dst.with_name(".tmp-" + dst.name)
             with open(tmp, "wb") as out:
@@ -293,6 +316,41 @@ def create_app(settings=None):
             raise HTTPException(400, f"engine must be one of {ENGINE_NAMES}")
         worker.enqueue(mid, kind=body.kind, engine=body.engine)
         return {"queued": True}
+
+    @app.get("/api/v1/settings")
+    def get_settings(tok=Depends(need("device", "agent", "admin"))):
+        return store.settings()
+
+    @app.put("/api/v1/settings")
+    def put_settings(body: SettingsIn, tok=Depends(need("agent", "admin"))):
+        try:
+            return store.update_settings(**body.model_dump())
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
+    @app.put("/api/v1/meetings/{mid}/storage")
+    def put_storage(mid: str, body: StorageIn, tok=Depends(need("device", "agent", "admin"))):
+        meeting_or_404(mid)
+        change_storage(mid, body.storage)
+        return {"meeting_id": mid, "storage": body.storage}
+
+    def change_storage(mid, storage):
+        store.set_storage(mid, storage)
+        if storage == "drive" and store.meta(mid)["state"] == "done":
+            threading.Thread(target=followup.run, kwargs={"meeting_ids": [mid]}, daemon=True).start()
+
+    @app.get("/api/v1/files/{token}")
+    def signed_file(token: str):
+        """A file of a meeting, by a signed link from drive_files (no other auth)."""
+        from .signing import verify
+        found = verify(s, token)
+        if not found:
+            raise HTTPException(403, "link expired or invalid")
+        mid, name = found
+        files = dict(store.drive_files(mid))
+        if name not in files:
+            raise HTTPException(404)
+        return FileResponse(files[name], filename=name)
 
     @app.get("/api/v1/jobs")
     def jobs(tok=Depends(need("device", "agent", "admin"))):
@@ -380,6 +438,14 @@ def create_app(settings=None):
         store.set_names(mid, {k[5:]: v for k, v in form.items() if k.startswith("name:")})
         return RedirectResponse(f"/m/{mid}#speakers", status_code=303)
 
+    @app.post("/m/{mid}/storage")
+    def storage_form(mid: str, storage: str = Form(...), tok=Depends(need(*READERS, html=True))):
+        meeting_or_404(mid)
+        if storage not in ("local", "drive"):
+            raise HTTPException(400)
+        change_storage(mid, storage)
+        return RedirectResponse(f"/m/{mid}", status_code=303)
+
     @app.post("/m/{mid}/reprocess")
     def reprocess_form(mid: str, kind: str = Form("transcribe"), engine: str = Form(""),
                        tok=Depends(need(*READERS, html=True))):
@@ -410,8 +476,8 @@ def create_app(settings=None):
         items = followup.list()
         titles = {m["id"]: m["title"] or m["id"] for m in store.list(limit=1000)}
         return page(request, "review.html", tok, items=items, titles=titles, auto=s.followup_auto,
-                    repo=s.github_repo, executor=s.followup_executor,
-                    targets=("mock GitHub and Drive on this box" if s.followup_executor == "direct"
+                    repo=s.github_repo, executor=s.followup_executor, targets=sorted(s.followup_targets),
+                    carrier=("mock GitHub and Drive on this box" if s.followup_executor == "direct"
                              else "the Agent Command Center agent (outbox)"))
 
     @app.post("/review/run")
@@ -452,8 +518,16 @@ def create_app(settings=None):
     def favicon():
         return FileResponse(PWA_DIR / "icon-192.png")
 
+    from .engines.remote import health as engine_health
     from .mcp_server import mount_mcp
-    mount_mcp(app, s, db, store, followup, token_row)
+
+    def engines_health():
+        out = {}
+        for name, url in (("A", s.nemo_url), ("B", s.qwen_url)):
+            h = engine_health(url)
+            out[name] = {"ok": bool(h.get("ok")), "busy": bool(h.get("current"))} if h else {"ok": False}
+        return out
+    mount_mcp(app, s, db, store, followup, token_row, worker=worker, engines_health=engines_health)
     return app
 
 

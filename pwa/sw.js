@@ -1,6 +1,6 @@
 // App shell cache so the recorder opens without a network. Uploads are not
 // handled here: the page keeps unsent chunks in IndexedDB and retries.
-const CACHE = 'indie-recorder-v1';
+const CACHE = 'indie-recorder-v2';
 const SHELL = ['./', 'index.html', 'app.js', 'app.css', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {

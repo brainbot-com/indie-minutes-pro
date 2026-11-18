@@ -93,9 +93,21 @@ CREATE TABLE IF NOT EXISTS followup_seen (
   summary_version INTEGER NOT NULL,
   seen_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS jobs_state ON jobs (state, id);
 CREATE INDEX IF NOT EXISTS proposals_state ON proposals (state);
 """
+
+
+# Columns added after the first release; ALTER fails harmlessly once they exist.
+MIGRATIONS = [
+    "ALTER TABLE recordings ADD COLUMN storage TEXT",
+    "ALTER TABLE meetings ADD COLUMN storage TEXT NOT NULL DEFAULT 'local'",
+    "ALTER TABLE meetings ADD COLUMN drive_url TEXT",
+]
 
 
 class DB:
@@ -104,6 +116,19 @@ class DB:
         with self.connect() as con:
             con.execute("PRAGMA journal_mode=WAL")
             con.executescript(SCHEMA)
+            for sql in MIGRATIONS:
+                try:
+                    con.execute(sql)
+                except sqlite3.OperationalError:
+                    pass
+
+    def setting(self, key, default=None):
+        row = self.one("SELECT value FROM settings WHERE key = ?", key)
+        return row["value"] if row else default
+
+    def set_setting(self, key, value):
+        self.run("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                 key, str(value))
 
     @contextmanager
     def connect(self):

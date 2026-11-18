@@ -61,6 +61,7 @@ async function start() {
   const rec = {
     client_id: crypto.randomUUID(), mime: mr.mimeType || mime || 'audio/webm',
     title: $('title').value.trim() || null, started_at: new Date().toISOString(),
+    storage: $('drive').checked ? 'drive' : 'local',
     state: 'recording', next_idx: 0, recording_id: null, total_chunks: null,
   };
   await put('recs', rec);
@@ -77,6 +78,7 @@ async function start() {
   $('rec').classList.add('on');
   $('rec').textContent = 'Stop';
   $('title').disabled = true;
+  $('drive').disabled = true;
   kick();
 }
 
@@ -117,6 +119,7 @@ function stop() {
   $('rec').classList.remove('on');
   $('rec').textContent = 'Record';
   $('title').disabled = false;
+  $('drive').disabled = false;
   $('title').value = '';
 }
 
@@ -193,7 +196,7 @@ async function uploadAll() {
 
 async function uploadRec(r) {
   if (!r.recording_id) {
-    const res = await api('/api/v1/recordings', json({ client_id: r.client_id, mime: r.mime, title: r.title, started_at: r.started_at }));
+    const res = await api('/api/v1/recordings', json({ client_id: r.client_id, mime: r.mime, title: r.title, started_at: r.started_at, storage: r.storage }));
     if (!res.ok) throw new Error('create ' + res.status);
     r.recording_id = (await res.json()).recording_id;
     await put('recs', r);
@@ -274,7 +277,7 @@ async function render() {
     const li = document.createElement('li');
     const when = new Date(r.started_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
     const head = document.createElement('div');
-    head.textContent = `${r.title || 'Recording'} · ${when}` + (r.interrupted ? ' · interrupted' : '');
+    head.textContent = `${r.title || 'Recording'} · ${when} · ${r.storage === 'drive' ? 'Drive' : 'local'}` + (r.interrupted ? ' · interrupted' : '');
     const st = document.createElement('div');
     st.className = 'state';
     if (r.state === 'recording') { st.className += ' pending'; st.textContent = `Recording, ${sent}/${chunks.length} chunks on the box`; }
@@ -289,6 +292,12 @@ async function render() {
     li.append(head, st);
     ul.appendChild(li);
   }
+}
+
+function storageHint() {
+  $('storage-hint').textContent = $('drive').checked
+    ? 'On: after processing, the summary, action items and transcript are copied to Google Drive.'
+    : 'Off: the recording, transcript and summary stay on the box.';
 }
 
 function showPair(msg) {
@@ -328,6 +337,11 @@ async function boot() {
     try { await start(); } catch (e) { warn('Could not start recording: ' + e.message); stop(); }
   };
   window.addEventListener('online', kick);
+  $('drive').addEventListener('change', storageHint);
+  // The box's default for new recordings; the switch changes it for this recording only.
+  api('/api/v1/settings').then(r => r.ok ? r.json() : null).then(st => {
+    if (st && !mr) { $('drive').checked = st.storage_default === 'drive'; storageHint(); }
+  }).catch(() => {});
   await recoverInterrupted();
   render();
   kick();

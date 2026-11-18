@@ -30,7 +30,8 @@ def executor():
 def app(tmp_path, monkeypatch, executor):
     s = Settings(data_dir=tmp_path / "data", worker="0", engine="fake", secure_cookies="0",
                  public_url="https://box.test", github_token_file=tmp_path / "no-token", followup_on_done="0",
-                 followup_executor=executor, drive_api_url="")
+                 followup_executor=executor, drive_api_url="", followup_targets="drive,github",
+                 storage_default="drive", files_base_url="https://box.test/api/v1/files")
     monkeypatch.setattr(wk, "summarize", lambda transcript, settings, log=print: dict(SUMMARY))
     return create_app(s)
 
@@ -134,8 +135,8 @@ def test_followup_is_idempotent(app, client, tmp_path, monkeypatch):
         {"item": 1, "action": "new_issue", "issue_number": 0, "title": "Check the open security issue", "body": "Look at it", "rationale": "new"}]}
     monkeypatch.setattr(fu, "chat_json", lambda *a, **k: (decisions, {}))
     f.propose()
-    assert sorted(p["kind"] for p in f.list()) == ["drive_log", "github_comment", "github_issue"]
-    assert all("transcript" not in json.dumps(p["payload"]).lower() for p in f.list())
+    assert sorted(p["kind"] for p in f.list()) == ["drive_log", "drive_store", "github_comment", "github_issue"]
+    assert all("thanks for joining" not in json.dumps(p["payload"]).lower() for p in f.list())  # no transcript text
     assert f.propose()["proposed"] == []
     for p in f.list(state="proposed"):
         f.decide(p["id"], approve=True)
@@ -145,11 +146,13 @@ def test_followup_is_idempotent(app, client, tmp_path, monkeypatch):
         f.execute(p["id"])
     assert len(gh.created) == 1 and len(gh.comments) == 1
     outbox = f.outbox()
-    assert len(outbox) == 1 and outbox[0]["kind"] == "drive_log"
-    assert f.ack(outbox[0]["id"], "https://docs.test/log")["state"] == "executed" and f.outbox() == []
+    assert sorted(p["kind"] for p in outbox) == ["drive_log", "drive_store"]
+    for p in outbox:
+        assert f.ack(p["id"], f"https://docs.test/{p['kind']}")["state"] == "executed"
+    assert f.outbox() == [] and app.state.store.meta(mid)["drive_url"] == "https://docs.test/drive_store"
     app.state.store.add_summary(mid, dict(SUMMARY), author="agent (test)")
     new = f.propose()["proposed"]
-    assert [f.db.one("SELECT kind FROM proposals WHERE id = ?", pid)["kind"] for pid in new] == ["drive_log"]
+    assert sorted(f.db.one("SELECT kind FROM proposals WHERE id = ?", pid)["kind"] for pid in new) == ["drive_log", "drive_store"]
 
 
 def test_merge_windows_links_speakers():
@@ -201,7 +204,7 @@ def test_agent_mode_uses_outbox_and_synced_issues(app, client, tmp_path, monkeyp
     for p in f.list(state="proposed"):
         assert f.decide(p["id"], approve=True)["outbox"]
     box = client.get("/api/v1/outbox", headers=agent).json()
-    assert sorted(p["kind"] for p in box) == ["drive_log", "github_comment", "github_issue"]
+    assert sorted(p["kind"] for p in box) == ["drive_log", "drive_store", "github_comment", "github_issue"]
     for p in box:
         assert client.post(f"/api/v1/outbox/{p['id']}/ack", json={"url": f"https://done.test/{p['kind']}"},
                            headers=agent).json()["state"] == "executed"
@@ -225,20 +228,48 @@ def test_direct_mode_against_the_mock_server(app, client, tmp_path, monkeypatch)
     monkeypatch.setattr(fu, "chat_json", lambda *a, **k: ({"decisions": [
         {"item": 0, "action": "comment", "issue_number": 5, "title": "", "body": "Deck by Friday", "rationale": "same"},
         {"item": 1, "action": "new_issue", "issue_number": 0, "title": "Security check", "body": "x", "rationale": "new"}]}, {}))
-    f.propose()
+    f.run()  # the Drive items are approved by the storage choice and run at once
     for p in f.list(state="proposed"):
         f.decide(p["id"], approve=True)
-    assert sorted(p["state"] for p in f.list()) == ["executed"] * 3
+    assert sorted(p["state"] for p in f.list()) == ["executed"] * 4
     state = json.loads((tmp_path / "mock.json").read_text())
+    folder = next(iter(state["folders"].values()))
+    assert sorted(folder) == ["Action items.md", "Summary.md", "Transcript.md"]
     issues = state["repos"]["brainbot-com/indie-recorder-sandbox"]["issues"]
     assert issues[-1]["title"] == "Security check" and len(state["repos"]["brainbot-com/indie-recorder-sandbox"]["comments"]["5"]) == 1
     assert len(state["docs"]["indie-recorder test/Meeting log"]) == 1
     f.db.run("DELETE FROM mappings")  # a lost database must not cause duplicates
     f.db.run("UPDATE proposals SET state = 'approved'")
     for p in f.list():
-        if p["kind"] != "drive_log":
+        if not p["kind"].startswith("drive_"):
             f.execute(p["id"])
     state = json.loads((tmp_path / "mock.json").read_text())
     assert len(state["repos"]["brainbot-com/indie-recorder-sandbox"]["issues"]) == 9
     assert len(state["repos"]["brainbot-com/indie-recorder-sandbox"]["comments"]["5"]) == 1
     srv.shutdown()
+
+
+def test_local_meetings_stay_local_until_switched(app, client, tmp_path, monkeypatch):
+    agent = {"Authorization": f"Bearer {create_token(app.state.db, 'cc', 'agent')}"}
+    assert client.put("/api/v1/settings", json={"storage_default": "local", "drive_folder": "Meetings"},
+                      headers=agent).json()["storage_default"] == "local"
+    mid, phone = make_meeting(app, client, tmp_path)
+    f = app.state.followup
+    monkeypatch.setattr(fu, "chat_json", lambda *a, **k: ({"decisions": []}, {}))
+    f.run()
+    assert app.state.store.meta(mid)["storage"] == "local" and f.list() == []
+    # the person changes their mind: the meeting goes to Drive
+    app.state.store.set_storage(mid, "drive")
+    f.run()
+    box = f.outbox()
+    assert sorted(p["kind"] for p in box) == ["drive_log", "drive_store"]
+    store_item = next(p for p in box if p["kind"] == "drive_store")
+    assert store_item["payload"]["folder"] == "Meetings"
+    call = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "drive_files", "arguments": {"proposal_id": store_item["id"]}}}
+    files = json.loads(client.post("/mcp", json=call, headers=agent).json()["result"]["content"][0]["text"])
+    assert [x["name"] for x in files["files"]] == ["Summary.md", "Action items.md", "Transcript.md"]
+    path = files["files"][2]["url"].replace("https://box.test", "")
+    r = client.get(path)
+    assert r.status_code == 200 and "Speaker" in r.text
+    assert client.get(path[:-3] + "xyz").status_code == 403  # tampered link

@@ -29,6 +29,8 @@
 
   <section id="recorder" class="card" hidden>
     <input id="title" placeholder="Meeting title (optional)" maxlength="200">
+    <label class="toggle"><input type="checkbox" id="drive"> Save to Google Drive</label>
+    <p class="muted" id="storage-hint">Off: the recording, transcript and summary stay on the box.</p>
     <div class="clock" id="clock">00:00:00</div>
     <div class="meter"><div id="level"></div></div>
     <button id="rec" class="rec" aria-label="Record">Record</button>

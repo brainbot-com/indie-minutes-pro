@@ -2,10 +2,9 @@
 plain JSON responses and no sessions, which MCP clients accept.
 
 The tools mirror the JSON API: list meetings, read one with its full
-transcript, store a better summary, sync the repo's issues, and work the
-outbox of approved GitHub and Drive follow-ups. Use it only
-from agents that run on aibox1 against aibox1's own LLM: the transcripts it
-returns must not leave the box."""
+transcript, store a better summary, choose local or Drive storage, sync the
+repo's issues, and work the outbox of Drive and GitHub follow-ups. Agents that
+read transcripts must use aibox1's own LLM, never another model host."""
 import json
 
 from fastapi import Request
@@ -15,13 +14,16 @@ from . import __version__
 
 VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 
-INSTRUCTIONS = """Meetings recorded on aibox1. Each meeting has a transcript with speaker labels
+INSTRUCTIONS = """Meetings recorded on aibox1. Each meeting is stored either locally (nothing leaves the box) or in
+Google Drive (summary, action items and transcript go to a Drive folder). The person chooses with set_storage;
+update_settings sets the default for new recordings. Each meeting has a transcript with speaker labels
 ("Speaker 1".."Speaker N", or the names people set), a first summary written by the recorder,
 and action items. Use update_summary to store a better summary with the context and memory you
 have; it becomes the current version and the follow-up agent re-reads it. Keep the box's copy
 of the repo's issues fresh with sync_issues so new follow-ups can point at existing issues.
-Follow-ups people approved (GitHub issues and comments, Drive doc entries) wait in
-list_outbox: carry each out with your GitHub and Drive tools, then call ack_outbox_item."""
+Follow-ups wait in list_outbox (Drive uploads of meetings set to Drive, entries for the meeting log,
+GitHub issues and comments people approved): carry each out with your Drive and GitHub tools, then call
+ack_outbox_item."""
 
 TOOLS = [
     {"name": "pending_work",
@@ -53,6 +55,39 @@ TOOLS = [
          "action_items": {"type": "array", "items": {"type": "object", "required": ["text"], "properties": {
              "text": {"type": "string"}, "owner": {"type": "string"}, "due": {"type": "string"}}}},
          "note": {"type": "string", "description": "what you changed and which context you used"}}}},
+    {"name": "status",
+     "description": "The recorder's state: worker, current job, queue, engines, default storage, and how many "
+                    "meetings and pending Drive uploads there are.",
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "get_settings",
+     "description": "Defaults: storage for new recordings (local or drive), the Drive folder, whether audio goes to Drive.",
+     "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "update_settings",
+     "description": "Change the defaults. storage_default: local (nothing leaves the box) or drive. drive_folder: the "
+                    "name of the Drive folder that holds a subfolder per meeting and the meeting log. "
+                    "drive_include_audio: also upload the recording.",
+     "inputSchema": {"type": "object", "properties": {
+         "storage_default": {"type": "string", "enum": ["local", "drive"]},
+         "drive_folder": {"type": "string"},
+         "drive_include_audio": {"type": "boolean"}}}},
+    {"name": "set_storage",
+     "description": "Keep one meeting local, or store it in Google Drive. Switching to drive queues its upload; "
+                    "switching back to local stops further uploads (what is already in Drive stays there).",
+     "inputSchema": {"type": "object", "required": ["meeting_id", "storage"], "properties": {
+         "meeting_id": {"type": "string"}, "storage": {"type": "string", "enum": ["local", "drive"]}}}},
+    {"name": "rename_speakers",
+     "description": "Set names for speaker labels, e.g. {\"Speaker 1\": \"Luis\"}. The names replace the labels in "
+                    "the transcript, the summary and the action items.",
+     "inputSchema": {"type": "object", "required": ["meeting_id", "names"], "properties": {
+         "meeting_id": {"type": "string"}, "names": {"type": "object", "additionalProperties": {"type": "string"}}}}},
+    {"name": "new_summary",
+     "description": "Have the recorder write a new first summary of a meeting with the box's LLM (queued).",
+     "inputSchema": {"type": "object", "required": ["meeting_id"], "properties": {"meeting_id": {"type": "string"}}}},
+    {"name": "drive_files",
+     "description": "For a drive_store item from the outbox: the Drive folder, the meeting's subfolder, and each "
+                    "file with a signed download link (valid two hours). Download each with curl -o into your "
+                    "folder and upload it with your Drive tools: the files never pass through the conversation.",
+     "inputSchema": {"type": "object", "required": ["proposal_id"], "properties": {"proposal_id": {"type": "string"}}}},
     {"name": "sync_issues",
      "description": "Send the repo's issues (open and recently closed) so the box's follow-up agent can match "
                     "action items against them. Replaces the previous copy.",
@@ -62,14 +97,17 @@ TOOLS = [
              "number": {"type": "integer"}, "title": {"type": "string"}, "body": {"type": "string"},
              "state": {"type": "string"}, "html_url": {"type": "string"}}}}}}},
     {"name": "list_outbox",
-     "description": "Approved follow-ups waiting to be carried out. kind github_issue: open an issue in "
-                    "payload.repo with payload.title and payload.body. kind github_comment: comment payload.body on "
-                    "issue payload.issue_number. kind drive_log: append payload.markdown to the Google Doc "
-                    "payload.doc in the Drive folder payload.folder (create it if missing). Bodies already "
-                    "contain a hidden marker; post them unchanged so reruns can be detected.",
+     "description": "Follow-ups waiting to be carried out. kind drive_store: call drive_files with its id and "
+                    "put each file into the Drive folder payload.folder, subfolder payload.subfolder. kind "
+                    "drive_log: append payload.markdown to the Google Doc payload.doc in the Drive folder "
+                    "payload.folder (create it if missing). kind github_issue: open an issue in payload.repo with "
+                    "payload.title and payload.body. kind github_comment: comment payload.body on issue "
+                    "payload.issue_number. GitHub bodies contain a hidden marker; post them unchanged so reruns "
+                    "can be detected.",
      "inputSchema": {"type": "object", "properties": {}}},
     {"name": "ack_outbox_item",
-     "description": "Report that you carried out an outbox item, with the URL of the issue, comment or doc.",
+     "description": "Report that you carried out an outbox item, with the URL of the Drive folder, doc, issue "
+                    "or comment.",
      "inputSchema": {"type": "object", "required": ["proposal_id", "url"], "properties": {
          "proposal_id": {"type": "string"}, "url": {"type": "string"}, "note": {"type": "string"}}}},
 ]
@@ -79,7 +117,7 @@ class ToolError(Exception):
     pass
 
 
-def mount_mcp(app, s, db, store, followup, token_row):
+def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_health=None):
     def agent(request):
         # Header only: a token in the query string would end up in access logs.
         tok = token_row(request)
@@ -103,11 +141,64 @@ def mount_mcp(app, s, db, store, followup, token_row):
             if args.get("state"):
                 rows = [m for m in rows if m["state"] == args["state"]]
             return [{k: m[k] for k in ("id", "title", "started_at", "duration_s", "language", "state", "speakers",
-                                       "summary_version", "summary_author", "updated_at")} | {"url": store.link(m["id"])}
+                                       "summary_version", "summary_author", "updated_at", "storage", "drive_url",
+                                       "tldr")} | {"url": store.link(m["id"])}
                     for m in rows]
+        if name == "status":
+            rows = store.list(limit=10000)
+            states = {}
+            for m in rows:
+                states[m["state"]] = states.get(m["state"], 0) + 1
+            box = followup.outbox()
+            return {"worker": bool(worker and worker.thread and worker.thread.is_alive()),
+                    "current_job": worker.current if worker else None,
+                    "queued_jobs": len(worker.queue()) if worker else None,
+                    "engine": s.engine, "llm": s.llm_model, "engines": engines_health() if engines_health else {},
+                    "meetings": len(rows), "by_state": states,
+                    "in_drive": sum(1 for m in rows if m.get("drive_url")),
+                    "pending_drive": sum(1 for p in box if p["kind"].startswith("drive_")),
+                    "settings": store.settings(), "followup": followup.executor,
+                    "targets": sorted(s.followup_targets)}
+        if name == "get_settings":
+            return store.settings()
+        if name == "update_settings":
+            try:
+                return store.update_settings(**{k: args[k] for k in ("storage_default", "drive_folder",
+                                                                       "drive_include_audio") if k in args})
+            except ValueError as e:
+                raise ToolError(str(e))
+        if name == "drive_files":
+            p = next((x for x in followup.outbox() if x["id"] == args.get("proposal_id")), None)
+            if not p or p["kind"] != "drive_store":
+                raise ToolError("no drive_store item with that proposal_id in the outbox")
+            from .signing import sign
+            mid = p["meeting_id"]
+            return {"folder": p["payload"]["folder"], "subfolder": p["payload"]["subfolder"],
+                    "files": [{"name": n, "bytes": path.stat().st_size,
+                               "url": f"{s.files_base_url}/{sign(s, mid, n)}"} for n, path in store.drive_files(mid)]}
         mid = args.get("meeting_id", "")
-        if name in ("get_meeting", "update_summary") and not store.meta(mid):
+        if name in ("get_meeting", "update_summary", "set_storage", "rename_speakers", "new_summary") \
+                and not store.meta(mid):
             raise ToolError(f"no meeting {mid!r}")
+        if name == "set_storage":
+            try:
+                store.set_storage(mid, args.get("storage"))
+            except ValueError as e:
+                raise ToolError(str(e))
+            if args["storage"] == "drive" and store.meta(mid)["state"] == "done":
+                import threading
+                threading.Thread(target=followup.run, kwargs={"meeting_ids": [mid]}, daemon=True).start()
+            return {"meeting_id": mid, "storage": args["storage"]}
+        if name == "rename_speakers":
+            names = args.get("names") or {}
+            if not isinstance(names, dict):
+                raise ToolError("names must be an object")
+            return {"meeting_id": mid, "names": store.set_names(mid, {str(k): str(v) for k, v in names.items()})}
+        if name == "new_summary":
+            if not worker:
+                raise ToolError("the worker is not running")
+            worker.enqueue(mid, kind="summarize")
+            return {"meeting_id": mid, "queued": True}
         if name == "get_meeting":
             m = store.meta(mid)
             out = {**m, "url": store.link(mid), "speaker_names": store.names(mid),

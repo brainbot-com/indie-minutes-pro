@@ -132,8 +132,8 @@ class GitHub:
 
 
 class Drive:
-    """Appends to a doc in a folder. Only the mock exists here; real Drive
-    updates are the Agent Command Center agent's job (outbox)."""
+    """Appends to a doc and stores files in a folder. Only the mock exists
+    here; real Drive updates are the Agent Command Center agent's job (outbox)."""
 
     def __init__(self, settings):
         self.base = settings.drive_api_url
@@ -143,6 +143,20 @@ class Drive:
 
     def append(self, folder, doc, markdown):
         r = httpx.post(f"{self.base}/append", json={"folder": folder, "doc": doc, "markdown": markdown}, timeout=30)
+        r.raise_for_status()
+        return r.json()["url"]
+
+    def store(self, folder, subfolder, files):
+        """files: [(name, path)]. Text goes as text, anything else base64."""
+        import base64
+        body = []
+        for name, path in files:
+            data = path.read_bytes()
+            try:
+                body.append({"name": name, "text": data.decode()})
+            except UnicodeDecodeError:
+                body.append({"name": name, "base64": base64.b64encode(data).decode()})
+        r = httpx.post(f"{self.base}/store", json={"folder": folder, "subfolder": subfolder, "files": body}, timeout=120)
         r.raise_for_status()
         return r.json()["url"]
 
@@ -200,9 +214,13 @@ class Followup:
             r["result"] = json.loads(r["result"]) if r["result"] else None
         return rows
 
+    def enabled(self, kind):
+        """github_* proposals only while GitHub is a target (FOLLOWUP_TARGETS)."""
+        return kind.split("_")[0] in self.s.followup_targets
+
     def outbox(self):
-        """Approved proposals nobody has carried out yet."""
-        return self.list(state="approved")
+        """Approved proposals nobody has carried out yet, for targets still enabled."""
+        return [p for p in self.list(state="approved") if self.enabled(p["kind"])]
 
     def issues(self):
         """Existing issues to match action items against: from the API (direct)
@@ -213,6 +231,8 @@ class Followup:
         return index.get("issues", []) if index.get("repo") == self.s.github_repo else []
 
     def can_file_issues(self):
+        if "github" not in self.s.followup_targets:
+            return False
         return self.executor == "agent" or self.github.available()
 
     def sync_issues(self, repo, issues):
@@ -252,11 +272,13 @@ class Followup:
         return (self.db.one("SELECT 1 FROM proposals WHERE meeting_id = ? AND item_key = ?", mid, key)
                 or self.db.one("SELECT 1 FROM mappings WHERE meeting_id = ? AND item_key = ?", mid, key))
 
-    def _add(self, mid, key, kind, payload, rationale):
+    def _add(self, mid, key, kind, payload, rationale, approved=False):
         pid = new_id("prop")
-        n = self.db.run("INSERT OR IGNORE INTO proposals (id, meeting_id, item_key, kind, payload, rationale, created_at)"
-                        " VALUES (?, ?, ?, ?, ?, ?, ?)", pid, mid, key, kind,
-                        json.dumps(payload, ensure_ascii=False), rationale, now_iso())
+        n = self.db.run("INSERT OR IGNORE INTO proposals (id, meeting_id, item_key, kind, payload, rationale, created_at,"
+                        " state, decided_at, result) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", pid, mid, key, kind,
+                        json.dumps(payload, ensure_ascii=False), rationale, now_iso(),
+                        "approved" if approved else "proposed", now_iso() if approved else None,
+                        json.dumps({"decided_by": "storage choice"}) if approved else None)
         return pid if n else None
 
     def _propose_meeting(self, mid):
@@ -298,17 +320,28 @@ class Followup:
                     continue
                 if pid:
                     created.append(pid)
-        log_key = f"meeting-log-v{summary.get('version', 1)}"
-        if not self._known(mid, log_key):
-            payload = {"doc": self.s.drive_log_doc, "folder": self.s.drive_folder, "meeting_id": mid,
-                       "meeting_url": link, "summary_version": summary.get("version"),
-                       "markdown": self._log_entry(meta, summary, actions, link)}
-            why = "Every meeting gets an entry in the running meeting log."
-            if not self.can_file_issues():
-                why += " No GitHub access configured, so no issue proposals."
-            pid = self._add(mid, log_key, "drive_log", payload, why)
-            if pid:
-                created.append(pid)
+        if meta.get("storage") == "drive" and "drive" in self.s.followup_targets:
+            # The person chose Drive for this meeting: that is the approval.
+            version = summary.get("version", 1)
+            settings = self.store.settings()
+            store_key = f"drive-store-v{version}"
+            if not self._known(mid, store_key):
+                files = [name for name, _ in self.store.drive_files(mid)]
+                payload = {"folder": settings["drive_folder"], "subfolder": self.store.drive_folder_name(mid),
+                           "files": files, "meeting_id": mid, "meeting_url": link, "summary_version": version}
+                pid = self._add(mid, store_key, "drive_store", payload,
+                                "This meeting is set to Google Drive: its files go there.", approved=True)
+                if pid:
+                    created.append(pid)
+            log_key = f"meeting-log-v{version}"
+            if not self._known(mid, log_key):
+                payload = {"doc": self.s.drive_log_doc, "folder": settings["drive_folder"], "meeting_id": mid,
+                           "meeting_url": link, "summary_version": version,
+                           "markdown": self._log_entry(meta, summary, actions, link)}
+                pid = self._add(mid, log_key, "drive_log", payload,
+                                "Every meeting stored in Drive gets an entry in the running meeting log.", approved=True)
+                if pid:
+                    created.append(pid)
         return created
 
     def _log_entry(self, meta, summary, actions, link):
@@ -334,6 +367,8 @@ class Followup:
             return {"id": pid, "error": "no such proposal"}
         if p["state"] != "proposed":
             return {"id": pid, "state": p["state"], "note": "already decided"}
+        if approve and not self.enabled(p["kind"]):
+            return {"id": pid, "state": p["state"], "error": f"{p['kind']} is switched off (FOLLOWUP_TARGETS)"}
         state = "approved" if approve else "rejected"
         self.db.run("UPDATE proposals SET state = ?, decided_at = ?, result = ? WHERE id = ? AND state = 'proposed'",
                     state, now_iso(), json.dumps({"decided_by": who}), pid)
@@ -356,13 +391,15 @@ class Followup:
         if done:
             return self._executed(pid, done["target_kind"], done["target"], note="already mapped")
         direct = self.executor == "direct" and (
-            self.drive.available() if p["kind"] == "drive_log" else self.github.available())
+            self.drive.available() if p["kind"].startswith("drive_") else self.github.available())
         if not direct:
             write_json(self.s.outbox_dir / f"{pid}.json", {**p, "state": "approved"})
             return {"id": pid, "state": "approved", "outbox": True}
         try:
             mark = marker(mid, key)
-            if p["kind"] == "drive_log":
+            if p["kind"] == "drive_store":
+                url = self.drive.store(payload["folder"], payload["subfolder"], self.store.drive_files(mid))
+            elif p["kind"] == "drive_log":
                 url = self.drive.append(payload["folder"], payload["doc"], payload["markdown"])
             elif p["kind"] == "github_comment":
                 url = self.github.find_marker(mark, payload["issue_number"]) or \
@@ -389,6 +426,8 @@ class Followup:
 
     def _executed(self, pid, kind, target, note=None, who=None):
         p = self.db.one("SELECT * FROM proposals WHERE id = ?", pid)
+        if kind == "drive_store":
+            self.db.run("UPDATE meetings SET drive_url = ? WHERE id = ?", target, p["meeting_id"])
         self.db.run("INSERT OR IGNORE INTO mappings (meeting_id, item_key, target_kind, target, proposal_id, created_at)"
                     " VALUES (?, ?, ?, ?, ?, ?)", p["meeting_id"], p["item_key"], kind, target, pid, now_iso())
         prev = json.loads(p["result"]) if p["result"] else {}
@@ -406,6 +445,7 @@ class Followup:
         auto = self.s.followup_auto if auto is None else auto
         report = self.propose(meeting_ids)
         report["mode"] = "auto" if auto else "dry-run"
+        report["targets"] = sorted(self.s.followup_targets)
         if auto:
             for pid in report["proposed"]:
                 self.db.run("UPDATE proposals SET state = 'approved', decided_at = ?, result = ? WHERE id = ?"

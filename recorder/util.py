@@ -26,6 +26,12 @@ def parse_iso(value):
         return None
 
 
+def local_date(iso, tz="Europe/Berlin"):
+    from zoneinfo import ZoneInfo
+    t = parse_iso(iso) or utcnow()
+    return t.astimezone(ZoneInfo(tz)).strftime("%Y-%m-%d %H%M")
+
+
 def new_meeting_id(started=None):
     """Sortable and readable: 20261117-1530-a1b2 (UTC)."""
     t = started or utcnow()

@@ -98,8 +98,8 @@ class Worker:
             return
         if self.followup and self.s.followup_on_done:
             try:
-                res = self.followup.propose(meeting_ids=[mid])
-                log(f"follow-up: {len(res.get('proposed', []))} proposals")
+                res = self.followup.run(meeting_ids=[mid])
+                log(f"follow-up: {len(res.get('proposed', []))} proposals, {len(res.get('executed', []))} carried out or queued")
             except Exception as e:
                 log(f"follow-up failed (the hourly run retries): {e}")
 

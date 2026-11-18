@@ -1,30 +1,17 @@
 {% extends "base.html" %}
 {% block head %}{% if jobs %}<meta http-equiv="refresh" content="10">{% endif %}{% endblock %}
 {% block main %}
-<div class="head-row">
-  <h1>Meetings</h1>
-  <a class="button" href="/app/">Record</a>
-</div>
-{% if jobs %}
-<p class="notice">Working on {{ jobs|length }} job{{ 's' if jobs|length > 1 }}. This page refreshes itself.</p>
-{% endif %}
-{% if not meetings %}
-<section class="card"><p>No meetings yet. Record one with the phone app, or stream a file with <code>sim/phone_sim.py</code>.</p></section>
-{% endif %}
-<ul class="meetings">
+<h1>Meetings</h1>
+{% if not meetings %}<p class="muted">No meetings yet. Record one with the phone app.</p>{% endif %}
+<ul class="list">
 {% for m in meetings %}
-  <li class="card">
-    <a class="title" href="/m/{{ m.id }}">{{ m.title or m.id }}</a>
-    <div class="meta">
-      {{ local_time(m.started_at or m.created_at) }} · {{ fmt_duration(m.duration_s or 0) }}
-      {% if m.speakers %} · {{ m.speakers }} speakers{% endif %}
-      {% if m.language %} · {{ m.language }}{% endif %}
-      · <span class="state state-{{ m.state }}">{{ m.state }}</span>
-      {% if m.summary_version > 1 %} · <span class="badge">summary v{{ m.summary_version }}</span>{% endif %}
-    </div>
-    {% if m.tldr %}<p>{{ m.tldr }}</p>{% endif %}
-    {% if m.error %}<p class="error">{{ m.error }}</p>{% endif %}
-  </li>
+  <li><a href="/m/{{ m.id }}">
+    <span class="main"><span class="title">{{ m.title or m.id }}</span>
+    <span class="sub">{{ local_time(m.started_at or m.created_at) }} · {{ fmt_duration(m.duration_s or 0) }}{% if m.speakers %} · {{ m.speakers }} speakers{% endif %}</span></span>
+    {% if m.state == 'failed' %}<span class="chip err">failed</span>
+    {% elif m.state != 'done' %}<span class="chip busy">processing</span>
+    {% elif m.storage == 'drive' %}<span class="chip">Drive</span>{% endif %}
+  </a></li>
 {% endfor %}
 </ul>
 {% endblock %}

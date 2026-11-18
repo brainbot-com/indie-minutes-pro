@@ -2,93 +2,70 @@
 {% block title %}{{ m.title or m.id }} · indie recorder{% endblock %}
 {% block head %}{% if m.state not in ('done', 'failed') %}<meta http-equiv="refresh" content="5">{% endif %}{% endblock %}
 {% block main %}
+<a class="back" href="/">&larr; Meetings</a>
 <h1>{{ m.title or m.id }}</h1>
-<p class="meta">
-  {{ local_time(m.started_at or m.created_at) }} · {{ fmt_duration(m.duration_s or 0) }}
-  {% if m.speakers %} · {{ m.speakers }} speakers{% endif %}
-  {% if m.language %} · {{ m.language }}{% endif %}
-  · <span class="state state-{{ m.state }}">{{ m.state }}</span>
-  {% if t.engine %} · {{ t.engine.label or t.engine.name }}{% endif %}
-</p>
-{% if m.error %}<p class="error">{{ m.error }}</p>{% endif %}
-{% if m.state not in ('done', 'failed') %}<p class="notice">Processing: {{ m.state }}. This page refreshes itself.</p>{% endif %}
+<p class="meta">{{ local_time(m.started_at or m.created_at) }} · {{ fmt_duration(m.duration_s or 0) }}{% if m.speakers %} · {{ m.speakers }} speakers{% endif %}</p>
+
+{% if m.state == 'failed' %}<p class="error">Processing failed: {{ m.error }}</p>
+{% elif m.state != 'done' %}<p class="notice">Processing ({{ m.state }}). This page refreshes itself.</p>{% endif %}
 {% for note in t.notes or [] %}<p class="notice">{{ note }}</p>{% endfor %}
+
+<form method="post" action="/m/{{ m.id }}/storage" class="store">
+  <input type="hidden" name="storage" value="{{ 'local' if m.storage == 'drive' else 'drive' }}">
+  <button class="switch {{ 'on' if m.storage == 'drive' }}" aria-label="Store in Google Drive"><span></span></button>
+  <span>Store in Google Drive</span>
+  {% if m.drive_url %}<a href="{{ m.drive_url }}">Open folder</a>{% endif %}
+</form>
+<p class="muted small">{% if m.storage != 'drive' %}Stays on this box.{% elif m.drive_url %}Stored in Drive.{% else %}Waiting for the Drive upload.{% endif %}</p>
+
 {% if has_audio %}<audio id="player" controls preload="none" src="/m/{{ m.id }}/audio"></audio>{% endif %}
 
 {% if summary_md %}
-<section class="card summary">
-  {% if versions|length > 1 %}
-  <p class="versions">Summary versions:
-    {% for v in versions %}
-      <a href="/m/{{ m.id }}{% if v.version != versions[-1].version %}?v={{ v.version }}{% endif %}#summary"
-         class="{% if (shown and shown.version == v.version) or (not shown and loop.last) %}current{% endif %}">v{{ v.version }} · {{ v.author }}</a>{% if not loop.last %} ·{% endif %}
-    {% endfor %}
-  </p>
-  {% endif %}
-  <div id="summary">{{ summary_md|md|safe }}</div>
-</section>
+<div class="summary">{{ summary_md|md|safe }}</div>
+{% if versions|length > 1 %}
+<p class="muted small">Versions:
+  {% for v in versions %}<a href="/m/{{ m.id }}{% if not loop.last %}?v={{ v.version }}{% endif %}" class="{% if (shown and shown.version == v.version) or (not shown and loop.last) %}current{% endif %}">v{{ v.version }} {{ v.author }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
+</p>
 {% endif %}
-
-{% if actions %}
-<section class="card">
-  <h2>Action items and follow-ups</h2>
-  <ul class="actions">
-  {% for a in actions %}
-    <li id="a-{{ a.key }}">
-      <span>{{ a.text }}</span>
-      <span class="muted">{% if a.owner %}{{ a.owner }}{% endif %}{% if a.due %} · due {{ a.due }}{% endif %}</span>
-      {% set mp = mappings.get(a.key) %}{% set p = proposals.get(a.key) %}
-      {% if mp %}<a class="badge ok" href="{{ mp.target }}">{{ mp.target_kind|replace('_', ' ') }}</a>
-      {% elif p %}<a class="badge" href="/review#{{ p.id }}">{{ p.kind|replace('_', ' ') }}: {{ p.state }}</a>{% endif %}
-    </li>
-  {% endfor %}
-  </ul>
-</section>
 {% endif %}
 
 {% if names %}
-<section class="card" id="speakers">
-  <h2>Speakers</h2>
-  <p class="muted">Names you set here replace "Speaker N" in the transcript, the summary and the action items. No voice profiles are stored.</p>
+<details>
+  <summary>Speakers</summary>
   <form method="post" action="/m/{{ m.id }}/speakers" class="speakers">
-    {% for label, name in names.items() %}
-    <label>{{ label }} <input name="name:{{ label }}" value="{{ name }}" placeholder="name"></label>
-    {% endfor %}
-    <button>Save names</button>
+    {% for label, name in names.items() %}<label>{{ label }}<input name="name:{{ label }}" value="{{ name }}" placeholder="name"></label>{% endfor %}
+    <button class="secondary">Save names</button>
   </form>
-</section>
+  <p class="muted small">Names replace "Speaker N" everywhere. No voice profiles are stored.</p>
+</details>
 {% endif %}
 
 {% if segs %}
-<section class="card transcript">
-  <h2>Transcript</h2>
-  {% set ns = namespace(prev=None) %}
-  {% for seg in segs %}
-    {% if seg.spk != ns.prev %}<p class="spk spk-{{ seg.spk|replace(' ', '')|lower }}">{{ seg.name }} <a class="ts" href="#" data-t="{{ seg.s }}">{{ fmt_ts(seg.s) }}</a></p>{% set ns.prev = seg.spk %}{% endif %}
-    <p>{{ seg.text }}</p>
-  {% endfor %}
-</section>
+<details>
+  <summary>Transcript</summary>
+  <div class="transcript">
+  {% for seg in segs %}<p><span class="spk">{{ seg.name }}</span> <a class="ts" href="#" data-t="{{ seg.s }}">{{ fmt_ts(seg.s) }}</a><br>{{ seg.text }}</p>{% endfor %}
+  </div>
+</details>
 {% endif %}
 
-<section class="card">
-  <h2>Files and processing</h2>
-  <p>
-    {% for f in ['summary.md', 'actions.json', 'transcript.md', 'transcript.json', 'speakers.json', 'meta.json'] %}
-    <a href="/m/{{ m.id }}/files/{{ f }}">{{ f }}</a>{% if not loop.last %} · {% endif %}
-    {% endfor %}
-  </p>
-  {% if t.timings %}<p class="muted">Timings: {% for k, v in t.timings.items() %}{{ k }} {{ v }}{% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
-  {% if t.resources %}<p class="muted">Resources: {% for k, v in t.resources.items() %}{{ k }} {{ v }}{% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
-  <form method="post" action="/m/{{ m.id }}/reprocess" class="inline">
-    <input type="hidden" name="kind" value="transcribe">
-    <select name="engine">{% for e in engines %}<option {% if t.engine and e == m.engine %}selected{% endif %}>{{ e }}</option>{% endfor %}</select>
-    <button>Transcribe again</button>
-  </form>
-  <form method="post" action="/m/{{ m.id }}/reprocess" class="inline">
-    <input type="hidden" name="kind" value="summarize">
-    <button class="secondary">New recorder summary</button>
-  </form>
-</section>
+<details>
+  <summary>Details</summary>
+  <div class="small">
+    {% if t.engine %}<p class="muted">{{ t.engine.label or t.engine.name }}{% if t.timings and t.timings.engine_wall_s %} · transcribed in {{ t.timings.engine_wall_s|round|int }} s{% endif %}</p>{% endif %}
+    {% if proposals %}<p class="muted">Follow-ups: {% for p in proposals.values() %}{{ p.kind|replace('_', ' ') }} ({{ p.state }}){% if not loop.last %}, {% endif %}{% endfor %} · <a href="/review">review</a></p>{% endif %}
+    <p>{% for f in ['summary.md', 'actions.json', 'transcript.md', 'transcript.json'] %}<a href="/m/{{ m.id }}/files/{{ f }}">{{ f }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</p>
+    <form method="post" action="/m/{{ m.id }}/reprocess" class="inline">
+      <input type="hidden" name="kind" value="transcribe">
+      <select name="engine">{% for e in engines %}<option {% if e == m.engine %}selected{% endif %}>{{ e }}</option>{% endfor %}</select>
+      <button class="secondary">Transcribe again</button>
+    </form>
+    <form method="post" action="/m/{{ m.id }}/reprocess" class="inline">
+      <input type="hidden" name="kind" value="summarize">
+      <button class="secondary">New summary</button>
+    </form>
+  </div>
+</details>
 <script>
 document.querySelectorAll('a.ts').forEach(a => a.addEventListener('click', e => {
   e.preventDefault();

@@ -16,7 +16,9 @@ data/meetings/<id>/
 import shutil
 
 from . import render
-from .util import now_iso, read_json, write_json, write_text
+from .util import local_date, now_iso, read_json, write_json, write_text
+
+STORAGE = ("local", "drive")
 
 
 class Store:
@@ -29,6 +31,62 @@ class Store:
 
     def link(self, mid):
         return f"{self.s.public_url}/m/{mid}"
+
+    # -- settings the app and the web view can change ---------------------------
+
+    def settings(self):
+        db, s = self.db, self.s
+        return {"storage_default": db.setting("storage_default", s.storage_default),
+                "drive_folder": db.setting("drive_folder", s.drive_folder),
+                "drive_include_audio": db.setting("drive_include_audio", "0") == "1"}
+
+    def update_settings(self, storage_default=None, drive_folder=None, drive_include_audio=None):
+        if storage_default is not None:
+            if storage_default not in STORAGE:
+                raise ValueError(f"storage_default must be one of {STORAGE}")
+            self.db.set_setting("storage_default", storage_default)
+        if drive_folder is not None:
+            name = drive_folder.strip()
+            if not name or "/" in name or len(name) > 120:
+                raise ValueError("drive_folder must be a folder name (no slashes, at most 120 characters)")
+            self.db.set_setting("drive_folder", name)
+        if drive_include_audio is not None:
+            self.db.set_setting("drive_include_audio", "1" if drive_include_audio else "0")
+        return self.settings()
+
+    def set_storage(self, mid, storage):
+        """local: nothing about this meeting leaves the box. drive: its summary,
+        action items and transcript (and audio, if set) go to Google Drive."""
+        if storage not in STORAGE:
+            raise ValueError(f"storage must be one of {STORAGE}")
+        self.db.run("UPDATE meetings SET storage = ?, updated_at = ? WHERE id = ?", storage, now_iso(), mid)
+        if storage == "drive":
+            # let the follow-up agent pick the meeting up again
+            self.db.run("DELETE FROM followup_seen WHERE meeting_id = ?", mid)
+        self.write_meta(mid)
+
+    def drive_folder_name(self, mid):
+        m = self.meta(mid)
+        when = local_date(m.get("started_at") or m.get("created_at"), self.s.display_tz)
+        title = (m.get("title") or mid).replace("/", "-").strip()
+        return f"{when} {title}"[:120]
+
+    def drive_files(self, mid):
+        """(name in Drive, local path) of what a Drive copy holds."""
+        f = self.folder(mid)
+        items = self.actions(mid).get("items", [])
+        lines = [f"# Action items: {self.meta(mid).get('title') or mid}", ""]
+        for a in items:
+            extra = ", ".join(x for x in (a["owner"], a["due"] and f"due {a['due']}") if x)
+            lines.append(f"- {a['text']}" + (f" ({extra})" if extra else ""))
+        if not items:
+            lines.append("None recorded.")
+        write_text(f / "actions.md", "\n".join(lines) + "\n")
+        out = [("Summary.md", f / "summary.md"), ("Action items.md", f / "actions.md"),
+               ("Transcript.md", f / "transcript.md")]
+        if self.settings()["drive_include_audio"] and self.original(mid):
+            out.append((f"Audio{self.original(mid).suffix}", self.original(mid)))
+        return [(name, path) for name, path in out if path.exists()]
 
     # -- index ---------------------------------------------------------------
 
@@ -44,12 +102,14 @@ class Store:
         cols = ", ".join(f"{k} = ?" for k in fields)
         self.db.run(f"UPDATE meetings SET {cols} WHERE id = ?", *fields.values(), mid)
 
-    def create(self, mid, *, title=None, started_at=None, source=None, recording_id=None, language=None):
+    def create(self, mid, *, title=None, started_at=None, source=None, recording_id=None, language=None,
+               storage=None):
         self.folder(mid).mkdir(parents=True, exist_ok=False)
+        storage = storage if storage in STORAGE else self.settings()["storage_default"]
         self.db.run(
-            "INSERT INTO meetings (id, title, created_at, started_at, source, recording_id, language, state)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, 'queued')",
-            mid, title, now_iso(), started_at, source, recording_id, language)
+            "INSERT INTO meetings (id, title, created_at, started_at, source, recording_id, language, state, storage)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?)",
+            mid, title, now_iso(), started_at, source, recording_id, language, storage)
         self.write_meta(mid)
         return mid
 

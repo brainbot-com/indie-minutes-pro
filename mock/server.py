@@ -8,6 +8,7 @@ GitHub (REST subset, same JSON shapes the follow-up agent reads):
   POST /github/repos/<owner>/<repo>/issues/<n>/comments {body}
 Drive:
   POST /drive/append  {folder, doc, markdown} -> {url}
+  POST /drive/store   {folder, subfolder, files: [{name, text | base64}]} -> {url}
   GET  /drive/docs
 Pages people can open (through Caddy at /mock/): /mock/, /mock/github/<owner>/<repo>/issues/<n>,
 /mock/drive/<folder>/<doc>."""
@@ -103,6 +104,9 @@ class Handler(BaseHTTPRequestHandler):
         m = re.fullmatch(r"/mock/drive/(.+)", path)
         if m:
             return self.send(200, page_doc(state, m.group(1)), "text/html")
+        m = re.fullmatch(r"/mock/drive-folder/(.+)", path)
+        if m:
+            return self.send(200, page_folder(state, m.group(1)), "text/html")
         if path == "/health":
             return self.send(200, {"ok": True})
         self.send(404, {"message": "Not Found"})
@@ -131,6 +135,13 @@ class Handler(BaseHTTPRequestHandler):
                 r["issues"][int(n) - 1]["comments"] = len(comments)
                 save(state)
                 return self.send(201, c)
+            if path == "/drive/store":
+                key = f"{body.get('folder', 'test')}/{body.get('subfolder', 'meeting')}"
+                files = state.setdefault("folders", {}).setdefault(key, {})
+                for f in body.get("files", []):
+                    files[f["name"]] = {"at": now(), "text": f.get("text"), "bytes": len(f.get("text") or f.get("base64") or "")}
+                save(state)
+                return self.send(200, {"url": f"{PUBLIC}/drive-folder/{quote(key)}", "files": len(files)})
             if path == "/drive/append":
                 key = f"{body.get('folder', 'test')}/{body.get('doc', 'Meeting log')}"
                 state["docs"].setdefault(key, []).append({"at": now(), "markdown": body.get("markdown", "")})
@@ -152,7 +163,10 @@ def page_index(state):
             out.append(f'<li><a href="github/{repo}/issues/{i["number"]}">#{i["number"]} {html.escape(i["title"])}</a>'
                        f' <span class="tag">{i["state"]}</span> {i["comments"]} comments</li>')
         out.append("</ul>")
-    out.append("<h2>Drive docs</h2><ul>")
+    out.append("<h2>Drive folders</h2><ul>")
+    for key, files in state.get("folders", {}).items():
+        out.append(f'<li><a href="drive-folder/{quote(key)}">{html.escape(key)}</a>, {len(files)} files</li>')
+    out.append("</ul><h2>Drive docs</h2><ul>")
     for key, entries in state["docs"].items():
         out.append(f'<li><a href="drive/{quote(key)}">{html.escape(key)}</a>, {len(entries)} entries</li>')
     return "".join(out) + "</ul>"
@@ -175,6 +189,15 @@ def page_doc(state, key):
     out = [STYLE, f'<p><a href="../../">mock index</a></p><h1>{html.escape(key)}</h1>']
     for e in entries:
         out.append(f"<p class=tag>{e['at']}</p><pre>{html.escape(e['markdown'])}</pre>")
+    return "".join(out)
+
+
+def page_folder(state, key):
+    files = state.get("folders", {}).get(key, {})
+    out = [STYLE, f'<p><a href="../../">mock index</a></p><h1>{html.escape(key)}</h1>']
+    for name, f in files.items():
+        body = html.escape(f["text"]) if f.get("text") is not None else f"(binary, {f['bytes']} characters of base64)"
+        out.append(f"<h2>{html.escape(name)}</h2><p class=tag>{f['at']}</p><pre>{body}</pre>")
     return "".join(out)
 
 
