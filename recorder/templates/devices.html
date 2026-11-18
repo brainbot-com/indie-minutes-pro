@@ -30,6 +30,10 @@
   <form method="post" action="/devices" class="inline">
     <input name="name" placeholder="Luis's phone" required>
     <select name="role"><option value="device">phone or device</option><option value="agent">agent</option></select>
+    <select name="user_id" aria-label="Person">
+      <option value="">nobody (shared)</option>
+      {% for u in users %}<option value="{{ u.id }}">{{ u.name or u.email or u.ext_id }}</option>{% endfor %}
+    </select>
     <button>Create token</button>
   </form>
   <p class="muted">Phones need the box's CA certificate once: <a href="http://10.1.9.7:8480/ca.crt">http://10.1.9.7:8480/ca.crt</a> (VPN only). See the README for the Android steps and the fingerprint.</p>
@@ -37,11 +41,11 @@
 <section class="card">
   <h2>Tokens</h2>
   <table>
-    <thead><tr><th>Name</th><th>Role</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+    <thead><tr><th>Name</th><th>Role</th><th>Person</th><th>Created</th><th>Last used</th><th></th></tr></thead>
     <tbody>
     {% for r in rows %}
     <tr class="{% if r.revoked_at %}muted{% endif %}">
-      <td>{{ r.name }}</td><td>{{ r.role }}</td><td>{{ local_time(r.created_at) }}</td>
+      <td>{{ r.name }}</td><td>{{ r.role }}{% if r.trusts_identity %} (service){% endif %}</td><td>{{ r.person }}</td><td>{{ local_time(r.created_at) }}</td>
       <td>{{ local_time(r.last_used_at) if r.last_used_at else '' }}</td>
       <td>{% if r.revoked_at %}revoked{% elif r.id != tok.id %}<form method="post" action="/devices/{{ r.id }}/revoke"><button class="secondary small">Revoke</button></form>{% else %}this session{% endif %}</td>
     </tr>

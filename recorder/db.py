@@ -97,6 +97,20 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  ext_id TEXT UNIQUE,
+  email TEXT,
+  name TEXT,
+  created_at TEXT NOT NULL,
+  last_seen_at TEXT
+);
+CREATE TABLE IF NOT EXISTS user_settings (
+  user_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  PRIMARY KEY (user_id, key)
+);
 CREATE INDEX IF NOT EXISTS jobs_state ON jobs (state, id);
 CREATE INDEX IF NOT EXISTS proposals_state ON proposals (state);
 """
@@ -107,6 +121,10 @@ MIGRATIONS = [
     "ALTER TABLE recordings ADD COLUMN storage TEXT",
     "ALTER TABLE meetings ADD COLUMN storage TEXT NOT NULL DEFAULT 'local'",
     "ALTER TABLE meetings ADD COLUMN drive_url TEXT",
+    # people: a token belongs to a person, a meeting to the person who recorded it
+    "ALTER TABLE tokens ADD COLUMN user_id TEXT",
+    "ALTER TABLE tokens ADD COLUMN trusts_identity INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE meetings ADD COLUMN owner_id TEXT",
 ]
 
 
@@ -129,6 +147,15 @@ class DB:
     def set_setting(self, key, value):
         self.run("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
                  key, str(value))
+
+    def user_setting(self, user_id, key, default=None):
+        """A person's own setting, else the box-wide one, else the default."""
+        row = self.one("SELECT value FROM user_settings WHERE user_id = ? AND key = ?", user_id, key) if user_id else None
+        return row["value"] if row else self.setting(key, default)
+
+    def set_user_setting(self, user_id, key, value):
+        self.run("INSERT INTO user_settings (user_id, key, value) VALUES (?, ?, ?)"
+                 " ON CONFLICT (user_id, key) DO UPDATE SET value = excluded.value", user_id, key, str(value))
 
     @contextmanager
     def connect(self):

@@ -34,25 +34,27 @@ class Store:
 
     # -- settings the app and the web view can change ---------------------------
 
-    def settings(self):
+    def settings(self, user_id=None):
+        """A person's settings (their own where they set one, else the box's)."""
         db, s = self.db, self.s
-        return {"storage_default": db.setting("storage_default", s.storage_default),
-                "drive_folder": db.setting("drive_folder", s.drive_folder),
-                "drive_include_audio": db.setting("drive_include_audio", "0") == "1"}
+        return {"storage_default": db.user_setting(user_id, "storage_default", s.storage_default),
+                "drive_folder": db.user_setting(user_id, "drive_folder", s.drive_folder),
+                "drive_include_audio": db.user_setting(user_id, "drive_include_audio", "0") == "1"}
 
-    def update_settings(self, storage_default=None, drive_folder=None, drive_include_audio=None):
+    def update_settings(self, storage_default=None, drive_folder=None, drive_include_audio=None, user_id=None):
+        put = (lambda k, v: self.db.set_user_setting(user_id, k, v)) if user_id else self.db.set_setting
         if storage_default is not None:
             if storage_default not in STORAGE:
                 raise ValueError(f"storage_default must be one of {STORAGE}")
-            self.db.set_setting("storage_default", storage_default)
+            put("storage_default", storage_default)
         if drive_folder is not None:
             name = drive_folder.strip()
             if not name or "/" in name or len(name) > 120:
                 raise ValueError("drive_folder must be a folder name (no slashes, at most 120 characters)")
-            self.db.set_setting("drive_folder", name)
+            put("drive_folder", name)
         if drive_include_audio is not None:
-            self.db.set_setting("drive_include_audio", "1" if drive_include_audio else "0")
-        return self.settings()
+            put("drive_include_audio", "1" if drive_include_audio else "0")
+        return self.settings(user_id)
 
     def set_storage(self, mid, storage):
         """local: nothing about this meeting leaves the box. drive: its summary,
@@ -84,7 +86,7 @@ class Store:
         write_text(f / "actions.md", "\n".join(lines) + "\n")
         out = [("Summary.md", f / "summary.md"), ("Action items.md", f / "actions.md"),
                ("Transcript.md", f / "transcript.md")]
-        if self.settings()["drive_include_audio"] and self.original(mid):
+        if self.settings(self.meta(mid).get("owner_id"))["drive_include_audio"] and self.original(mid):
             out.append((f"Audio{self.original(mid).suffix}", self.original(mid)))
         return [(name, path) for name, path in out if path.exists()]
 
@@ -93,8 +95,12 @@ class Store:
     def meta(self, mid):
         return self.db.one("SELECT * FROM meetings WHERE id = ?", mid)
 
-    def list(self, limit=200):
-        return self.db.all("SELECT * FROM meetings ORDER BY COALESCE(started_at, created_at) DESC LIMIT ?", limit)
+    def list(self, limit=200, who=None):
+        """Every meeting (who=None, the box itself), else what that caller may see."""
+        if who is None or who.admin:
+            return self.db.all("SELECT * FROM meetings ORDER BY COALESCE(started_at, created_at) DESC LIMIT ?", limit)
+        return self.db.all("SELECT * FROM meetings WHERE owner_id IS ? ORDER BY COALESCE(started_at, created_at) DESC"
+                           " LIMIT ?", who.user_id, limit)
 
     def set_state(self, mid, state, **fields):
         fields["state"] = state
@@ -103,13 +109,13 @@ class Store:
         self.db.run(f"UPDATE meetings SET {cols} WHERE id = ?", *fields.values(), mid)
 
     def create(self, mid, *, title=None, started_at=None, source=None, recording_id=None, language=None,
-               storage=None):
+               storage=None, owner_id=None):
         self.folder(mid).mkdir(parents=True, exist_ok=False)
-        storage = storage if storage in STORAGE else self.settings()["storage_default"]
+        storage = storage if storage in STORAGE else self.settings(owner_id)["storage_default"]
         self.db.run(
-            "INSERT INTO meetings (id, title, created_at, started_at, source, recording_id, language, state, storage)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?)",
-            mid, title, now_iso(), started_at, source, recording_id, language, storage)
+            "INSERT INTO meetings (id, title, created_at, started_at, source, recording_id, language, state, storage,"
+            " owner_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)",
+            mid, title, now_iso(), started_at, source, recording_id, language, storage, owner_id)
         self.write_meta(mid)
         return mid
 

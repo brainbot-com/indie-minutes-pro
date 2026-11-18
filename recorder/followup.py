@@ -323,7 +323,7 @@ class Followup:
         if meta.get("storage") == "drive" and "drive" in self.s.followup_targets:
             # The person chose Drive for this meeting: that is the approval.
             version = summary.get("version", 1)
-            settings = self.store.settings()
+            settings = self.store.settings(meta.get("owner_id"))
             store_key = f"drive-store-v{version}"
             if not self._known(mid, store_key):
                 files = [name for name, _ in self.store.drive_files(mid)]

@@ -293,3 +293,68 @@ def test_devices_page_pairs_the_android_app(app, client, tmp_path):
     assert base64.urlsafe_b64decode(q["ca"] + "=" * (-len(q["ca"]) % 4)) == der
     assert client.get("/api/v1/settings", headers={"Authorization": f"Bearer {q['t']}"}).status_code == 200
     assert "Install it once" not in page
+
+
+def upload_tone(client, tmp_path, headers, client_id, seconds=5):
+    data = tone(tmp_path / f"{client_id}.wav", seconds)
+    rid = client.post("/api/v1/recordings", json={"client_id": client_id, "mime": "audio/wav"},
+                      headers=headers).json()["recording_id"]
+    client.put(f"/api/v1/recordings/{rid}/chunks/0", content=data, headers=headers)
+    return client.post(f"/api/v1/recordings/{rid}/finalize", json={"total_chunks": 1}, headers=headers).json()["meeting_id"]
+
+
+def test_people_see_only_their_own_meetings(app, client, tmp_path):
+    from recorder.people import add_person
+    db = app.state.db
+    ana, ben = add_person(db, ext_id="ext-ana"), add_person(db, ext_id="ext-ben")
+    ana_phone = {"Authorization": f"Bearer {create_token(db, 'ana phone', 'device', user_id=ana['id'])}"}
+    ben_phone = {"Authorization": f"Bearer {create_token(db, 'ben phone', 'device', user_id=ben['id'])}"}
+    mid = upload_tone(client, tmp_path, ana_phone, "ana-meeting-1")
+    assert db.one("SELECT owner_id FROM meetings WHERE id = ?", mid)["owner_id"] == ana["id"]
+    assert [m["id"] for m in client.get("/api/v1/meetings", headers=ana_phone).json()] == [mid]
+    assert client.get("/api/v1/meetings", headers=ben_phone).json() == []
+    assert client.get(f"/api/v1/meetings/{mid}", headers=ben_phone).status_code == 404
+    assert client.put(f"/api/v1/meetings/{mid}/storage", json={"storage": "local"}, headers=ben_phone).status_code == 404
+    admin = {"Authorization": f"Bearer {create_token(db, 'admin', 'admin')}"}
+    assert mid in [m["id"] for m in client.get("/api/v1/meetings", headers=admin).json()]
+    shared = {"Authorization": f"Bearer {create_token(db, 'sim', 'device')}"}   # a token without a person
+    assert mid not in [m["id"] for m in client.get("/api/v1/meetings", headers=shared).json()]
+
+
+def test_brainbot_connector_speaks_for_the_person(app, client, tmp_path):
+    db = app.state.db
+    ca = tmp_path / "ca.crt"
+    ca.write_text("-----BEGIN CERTIFICATE-----\n" + base64.b64encode(bytes(range(40))).decode() + "\n-----END CERTIFICATE-----\n")
+    app.state.settings.ca_cert_file = ca
+    service = create_token(db, "brainbot:agent command", "agent", trusts_identity=True)
+
+    def call(op, args=None, user="ext-ana", caller="user"):
+        h = {"Authorization": f"Bearer {service}", "X-Indie-User": user, "X-Indie-Caller": caller}
+        return client.post("/api/v1/indiechat", json={"op": op, "args": args or {}}, headers=h)
+
+    assert call("whoami").json()["result"]["meetings"] == 0
+    paired = call("pair_phone", {"name": "Ana's Pixel"}).json()["result"]
+    assert paired["android"].startswith("indierecorder://pair?") and "<svg" in paired["android_qr"]
+    phone = {"Authorization": f"Bearer {paired['android'].split('&t=')[1].split('&')[0]}"}
+    mid = upload_tone(client, tmp_path, phone, "ana-meeting-2")
+    assert [m["id"] for m in call("list_meetings").json()["result"]] == [mid]
+    assert call("list_meetings", user="ext-ben").json()["result"] == []
+    assert call("get_meeting", {"meeting_id": mid}, user="ext-ben").status_code == 400
+    assert call("set_storage", {"meeting_id": mid, "storage": "local"}).json()["result"]["storage"] == "local"
+    # Ana's agents read her meetings, but only she pairs or removes phones
+    assert call("list_meetings", caller="agent").json()["result"][0]["id"] == mid
+    assert call("pair_phone", caller="agent").status_code == 400
+    phones = call("phones").json()["result"]
+    assert [p["name"] for p in phones] == ["Ana's Pixel"]
+    assert call("remove_phone", {"id": phones[0]["id"]}, user="ext-ben").status_code == 400
+    assert call("remove_phone", {"id": phones[0]["id"]}).json()["result"]["removed"] == phones[0]["id"]
+    assert client.get("/api/v1/meetings", headers=phone).status_code == 401
+    # settings are per person
+    assert call("update_settings", {"storage_default": "local"}).json()["result"]["storage_default"] == "local"
+    assert call("get_settings", user="ext-ben").json()["result"]["storage_default"] == "drive"
+    # without the service token, or without a person, nothing
+    plain = create_token(db, "agent", "agent")
+    assert client.post("/api/v1/indiechat", json={"op": "whoami"},
+                       headers={"Authorization": f"Bearer {plain}", "X-Indie-User": "ext-ana"}).status_code == 401
+    assert client.post("/api/v1/indiechat", json={"op": "whoami"},
+                       headers={"Authorization": f"Bearer {service}"}).status_code == 401

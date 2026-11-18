@@ -23,6 +23,7 @@ from .config import Settings
 from .db import DB
 from .engines import NAMES as ENGINE_NAMES, Engines
 from .followup import Followup
+from .people import label, resolve
 from .render import display_name, local_time, render_summary_md, words_to_segments
 from .store import Store
 from .util import (fmt_duration, fmt_ts, hash_token, new_id, new_meeting_id, new_token, now_iso,
@@ -157,14 +158,31 @@ def create_app(settings=None):
             raise HTTPException(401 if not row else 403, "valid token required" if not row else "not allowed")
         return dep
 
-    def page(request, name, tok, **ctx):
-        return templates.TemplateResponse(request, name, {"tok": tok, "s": s, **ctx})
+    def person(*roles, html=False):
+        """Like need(), but answers who the request speaks for (people.py):
+        everything below shows a caller only their own meetings."""
+        def dep(request: Request):
+            row = token_row(request)
+            who = resolve(db, row, request.headers) if row and row["role"] in roles else None
+            if who:
+                return who
+            if html:
+                raise HTTPException(303, headers={"Location": "/login?next=" + quote(str(request.url.path))})
+            raise HTTPException(401 if not row else 403, "valid token required" if not row else "not allowed")
+        return dep
 
-    def meeting_or_404(mid):
+    def page(request, name, who, **ctx):
+        tok = who.token if hasattr(who, "token") else who
+        return templates.TemplateResponse(request, name, {"tok": tok, "who": who, "s": s, **ctx})
+
+    def meeting_or_404(mid, who=None):
         m = store.meta(mid)
-        if not m:
+        if not m or (who is not None and not who.sees(m)):
             raise HTTPException(404, "no such meeting")
         return m
+
+    def visible_proposals(who, **kw):
+        return [p for p in followup.list(**kw) if who.sees(store.meta(p["meeting_id"]))]
 
     # -- upload API ------------------------------------------------------------
 
@@ -240,7 +258,7 @@ def create_app(settings=None):
             mid = new_meeting_id(started)
             store.create(mid, title=body.title or row["title"], started_at=row["started_at"] or now_iso(),
                          source=f"device:{tok['name']}", recording_id=rid, language=row["language"],
-                         storage=row["storage"])
+                         storage=row["storage"], owner_id=tok.get("user_id"))
             dst = store.folder(mid) / f"original.{audio.ext_for_mime(row['mime'])}"
             tmp = dst.with_name(".tmp-" + dst.name)
             with open(tmp, "wb") as out:
@@ -271,8 +289,8 @@ def create_app(settings=None):
 
     @app.get("/api/v1/meetings")
     def list_meetings(since: str | None = None, state: str | None = None,
-                      tok=Depends(need("device", "agent", "admin"))):
-        rows = store.list(limit=1000)
+                      who=Depends(person("device", "agent", "admin"))):
+        rows = store.list(limit=1000, who=who)
         if since:
             rows = [m for m in rows if (m["updated_at"] or m["created_at"]) > since]
         if state:
@@ -280,12 +298,12 @@ def create_app(settings=None):
         return [{**m, "url": store.link(m["id"])} for m in rows]
 
     @app.get("/api/v1/meetings/{mid}")
-    def get_meeting(mid: str, transcript: bool = False, tok=Depends(need("device", "agent", "admin"))):
-        return meeting_json(meeting_or_404(mid), transcript=transcript)
+    def get_meeting(mid: str, transcript: bool = False, who=Depends(person("device", "agent", "admin"))):
+        return meeting_json(meeting_or_404(mid, who), transcript=transcript)
 
     @app.get("/api/v1/meetings/{mid}/transcript")
-    def get_transcript(mid: str, format: str = "json", tok=Depends(need("device", "agent", "admin"))):
-        meeting_or_404(mid)
+    def get_transcript(mid: str, format: str = "json", who=Depends(person("device", "agent", "admin"))):
+        meeting_or_404(mid, who)
         if format == "md":
             return PlainTextResponse(_read(store.folder(mid) / "transcript.md"), media_type="text/markdown")
         t = store.transcript(mid)
@@ -295,43 +313,43 @@ def create_app(settings=None):
         return {**t, "speaker_names": names}
 
     @app.put("/api/v1/meetings/{mid}/speakers")
-    def put_speakers(mid: str, body: SpeakersIn, tok=Depends(need(*READERS))):
-        meeting_or_404(mid)
+    def put_speakers(mid: str, body: SpeakersIn, who=Depends(person(*READERS))):
+        meeting_or_404(mid, who)
         return {"names": store.set_names(mid, body.names)}
 
     @app.post("/api/v1/meetings/{mid}/summary")
-    def post_summary(mid: str, body: SummaryIn, tok=Depends(need(*WRITERS))):
-        m = meeting_or_404(mid)
+    def post_summary(mid: str, body: SummaryIn, who=Depends(person(*WRITERS))):
+        m = meeting_or_404(mid, who)
         if not (body.markdown or body.tldr):
             raise HTTPException(400, "send markdown or tldr")
         current = store.summary(mid) or {}
         summary = {k: v for k, v in body.model_dump().items() if v is not None and k != "author"}
         summary.setdefault("language", current.get("language") or m["language"])
-        version = store.add_summary(mid, summary, author=f"{body.author} ({tok['name']})")
+        version = store.add_summary(mid, summary, author=f"{body.author} ({who.name})")
         return {"meeting_id": mid, "version": version, "url": store.link(mid)}
 
     @app.post("/api/v1/meetings/{mid}/reprocess")
-    def reprocess(mid: str, body: ReprocessIn, tok=Depends(need(*READERS))):
-        meeting_or_404(mid)
+    def reprocess(mid: str, body: ReprocessIn, who=Depends(person(*READERS))):
+        meeting_or_404(mid, who)
         if body.engine and body.engine not in ENGINE_NAMES:
             raise HTTPException(400, f"engine must be one of {ENGINE_NAMES}")
         worker.enqueue(mid, kind=body.kind, engine=body.engine)
         return {"queued": True}
 
     @app.get("/api/v1/settings")
-    def get_settings(tok=Depends(need("device", "agent", "admin"))):
-        return store.settings()
+    def get_settings(who=Depends(person("device", "agent", "admin"))):
+        return store.settings(who.user_id)
 
     @app.put("/api/v1/settings")
-    def put_settings(body: SettingsIn, tok=Depends(need("agent", "admin"))):
+    def put_settings(body: SettingsIn, who=Depends(person("agent", "admin"))):
         try:
-            return store.update_settings(**body.model_dump())
+            return store.update_settings(**body.model_dump(), user_id=who.user_id)
         except ValueError as e:
             raise HTTPException(400, str(e))
 
     @app.put("/api/v1/meetings/{mid}/storage")
-    def put_storage(mid: str, body: StorageIn, tok=Depends(need("device", "agent", "admin"))):
-        meeting_or_404(mid)
+    def put_storage(mid: str, body: StorageIn, who=Depends(person("device", "agent", "admin"))):
+        meeting_or_404(mid, who)
         change_storage(mid, body.storage)
         return {"meeting_id": mid, "storage": body.storage}
 
@@ -365,22 +383,29 @@ def create_app(settings=None):
     # -- follow-up proposals and the Drive outbox ------------------------------
 
     @app.get("/api/v1/proposals")
-    def list_proposals(state: str | None = None, tok=Depends(need("device", "agent", "admin"))):
-        return followup.list(state=state)
+    def list_proposals(state: str | None = None, who=Depends(person("device", "agent", "admin"))):
+        return visible_proposals(who, state=state)
+
+    def own_proposal(pid, who):
+        row = db.one("SELECT meeting_id FROM proposals WHERE id = ?", pid)
+        if not row or not who.sees(store.meta(row["meeting_id"])):
+            raise HTTPException(404, "no such proposal")
 
     @app.post("/api/v1/proposals/{pid}/{action}")
-    def decide(pid: str, action: str, tok=Depends(need(*READERS))):
+    def decide(pid: str, action: str, who=Depends(person(*READERS))):
         if action not in ("approve", "reject"):
             raise HTTPException(404)
-        return followup.decide(pid, approve=action == "approve", who=tok["name"])
+        own_proposal(pid, who)
+        return followup.decide(pid, approve=action == "approve", who=who.name)
 
     @app.get("/api/v1/outbox")
-    def outbox(tok=Depends(need(*WRITERS))):
-        return followup.outbox()
+    def outbox(who=Depends(person(*WRITERS))):
+        return [p for p in followup.outbox() if who.sees(store.meta(p["meeting_id"]))]
 
     @app.post("/api/v1/outbox/{pid}/ack")
-    def ack(pid: str, body: AckIn, tok=Depends(need(*WRITERS))):
-        return followup.ack(pid, body.url, body.note, who=tok["name"])
+    def ack(pid: str, body: AckIn, who=Depends(person(*WRITERS))):
+        own_proposal(pid, who)
+        return followup.ack(pid, body.url, body.note, who=who.name)
 
     @app.put("/api/v1/issues-index")
     def issues_index(body: IssuesIn, tok=Depends(need(*WRITERS))):
@@ -410,12 +435,12 @@ def create_app(settings=None):
         return resp
 
     @app.get("/", response_class=HTMLResponse)
-    def index(request: Request, tok=Depends(need(*READERS, html=True))):
-        return page(request, "meetings.html", tok, meetings=store.list(), jobs=worker.queue())
+    def index(request: Request, who=Depends(person(*READERS, html=True))):
+        return page(request, "meetings.html", who, meetings=store.list(who=who), jobs=worker.queue())
 
     @app.get("/m/{mid}", response_class=HTMLResponse)
-    def meeting_page(request: Request, mid: str, v: int | None = None, tok=Depends(need(*READERS, html=True))):
-        m = meeting_or_404(mid)
+    def meeting_page(request: Request, mid: str, v: int | None = None, who=Depends(person(*READERS, html=True))):
+        m = meeting_or_404(mid, who)
         versions = store.summary_versions(mid)
         shown = next((x for x in versions if x["version"] == v), None) if v else None
         summary_md = _read(store.folder(mid) / "summary.md")
@@ -427,21 +452,21 @@ def create_app(settings=None):
                 for seg in words_to_segments(t.get("words", [])) or t.get("segments", [])]
         proposals = {p["item_key"]: p for p in followup.list(meeting_id=mid)}
         mappings = {r["item_key"]: r for r in db.all("SELECT * FROM mappings WHERE meeting_id = ?", mid)}
-        return page(request, "meeting.html", tok, m=m, t=t, segs=segs, names=names, summary_md=summary_md,
+        return page(request, "meeting.html", who, m=m, t=t, segs=segs, names=names, summary_md=summary_md,
                     versions=versions, shown=shown, actions=store.actions(mid).get("items", []),
                     proposals=proposals, mappings=mappings, engines=[e for e in ENGINE_NAMES if e != "fake"],
                     has_audio=store.audio(mid).exists() or bool(store.original(mid)))
 
     @app.post("/m/{mid}/speakers")
-    async def speakers_form(request: Request, mid: str, tok=Depends(need(*READERS, html=True))):
-        meeting_or_404(mid)
+    async def speakers_form(request: Request, mid: str, who=Depends(person(*READERS, html=True))):
+        meeting_or_404(mid, who)
         form = await request.form()
         store.set_names(mid, {k[5:]: v for k, v in form.items() if k.startswith("name:")})
         return RedirectResponse(f"/m/{mid}#speakers", status_code=303)
 
     @app.post("/m/{mid}/storage")
-    def storage_form(mid: str, storage: str = Form(...), tok=Depends(need(*READERS, html=True))):
-        meeting_or_404(mid)
+    def storage_form(mid: str, storage: str = Form(...), who=Depends(person(*READERS, html=True))):
+        meeting_or_404(mid, who)
         if storage not in ("local", "drive"):
             raise HTTPException(400)
         change_storage(mid, storage)
@@ -449,34 +474,34 @@ def create_app(settings=None):
 
     @app.post("/m/{mid}/reprocess")
     def reprocess_form(mid: str, kind: str = Form("transcribe"), engine: str = Form(""),
-                       tok=Depends(need(*READERS, html=True))):
-        meeting_or_404(mid)
+                       who=Depends(person(*READERS, html=True))):
+        meeting_or_404(mid, who)
         if kind not in ("transcribe", "summarize") or (engine and engine not in ENGINE_NAMES):
             raise HTTPException(400)
         worker.enqueue(mid, kind=kind, engine=engine or None)
         return RedirectResponse(f"/m/{mid}", status_code=303)
 
     @app.get("/m/{mid}/audio")
-    def meeting_audio(mid: str, tok=Depends(need(*READERS, html=True))):
-        meeting_or_404(mid)
+    def meeting_audio(mid: str, who=Depends(person(*READERS, html=True))):
+        meeting_or_404(mid, who)
         f = store.audio(mid) if store.audio(mid).exists() else store.original(mid)
         if not f:
             raise HTTPException(404)
         return FileResponse(f)
 
     @app.get("/m/{mid}/files/{name}")
-    def meeting_file(mid: str, name: str, tok=Depends(need(*READERS, html=True))):
-        meeting_or_404(mid)
+    def meeting_file(mid: str, name: str, who=Depends(person(*READERS, html=True))):
+        meeting_or_404(mid, who)
         f = store.folder(mid) / name
         if name not in FILES or not f.exists():
             raise HTTPException(404)
         return FileResponse(f, media_type="text/markdown; charset=utf-8" if name.endswith(".md") else None)
 
     @app.get("/review", response_class=HTMLResponse)
-    def review(request: Request, tok=Depends(need(*READERS, html=True))):
-        items = followup.list()
-        titles = {m["id"]: m["title"] or m["id"] for m in store.list(limit=1000)}
-        return page(request, "review.html", tok, items=items, titles=titles, auto=s.followup_auto,
+    def review(request: Request, who=Depends(person(*READERS, html=True))):
+        items = visible_proposals(who)
+        titles = {m["id"]: m["title"] or m["id"] for m in store.list(limit=1000, who=who)}
+        return page(request, "review.html", who, items=items, titles=titles, auto=s.followup_auto,
                     repo=s.github_repo, executor=s.followup_executor, targets=sorted(s.followup_targets),
                     carrier=("mock GitHub and Drive on this box" if s.followup_executor == "direct"
                              else "the Agent Command Center agent (outbox)"))
@@ -487,33 +512,45 @@ def create_app(settings=None):
         return RedirectResponse("/review", status_code=303)
 
     @app.post("/review/{pid}/{action}")
-    def review_decide(pid: str, action: str, tok=Depends(need(*READERS, html=True))):
+    def review_decide(pid: str, action: str, who=Depends(person(*READERS, html=True))):
         if action not in ("approve", "reject"):
             raise HTTPException(404)
-        followup.decide(pid, approve=action == "approve", who=tok["name"])
+        own_proposal(pid, who)
+        followup.decide(pid, approve=action == "approve", who=who.name)
         return RedirectResponse("/review", status_code=303)
+
+    def token_rows():
+        users = {u["id"]: u for u in db.all("SELECT * FROM users")}
+        return [{**r, "person": label(users.get(r["user_id"])) if r["user_id"] else ""}
+                for r in db.all("SELECT * FROM tokens ORDER BY created_at DESC")], list(users.values())
 
     @app.get("/devices", response_class=HTMLResponse)
     def devices(request: Request, tok=Depends(need("admin", html=True))):
-        rows = db.all("SELECT * FROM tokens ORDER BY created_at DESC")
-        return page(request, "devices.html", tok, rows=rows, created=None)
+        rows, users = token_rows()
+        return page(request, "devices.html", tok, rows=rows, users=users, created=None)
 
     @app.post("/devices", response_class=HTMLResponse)
-    def add_device(request: Request, name: str = Form(...), role: str = Form("device"),
+    def add_device(request: Request, name: str = Form(...), role: str = Form("device"), user_id: str = Form(""),
                    tok=Depends(need("admin", html=True))):
         if role not in ("device", "agent"):
             raise HTTPException(400)
+        if user_id and not db.one("SELECT 1 FROM users WHERE id = ?", user_id):
+            raise HTTPException(400, "no such person")
         name = name.strip()[:80] or "device"
-        raw = create_token(db, name, role)
+        raw = create_token(db, name, role, user_id=user_id or None)
+        rows, users = token_rows()
+        return page(request, "devices.html", tok, rows=rows, users=users,
+                    created={"name": name, "role": role, "token": raw, **(pairing(raw, name) if role == "device" else {})})
+
+    def pairing(raw, name):
+        """What a phone needs: the PWA link, the Android link (with this box's CA) and their QR codes."""
         pair = f"{s.public_url}/app/#pair={raw}"
-        qr = segno.make(pair, error="m").svg_inline(scale=4, dark="#111", light="#fff") if role == "device" else None
-        android = android_link(raw, name) if role == "device" else None
-        rows = db.all("SELECT * FROM tokens ORDER BY created_at DESC")
-        return page(request, "devices.html", tok, rows=rows,
-                    created={"name": name, "role": role, "token": raw, "pair": pair, "qr": qr, "android": android,
-                             "android_qr": segno.make(android, error="l").svg_inline(scale=3, dark="#111", light="#fff")
-                             if android else None,
-                             "apk_url": s.apk_url if s.apk_file.exists() else None})
+        android = android_link(raw, name)
+        svg = lambda text, scale: segno.make(text, error="l" if len(text) > 200 else "m").svg_inline(
+            scale=scale, dark="#111", light="#fff")
+        return {"pair": pair, "qr": svg(pair, 4), "android": android,
+                "android_qr": svg(android, 3) if android else None,
+                "apk_url": s.apk_url if s.apk_file.exists() else None}
 
     def android_link(raw, name):
         """The Android app's pairing link: address, token and this box's CA certificate."""
@@ -544,14 +581,73 @@ def create_app(settings=None):
             h = engine_health(url)
             out[name] = {"ok": bool(h.get("ok")), "busy": bool(h.get("current"))} if h else {"ok": False}
         return out
-    mount_mcp(app, s, db, store, followup, token_row, worker=worker, engines_health=engines_health)
+    mcp_call = mount_mcp(app, s, db, store, followup, token_row, worker=worker, engines_health=engines_health)
+
+    # -- brainbot:agent command: its "indie-recorder" connector ------------------
+    # One endpoint for the Meetings app and people's agents there. The service
+    # token proves the call comes from brainbot:agent command, which names the
+    # person in X-Indie-User and says whether a person or an agent asks
+    # (X-Indie-Caller). Ops are the MCP tools, answered for that person, plus
+    # the phone pairing below, which only a person may use.
+    MAX_PHONES = 5
+
+    @app.post("/api/v1/indiechat")
+    async def indiechat(request: Request):
+        row = token_row(request)
+        if not row or not row.get("trusts_identity"):
+            return JSONResponse({"ok": False, "error": "service token required"}, status_code=401)
+        who = resolve(db, row, request.headers)
+        if not who:
+            return JSONResponse({"ok": False, "error": "no person named (X-Indie-User)"}, status_code=401)
+        try:
+            body = await request.json()
+        except ValueError:
+            body = None
+        if not isinstance(body, dict) or not isinstance(body.get("op"), str):
+            return JSONResponse({"ok": False, "error": "send {op, args}"}, status_code=400)
+        op, args = body["op"], body.get("args") if isinstance(body.get("args"), dict) else {}
+        try:
+            if op in ("pair_phone", "phones", "remove_phone") and who.caller != "user":
+                raise ToolError("only a person can pair or remove phones, not an agent")
+            if op == "whoami":
+                result = {"meetings": len(store.list(limit=10000, who=who)), "caller": who.caller,
+                          "phones": len(phones(who))}
+            elif op == "phones":
+                result = phones(who)
+            elif op == "pair_phone":
+                if len(phones(who)) >= MAX_PHONES:
+                    raise ToolError(f"at most {MAX_PHONES} phones: remove one first")
+                name = str(args.get("name") or "Phone").strip()[:60] or "Phone"
+                raw = create_token(db, name, "device", user_id=who.user_id)
+                result = {"name": name, **pairing(raw, name)}
+            elif op == "remove_phone":
+                n = db.run("UPDATE tokens SET revoked_at = ? WHERE id = ? AND user_id = ? AND role = 'device'"
+                           " AND revoked_at IS NULL", now_iso(), str(args.get("id", "")), who.user_id)
+                if not n:
+                    raise ToolError("no such phone")
+                result = {"removed": args.get("id")}
+            else:
+                result = mcp_call(op, args, who)
+        except ToolError as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+        return {"ok": True, "result": result}
+
+    def phones(who):
+        return [{"id": r["id"], "name": r["name"], "created_at": r["created_at"], "last_used_at": r["last_used_at"]}
+                for r in db.all("SELECT * FROM tokens WHERE user_id = ? AND role = 'device' AND revoked_at IS NULL"
+                                " ORDER BY created_at", who.user_id)]
+
+    from .mcp_server import ToolError
     return app
 
 
-def create_token(db, name, role):
+def create_token(db, name, role, user_id=None, trusts_identity=False):
+    """A new token, stored hashed. trusts_identity: brainbot:agent command's service
+    token, which speaks for the person its X-Indie-User header names (people.py)."""
     raw = new_token()
-    db.run("INSERT INTO tokens (id, name, role, token_hash, created_at) VALUES (?, ?, ?, ?, ?)",
-           new_id("tok"), name, role, hash_token(raw), now_iso())
+    db.run("INSERT INTO tokens (id, name, role, token_hash, created_at, user_id, trusts_identity)"
+           " VALUES (?, ?, ?, ?, ?, ?, ?)",
+           new_id("tok"), name, role, hash_token(raw), now_iso(), user_id, 1 if trusts_identity else 0)
     return raw
 
 

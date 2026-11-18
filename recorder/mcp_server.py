@@ -11,6 +11,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse, Response
 
 from . import __version__
+from .people import resolve
 
 VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 
@@ -118,24 +119,33 @@ class ToolError(Exception):
 
 
 def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_health=None):
+    """Mounts /mcp and returns call(name, args, who), which the connector for
+    brainbot:agent command (api.py) shares. Every tool answers for one caller:
+    their meetings, their outbox, their settings (people.py)."""
     def agent(request):
         # Header only: a token in the query string would end up in access logs.
         tok = token_row(request)
-        return tok if tok and tok["role"] in ("agent", "admin") else None
+        return resolve(db, tok, request.headers) if tok and tok["role"] in ("agent", "admin") else None
 
-    def call(name, args, tok):
+    def visible(who, mid):
+        m = store.meta(mid) if mid else None
+        return m if who.sees(m) else None
+
+    def outbox(who):
+        return [p for p in followup.outbox() if visible(who, p["meeting_id"])]
+
+    def call(name, args, who):
         if name == "pending_work":
             since = s.agent_since
             summaries = [{"meeting_id": m["id"], "title": m["title"], "started_at": m["started_at"],
                           "language": m["language"], "url": store.link(m["id"])}
-                         for m in store.list(limit=1000)
+                         for m in store.list(limit=1000, who=who)
                          if m["state"] == "done" and (m["summary_author"] or "").startswith("recorder")
                          and (m["started_at"] or m["created_at"]) >= since]
-            outbox = [{"proposal_id": p["id"], "kind": p["kind"], "meeting_id": p["meeting_id"]}
-                      for p in followup.outbox()]
-            return "" if not (summaries or outbox) else {"summaries": summaries, "outbox": outbox}
+            box = [{"proposal_id": p["id"], "kind": p["kind"], "meeting_id": p["meeting_id"]} for p in outbox(who)]
+            return "" if not (summaries or box) else {"summaries": summaries, "outbox": box}
         if name == "list_meetings":
-            rows = store.list(limit=1000)
+            rows = store.list(limit=1000, who=who)
             if args.get("since"):
                 rows = [m for m in rows if (m["updated_at"] or m["created_at"]) > args["since"]]
             if args.get("state"):
@@ -145,11 +155,11 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
                                        "tldr")} | {"url": store.link(m["id"])}
                     for m in rows]
         if name == "status":
-            rows = store.list(limit=10000)
+            rows = store.list(limit=10000, who=who)
             states = {}
             for m in rows:
                 states[m["state"]] = states.get(m["state"], 0) + 1
-            box = followup.outbox()
+            box = outbox(who)
             return {"worker": bool(worker and worker.thread and worker.thread.is_alive()),
                     "current_job": worker.current if worker else None,
                     "queued_jobs": len(worker.queue()) if worker else None,
@@ -157,18 +167,19 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
                     "meetings": len(rows), "by_state": states,
                     "in_drive": sum(1 for m in rows if m.get("drive_url")),
                     "pending_drive": sum(1 for p in box if p["kind"].startswith("drive_")),
-                    "settings": store.settings(), "followup": followup.executor,
+                    "settings": store.settings(who.user_id), "followup": followup.executor,
                     "targets": sorted(s.followup_targets)}
         if name == "get_settings":
-            return store.settings()
+            return store.settings(who.user_id)
         if name == "update_settings":
             try:
                 return store.update_settings(**{k: args[k] for k in ("storage_default", "drive_folder",
-                                                                       "drive_include_audio") if k in args})
+                                                                       "drive_include_audio") if k in args},
+                                             user_id=who.user_id)
             except ValueError as e:
                 raise ToolError(str(e))
         if name == "drive_files":
-            p = next((x for x in followup.outbox() if x["id"] == args.get("proposal_id")), None)
+            p = next((x for x in outbox(who) if x["id"] == args.get("proposal_id")), None)
             if not p or p["kind"] != "drive_store":
                 raise ToolError("no drive_store item with that proposal_id in the outbox")
             from .signing import sign
@@ -178,7 +189,7 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
                                "url": f"{s.files_base_url}/{sign(s, mid, n)}"} for n, path in store.drive_files(mid)]}
         mid = args.get("meeting_id", "")
         if name in ("get_meeting", "update_summary", "set_storage", "rename_speakers", "new_summary") \
-                and not store.meta(mid):
+                and not visible(who, mid):
             raise ToolError(f"no meeting {mid!r}")
         if name == "set_storage":
             try:
@@ -221,21 +232,24 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
             if args.get("action_items"):
                 summary["action_items"] = [{"text": a.get("text", ""), "owner": a.get("owner", ""),
                                             "due": a.get("due", "")} for a in args["action_items"]]
-            version = store.add_summary(mid, summary, author=f"agent ({tok['name']})")
+            version = store.add_summary(mid, summary, author=f"agent ({who.name})")
             return {"meeting_id": mid, "version": version, "url": store.link(mid)}
         if name == "sync_issues":
             return followup.sync_issues(args.get("repo", ""), args.get("issues") or [])
         if name == "list_outbox":
             return [{"proposal_id": p["id"], "kind": p["kind"], "meeting_id": p["meeting_id"],
-                     "payload": p["payload"]} for p in followup.outbox()]
+                     "payload": p["payload"]} for p in outbox(who)]
         if name == "ack_outbox_item":
-            res = followup.ack(args.get("proposal_id", ""), args.get("url", ""), args.get("note"), who=tok["name"])
+            row = db.one("SELECT meeting_id FROM proposals WHERE id = ?", args.get("proposal_id", ""))
+            if not row or not visible(who, row["meeting_id"]):
+                raise ToolError("no such outbox item")
+            res = followup.ack(args.get("proposal_id", ""), args.get("url", ""), args.get("note"), who=who.name)
             if res.get("error"):
                 raise ToolError(res["error"])
             return res
         raise ToolError(f"unknown tool {name!r}")
 
-    def handle(msg, tok):
+    def handle(msg, who):
         mid, method, params = msg.get("id"), msg.get("method"), msg.get("params") or {}
         if mid is None:
             return None  # a notification, e.g. notifications/initialized
@@ -251,7 +265,7 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
             elif method == "tools/list":
                 result = {"tools": TOOLS}
             elif method == "tools/call":
-                data = call(params.get("name"), params.get("arguments") or {}, tok)
+                data = call(params.get("name"), params.get("arguments") or {}, who)
                 text = data if isinstance(data, str) else json.dumps(data, ensure_ascii=False, indent=1)
                 result = {"content": [{"type": "text", "text": text}], "isError": False}
             else:
@@ -264,8 +278,8 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
 
     @app.post("/mcp")
     async def mcp_post(request: Request):
-        tok = agent(request)
-        if not tok:
+        who = agent(request)
+        if not who:
             return JSONResponse({"error": "agent token required"}, status_code=401)
         try:
             msg = await request.json()
@@ -273,7 +287,7 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
             return JSONResponse({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "parse error"}},
                                 status_code=400)
         batch = isinstance(msg, list)
-        replies = [r for r in (handle(m, tok) for m in (msg if batch else [msg])) if r is not None]
+        replies = [r for r in (handle(m, who) for m in (msg if batch else [msg])) if r is not None]
         if not replies:
             return Response(status_code=202)
         return JSONResponse(replies if batch else replies[0])
@@ -285,6 +299,8 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
     @app.delete("/mcp")
     def mcp_delete():
         return Response(status_code=405, headers={"Allow": "POST"})
+
+    return call
 
 
 def _read(path):

@@ -21,6 +21,7 @@ from .api import create_token
 from .config import Settings
 from .db import DB
 from .engines import NAMES, Engines
+from .people import add_person
 from .store import Store
 from .util import now_iso, write_json
 
@@ -33,6 +34,17 @@ def main(argv=None):
     t.add_argument("id", nargs="?")
     t.add_argument("--name", default="device")
     t.add_argument("--role", default="device", choices=["device", "agent", "admin"])
+    t.add_argument("--user", help="the person the token belongs to (user id)")
+    t.add_argument("--trusts-identity", action="store_true",
+                   help="brainbot:agent command's service token: speaks for the person in X-Indie-User")
+    u = sub.add_parser("user", help="people (accounts come from brainbot:agent command)")
+    u.add_argument("action", choices=["add", "list", "claim"])
+    u.add_argument("id", nargs="?", help="claim: the person's user id")
+    u.add_argument("--ext-id", help="the person's user id in brainbot:agent command")
+    u.add_argument("--email")
+    u.add_argument("--name")
+    u.add_argument("--token", action="append", default=[],
+                   help="claim: give this token, and the meetings its phone recorded, to the person")
     sub.add_parser("meetings")
     d = sub.add_parser("delete", help="delete meetings with all their files, e.g. test meetings")
     d.add_argument("meeting_ids", nargs="+")
@@ -54,13 +66,27 @@ def main(argv=None):
     out = None
     if a.cmd == "token":
         if a.action == "add":
-            print(create_token(db, a.name, a.role))
+            print(create_token(db, a.name, a.role, user_id=a.user, trusts_identity=a.trusts_identity))
             return
         if a.action == "list":
             out = db.all("SELECT id, name, role, created_at, last_used_at, revoked_at FROM tokens ORDER BY created_at")
         else:
             out = {"revoked": db.run("UPDATE tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL",
                                      now_iso(), a.id)}
+    elif a.cmd == "user":
+        if a.action == "add":
+            out = add_person(db, ext_id=a.ext_id, email=a.email, name=a.name)
+        elif a.action == "list":
+            out = db.all("SELECT * FROM users ORDER BY created_at")
+        else:
+            if not a.id or not db.one("SELECT 1 FROM users WHERE id = ?", a.id):
+                raise SystemExit("claim needs an existing user id")
+            out = {"tokens": 0, "meetings": 0}
+            for tid in a.token:
+                out["tokens"] += db.run("UPDATE tokens SET user_id = ? WHERE id = ?", a.id, tid)
+                out["meetings"] += db.run(
+                    "UPDATE meetings SET owner_id = ? WHERE recording_id IN"
+                    " (SELECT id FROM recordings WHERE token_id = ?)", a.id, tid)
     elif a.cmd == "meetings":
         out = Store(s, db).list()
     elif a.cmd == "delete":
