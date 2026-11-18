@@ -4,77 +4,113 @@ The recorder on aibox1 in brainbot:agent command (indie-chat on ai-knowledge): t
 Meetings app to read and steer your meetings, and a meeting agent that writes
 better summaries with what it knows and stores meetings in Google Drive.
 
-- `indie-recorder.html`: the Meetings app (an app template). List by day, a
-  meeting's summary, action items and transcript, speaker names, "Store in
-  Google Drive" per meeting and the default for new recordings. English and
-  German, follows brainbot:agent command's light and dark theme. Its WebMCP tools
-  (`list_meetings`, `open_meeting`, `set_storage`, `set_default_storage`,
-  `rename_speakers`) let the app's agent drive it.
-- `install-ai-knowledge.sh`: the one-time change on ai-knowledge.
+- `indie-recorder.html`: the Meetings app, one shared app for everyone. Each
+  person sees only their own meetings: list by day, a meeting's summary,
+  decisions, action items and transcript, speaker names, "Google Drive" per
+  meeting. Settings: the person's name (their phones show it), the storage
+  defaults, and Phones (connect one with a QR code for the Android app or a
+  web app link for any phone; remove one to lock it out). English and German,
+  light and dark as brainbot:agent command sets them; the same Swiss look as
+  the phone apps. Its WebMCP tools (`list_meetings`, `open_meeting`,
+  `set_storage`, `set_default_storage`, `rename_speakers`) let the app's agent
+  drive it; pairing is not one of them (an agent cannot add a phone).
+- `inline_assets.py`: puts `recorder/static/swiss.css` and the Inter font into
+  the app (it loads nothing from the box). Run it after changing either and
+  commit the result.
+- `install-ai-knowledge.sh`: the change on ai-knowledge.
 
 ## What goes where
 
 - Recording, transcription and the first summary happen on aibox1 only, with
   aibox1's own models.
-- brainbot:agent command reaches the recorder only through
-  `https://ai-knowledge.mz.brainbot.com/indie-recorder/mcp` (needs your
-  recorder token) and `/indie-recorder/api/v1/files/...` (signed links that
-  expire after two hours). Nothing else of the recorder is reachable there.
+- brainbot:agent command reaches the recorder only through three paths on
+  `https://ai-knowledge.mz.brainbot.com/indie-recorder/`: `api/v1/indiechat`
+  (the "indie-recorder" connector: the deployment's service token, and
+  brainbot:agent command names the signed-in person in `X-Indie-User`),
+  `mcp` (a person's own recorder token, for their meeting agent) and
+  `api/v1/files/...` (signed links that expire after two hours). Nothing else
+  of the recorder is reachable there.
+- The recorder knows people by their brainbot:agent command id (it gets no
+  name or email); a person's phones and meetings belong to that id. Only a
+  person, not an agent, can connect or remove phones or set their name.
 - Each meeting is either local or in Drive (your choice per meeting; the
   default for new recordings is a setting). A local meeting stays on aibox1:
   the Meetings app shows it through brainbot:agent command's server to your browser,
   nothing is stored on the way. A Drive meeting is uploaded by your meeting
   agent: `Summary.md`, `Action items.md`, `Transcript.md` (and the recording,
   if you switch that on) into a folder per meeting, plus an entry in the
-  running "Meeting log" doc.
+  running "Meeting log" doc. Without a meeting agent of your own, a Drive
+  meeting waits ("Waiting for the Drive upload") and stays on aibox1.
 - The meeting agent reads full transcripts, and an agent's run history keeps
   what its tools returned. It is your private agent, so that history is
   yours, on ai-knowledge. Give it aibox1's model (below), never StudioLLM:
   then no transcript goes to another model host.
 
-## Install (once, an admin of ai-knowledge)
+## Install (an admin of ai-knowledge)
 
 On aibox1 this is already set (`~/indie-recorder/.env`): `ALLOW_CIDRS`
 admits ai-knowledge (10.1.1.26), `FILES_BASE_URL` points at the route below,
 `FOLLOWUP_EXECUTOR=agent`, `FOLLOWUP_TARGETS=drive`, `STORAGE_DEFAULT=drive`.
+The connector's service token is made once on aibox1 with
+`python -m recorder.cli token add --name "brainbot:agent command" --role agent
+--trusts-identity` and kept in `secrets/indiechat_service_token`.
 
 From a checkout of this repo:
 
 ```bash
 scp -r integrations/indie-chat root@ai-knowledge.mz.brainbot.com:/root/indie-recorder-kit
-ssh root@ai-knowledge.mz.brainbot.com bash /root/indie-recorder-kit/install-ai-knowledge.sh
+ssh aibox1 cat indie-recorder/secrets/indiechat_service_token \
+  | ssh root@ai-knowledge.mz.brainbot.com bash /root/indie-recorder-kit/install-ai-knowledge.sh --token-stdin
 ```
 
-It fetches the recorder's CA certificate from aibox1 and refuses it unless its
-SHA-256 fingerprint is the recorder's (`E6:89:A7:83:...:07:F1:2D:9F`), then:
+The token travels on stdin, never on a command line; without `--token-stdin`
+the script keeps the one already set. It fetches the recorder's CA
+certificate from aibox1 and refuses it unless its SHA-256 fingerprint is the
+recorder's (`E6:89:A7:83:...:07:F1:2D:9F`), then:
 
-1. adds the route above to `/opt/kb/brain-tls/Caddyfile` (validated, then a
-   graceful reload; on a validation error the file is put back),
-2. adds `ai-knowledge.mz.brainbot.com` to `INDIE_PRIVATE_HOSTS` in
-   `/opt/kb/indiechat-src/.env`, so a person's own MCP server may point there
-   (the name resolves to the private 10.1.1.26),
-3. puts the Meetings template into `/opt/kb/indiechat-config` (no `seed`:
-   it waits in the template picker, nobody gets it unasked),
-4. recreates the indie-chat app container (a few seconds) and checks that
-   brainbot:agent command answers again; if not, it puts `.env` and the templates back.
+1. routes the three paths above in `/opt/kb/brain-tls/Caddyfile` to aibox1,
+   trusting only the recorder's CA (validated, then a graceful reload; on a
+   validation error the file is put back),
+2. adds `ai-knowledge.mz.brainbot.com` to `INDIE_PRIVATE_HOSTS` and sets
+   `INDIE_RECORDER_TOKEN` in `/opt/kb/indiechat-src/.env`,
+3. adds the "indie-recorder" connector (with `identity: true`) to
+   `connectors.json`,
+4. puts the Meetings template into `/opt/kb/indiechat-config`, seeded as one
+   shared app for everyone and refreshed from the template at every start,
+5. recreates the indie-chat app container (a few seconds) and checks that
+   brainbot:agent command answers again; if not, it puts `.env`, the
+   connectors and the templates back.
 
 Each changed file is backed up once as `<file>.pre-indie-recorder`. Running it
 again changes nothing that is already in place, except a newer
-`indie-recorder.html`, which it copies and loads (apps made from the template
-follow it at the next start, `refresh: true`).
+`indie-recorder.html`, which it copies and loads.
 
-To remove it: copy the three `.pre-indie-recorder` files back (the Caddyfile
-in place, `cat Caddyfile.pre-indie-recorder > Caddyfile`, then `docker exec
+To remove it: copy the `.pre-indie-recorder` files back (the Caddyfile in
+place, `cat Caddyfile.pre-indie-recorder > Caddyfile`, then `docker exec
 brain-tls caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile`),
 delete `/opt/kb/indiechat-config/app-templates/indie-recorder.html` and run
 `docker compose -p indiechat -f /opt/kb/indiechat-src/docker-compose.ai-knowledge.yml up -d --force-recreate app`.
 
 ## For each person
 
+The Meetings app is in everyone's sidebar. To record:
+
+1. **Your name.** Meetings, Settings, Your name: your phones show it, so you
+   can see whose account they record into.
+2. **A phone.** Meetings, Settings, Connect a phone. Android: install the app
+   once (link in step 01, VPN only), then scan the code with the phone's
+   camera. Any other phone: under "Show the link", open the web app link on
+   the phone (it needs the box's CA, see the main README). Remove a phone
+   there to lock it out.
+
+For Drive and the better summaries, a person also needs a meeting agent:
+
 1. **A recorder token.** On aibox1, `cd ~/indie-recorder && docker compose
    exec -T recorder python -m recorder.cli token add --name "agent command
-   <name>" --role agent < /dev/null` prints one (or an admin makes one on the
-   recorder's Devices page). Luis's is in `~/indie-recorder/secrets/command_center_token`.
+   <name>" --role agent --user <their user id> < /dev/null` prints one
+   (`recorder.cli user list` shows the ids; a person appears there after
+   their first visit to the Meetings app). Luis's is in
+   `~/indie-recorder/secrets/command_center_token`.
 2. **Your own MCP server.** brainbot:agent command's form for MCP servers has no field
    for a header yet, so add it once from the browser console: open
    https://ai-knowledge.mz.brainbot.com, press F12, Console, and run
@@ -88,10 +124,8 @@ delete `/opt/kb/indiechat-config/app-templates/indie-recorder.html` and run
    ```
 
    Reload the page. Settings, Integrations lists `indie-recorder` as yours:
-   only your own agents and apps get it.
-3. **The Meetings app.** New, From a template, Meetings. It finds the server
-   by its tools; the dot at the top turns green when it reaches aibox1.
-4. **The meeting agent** (needed for Drive and for the better summaries):
+   only your own agents get it.
+3. **The meeting agent** (needed for Drive and for the better summaries):
    - New agent, name it "Meeting follow-up". Engine **aibox1 Ollama (64k)**,
      model **qwen3.8:27b-ctx65536** (that exact tag: the box keeps it loaded
      for other work, another tag loads a second copy).

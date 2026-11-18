@@ -7,10 +7,12 @@ own LLM. Per meeting the person chooses where it lives: only on the box, or
 also in Google Drive (summary, action items, transcript, optionally the
 audio). A meeting agent in brainbot:agent command does the
 Drive part and writes a better summary from its own context and memory; the
-Meetings app in brainbot:agent command shows and steers it all.
+Meetings app in brainbot:agent command shows and steers it all. Everyone has
+their own account there: a person's phones record into it, and each person
+sees only their own meetings.
 
 ```
-phone (Chrome PWA, VPN)                         aibox1 (10.1.9.7)
+phone (Android app or PWA, VPN)                 aibox1 (10.1.9.7)
   record, 30 s chunks,  --HTTPS, VPN only-->  Caddy :8443 (private CA, allowlist ALLOW_CIDRS)
   offline buffer                                 |
                                                recorder (FastAPI): upload API, queue (1 job), web view, MCP
@@ -24,7 +26,7 @@ phone (Chrome PWA, VPN)                         aibox1 (10.1.9.7)
        follow-up agent: meeting set to Drive -> outbox -> meeting agent (brainbot:agent command) -> Google Drive
                         GitHub (optional): /review -> approved -> outbox -> agent -> issue or comment
        meeting agent (MCP) -> better summary v2, v3 ... (its context and memory)
-       Meetings app in brainbot:agent command (MCP) -> meetings, summaries, speakers, Drive or local
+       Meetings app in brainbot:agent command (connector, per person) -> meetings, summaries, speakers, phones
 ```
 
 ## What stays on the box
@@ -89,7 +91,10 @@ kernel 6.14 OEM, Mesa 25.2 RADV, ROCm 7.0.1, Docker 2x), as a user in the
    `docker compose exec engine-nemo nemo-speech doctor` (must list the Radeon
    8060S on RADV).
 
-## Phone (Chrome on Android)
+## Phone web app (PWA)
+
+For any phone with a current browser; on Android the native app (below) also
+records with the screen off.
 
 1. Connect the phone to the VPN.
 2. Install the box's CA certificate once: open `http://10.1.9.7:8480/ca.crt`,
@@ -97,15 +102,19 @@ kernel 6.14 OEM, Mesa 25.2 RADV, ROCm 7.0.1, Docker 2x), as a user in the
    certificate, CA certificate. Compare the SHA-256 fingerprint with the one
    `deploy/make-ca.sh` printed. Android then shows "network may be
    monitored"; that refers to this CA.
-3. On a laptop, sign in at `https://10.1.9.7:8443` with the admin token, open
-   Devices, create a token for the phone and scan the QR code with the phone.
-   That opens the recorder app paired (`/app/`). Install it from Chrome's menu
-   (Add to home screen).
-4. Record, Stop. Chunks are stored on the phone (IndexedDB) until the box has
-   them, so a dead network only delays the upload. The app keeps the screen
-   on with a Screen Wake Lock while recording; recording with the screen off
-   is the main job of the native app (see below). The list shows upload and
-   processing state and links to the summary.
+3. In brainbot:agent command, Meetings, Settings, Connect a phone; under
+   "Show the link", open the web app link on the phone. That opens the
+   recorder app (`/app/`) connected to your account. (An admin can also make
+   a token on the recorder's Devices page and paste it into the app.) Install
+   it from the browser's menu (Add to home screen).
+4. Record, Pause, Resume, Stop. A pause releases the microphone (the browser's
+   mic indicator goes off) and the clock counts recorded time only; the
+   waveform shows the last seconds, grey while paused. Chunks are stored on
+   the phone (IndexedDB) until the box has them, so a dead network only delays
+   the upload. The app keeps the screen on with a Screen Wake Lock while
+   recording; recording with the screen off is the main job of the native app
+   (see below). The list shows upload and processing state and links to the
+   summary.
 
 The phone simulator streams any audio file through the same upload API (Opus
 in 30 s chunks by default): `python3 sim/phone_sim.py --cacert secrets/tls/ca.crt
@@ -114,8 +123,8 @@ to exercise the resume path.
 
 ## Web view
 
-- Meetings: one line per meeting (title, start, length, speakers), a chip
-  only for processing, failed or Drive.
+- Meetings: a numbered row per meeting (title, start, length, and Processing,
+  Failed, Drive or Local). A person sees their own meetings, an admin all.
 - A meeting: the summary first (v1 by the recorder, later versions by the
   meeting agent; earlier ones stay linked), "Store in Google Drive" with a
   link to the meeting's Drive folder, the recording; folded away below:
@@ -184,9 +193,15 @@ agent with its instructions and hourly routine). In short:
   `set_storage`, `rename_speakers`, `new_summary`, `drive_files` (signed
   download links for a `drive_store` item), `list_outbox`, `ack_outbox_item`,
   `sync_issues`.
-- brainbot:agent command reaches it as
+- The Meetings app is one shared app for everyone. It uses the deployment's
+  "indie-recorder" connector (`/api/v1/indiechat`): brainbot:agent command
+  sends the recorder's service token and names the signed-in person, so the
+  recorder scopes everything to that person (their meetings, settings,
+  phones, name). Tokens of the role agent with `--trusts-identity` may do
+  that; a phone's token belongs to one person.
+- A person's meeting agent reaches the MCP endpoint as
   `https://ai-knowledge.mz.brainbot.com/indie-recorder/mcp`, a personal MCP
-  server of each person (their token, only their agents and apps).
+  server with their own recorder token (only their agents get it).
 - `AGENT_SUMMARIES_SINCE` keeps meetings from before go-live out of
   `pending_work`; `FILES_BASE_URL` is where the agent downloads files from.
 - An indie-chat on aibox1 itself can use `http://127.0.0.1:18000/mcp` as a
@@ -256,6 +271,10 @@ through the phone simulator into the running recorder, end to end.
 - Server certificate: 397 days; renew with `deploy/make-ca.sh secrets/tls`
   (keeps the CA) and `docker compose restart caddy`. The CA lasts 10 years.
 - Tokens: `docker compose exec recorder python -m recorder.cli token add|list|revoke`.
+- People: `recorder.cli user add|list|claim|remove`. A person appears on their
+  first visit to the Meetings app; `claim` gives a token, and the meetings its
+  phone recorded, to a person; `remove` revokes their phones and deletes them
+  (refused while meetings still belong to them).
 - Delete meetings (folder, index, follow-ups): `docker compose exec recorder
   python -m recorder.cli delete <meeting id> ...`; refused while a job runs
   for it.
@@ -286,8 +305,12 @@ through the phone simulator into the running recorder, end to end.
   the recorder's LLM calls share one GPU lock so this service never runs two
   GPU jobs at once; other services on the box (Ollama's other clients,
   ComfyUI) are outside that lock. Prefer IQ4_NL (22 GB) over Q8_0 (36 GB).
-- Tokens are not per user: any phone or admin token can read every meeting
-  (on top of the VPN).
+- brainbot:agent command passes only a person's id to the recorder, no name or
+  email. Each person picks the name their phones show (Meetings, Settings,
+  Your name); until then the phone shows only its own name.
+- New people start with the box's defaults for storage (on aibox1: Google
+  Drive, folder "indie-recorder test"). Drive uploads need a meeting agent of
+  their own; without one, a Drive meeting waits and stays on aibox1.
 - Follow-up proposals are matched against existing issues, not against other
   proposals still waiting for review: two meetings about the same work can
   each propose a new issue. Once one is approved and carried out, later
@@ -354,6 +377,24 @@ Build and test, on aibox1 from `~/indie-recorder`:
 Not in the app yet: a VPN of its own (it shows "Box not reachable (VPN?)" and
 waits), choosing the microphone (an external one is used when Android routes
 to it), editing speaker names (the web view and the Meetings app have it).
+
+## Design
+
+Every face of the recorder shares one look, direction 5 of the design canvas
+(Swiss): Inter, black on white (white on black in dark mode), one red
+(#E1251B) for recording and the one main action of a screen, 3px rules over
+sections and 1px rules between numbered rows, square switches and buttons.
+
+- `recorder/static/swiss.css`: the tokens and components; the PWA and the web
+  view load it from the box. The Meetings app gets it inlined, with the font,
+  by `integrations/indie-chat/inline_assets.py`. The Android app has the same
+  tokens in its Compose theme and the same Inter cuts in `res/font`.
+- Inter 4.1, subset to Latin (`recorder/static/Inter.woff2`, 53 KB), SIL Open
+  Font License (`recorder/static/Inter-OFL.txt`, also in the APK).
+- The waveform, the same in the PWA and the Android app: one bar per 100 ms of
+  recorded audio, bar 3 px wide every 5 px, the loudest sample of the window
+  mapped from -50 dBFS (2 px) to 0 dBFS (88 px), centred, newest at the right;
+  grey and still while paused, with a gap of three bars where the pause was.
 
 ## Layout
 
