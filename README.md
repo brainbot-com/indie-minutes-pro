@@ -87,7 +87,7 @@ phone (Android app or PWA, VPN)                 aibox1 (10.1.9.7)
   code; the Android app talks to aibox1 directly and pins it. Drive copies are
   plain in Drive (the person chose Drive). The indie-recorder app and the meeting
   agent read summaries and transcripts in brainbot:agent command, which keeps
-  its own data encrypted. Phones that do not seal yet (Android up to 0.3.0)
+  its own data encrypted. Phones that do not seal (Android before 0.4.0)
   are still accepted, over TLS.
 
 ## Setup from scratch
@@ -402,11 +402,17 @@ through the phone simulator into the running recorder, end to end.
 ## Android app
 
 `android/`: a native app (Kotlin, Jetpack Compose, Android 8 and later) for
-what the PWA cannot do: record with the screen off. Version 0.3.0 has the
+what the PWA cannot do: record with the screen off. Version 0.4.0 has the
 shared Swiss look (see Design): Connect, Ready, Recording, Paused, a meeting,
 Settings; it connects with a connect code (see "Connecting a phone"), scanned
 (the connect page opens the app) or typed as XXXX-XXXX, asks "Record into
-<person>'s account" before it connects, and names itself ("Pixel 8"). Typed
+<person>'s account" before it connects, and names itself (the device name set in the phone's settings, else maker and
+model). It seals each chunk on the phone like the web app (see Encryption;
+the box's key comes from `/api/v1/health` and is kept on the phone), and the
+recording's key sits under an Android Keystore key until the box has the
+recording; if the Keystore loses it, a part cut short by a crash is dropped,
+never kept in the clear. The main screen does not scroll: the timer and the
+blocks fit the phone and only the list scrolls. Typed
 codes are looked up at `CONNECT_BASE` (set when it is built, default the
 brain-tls address); old token links still work. Disconnect on the phone
 forgets the token; remove the phone in indie-recorder to lock it out.

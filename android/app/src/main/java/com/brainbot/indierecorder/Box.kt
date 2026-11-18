@@ -75,8 +75,24 @@ object Pairing {
             .putString("ca", Base64.getEncoder().encodeToString(cfg.caDer))
             .putString("name", cfg.name)
             .remove("me_device").remove("me_person")       // a new pairing may record for someone else
-            .remove("box_name")
+            .remove("box_name").remove("seal_kid").remove("seal_key")
             .apply()
+    }
+
+    /** The box's sealing key as its health answer last gave it (public); null from a box without one. */
+    fun sealKey(ctx: Context): Seal.BoxKey? {
+        val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val kid = p.getString("seal_kid", null) ?: return null
+        val key = p.getString("seal_key", null) ?: return null
+        return runCatching { Seal.BoxKey(kid, Seal.unb64u(key)) }.getOrNull()
+    }
+
+    /** From GET /api/v1/health: {"seal": {"kid", "alg", "key"}}; kept so a recording started offline is sealed too. */
+    fun saveSealKey(ctx: Context, health: JSONObject) {
+        val seal = health.optJSONObject("seal") ?: return
+        if (seal.optString("alg") != "ECDH-P256+HKDF-SHA256+A256GCM") return
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString("seal_kid", seal.getString("kid")).putString("seal_key", seal.getString("key")).apply()
     }
 
     /** The box's own name from its health answer ("aibox1"), for the screens' top bars. */
@@ -102,13 +118,19 @@ object Pairing {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
     }
 
-    // The token is encrypted with a key that never leaves the Android Keystore.
-    private fun key(): SecretKey {
+    private fun encrypt(plain: String): String = Keystore.encrypt(KEY_ALIAS, plain.toByteArray())
+
+    private fun decrypt(stored: String): String = String(Keystore.decrypt(KEY_ALIAS, stored))
+}
+
+/** Secrets kept on the phone, encrypted with keys that never leave the Android Keystore: "iv:ciphertext". */
+object Keystore {
+    private fun key(alias: String): SecretKey {
         val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        (ks.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
+        (ks.getKey(alias, null) as? SecretKey)?.let { return it }
         val kg = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
         kg.init(
-            KeyGenParameterSpec.Builder(KEY_ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+            KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
                 .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
                 .build()
@@ -116,18 +138,18 @@ object Pairing {
         return kg.generateKey()
     }
 
-    private fun encrypt(plain: String): String {
+    fun encrypt(alias: String, plain: ByteArray): String {
         val c = Cipher.getInstance("AES/GCM/NoPadding")
-        c.init(Cipher.ENCRYPT_MODE, key())
+        c.init(Cipher.ENCRYPT_MODE, key(alias))
         val b64 = Base64.getEncoder()
-        return b64.encodeToString(c.iv) + ":" + b64.encodeToString(c.doFinal(plain.toByteArray()))
+        return b64.encodeToString(c.iv) + ":" + b64.encodeToString(c.doFinal(plain))
     }
 
-    private fun decrypt(stored: String): String {
+    fun decrypt(alias: String, stored: String): ByteArray {
         val (iv, ct) = stored.split(":").map { Base64.getDecoder().decode(it) }
         val c = Cipher.getInstance("AES/GCM/NoPadding")
-        c.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, iv))
-        return String(c.doFinal(ct))
+        c.init(Cipher.DECRYPT_MODE, key(alias), GCMParameterSpec(128, iv))
+        return c.doFinal(ct)
     }
 }
 
@@ -164,7 +186,8 @@ class BoxApi(val cfg: BoxConfig) {
 
     fun createRecording(r: LocalRecording): JSONObject = post("/api/v1/recordings", JSONObject()
         .put("client_id", r.clientId).put("mime", "audio/aac").put("title", r.title.ifBlank { JSONObject.NULL })
-        .put("started_at", r.startedAt).put("storage", r.storage))
+        .put("started_at", r.startedAt).put("storage", r.storage)
+        .apply { if (r.sealed) put("seal", JSONObject().put("kid", r.sealKid).put("epk", r.sealEpk)) })
 
     fun putChunk(rid: String, idx: Int, data: ByteArray): JSONObject = JSONObject(send(
         "PUT", "/api/v1/recordings/$rid/chunks/$idx", data, "application/octet-stream",

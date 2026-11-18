@@ -39,6 +39,7 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
@@ -105,6 +106,16 @@ class RecorderService : Service() {
         RecState.recordedMs.value = 0
         RecState.wave.value = emptyList()
         show(notification(0))
+        // Sealed for the box from the first chunk on (Seal.kt), with the key its health answer last gave;
+        // a box that never gave one (an older recorder) gets the chunks as before.
+        val clientId = UUID.randomUUID().toString()
+        val seal = try {
+            Pairing.sealKey(this)?.let { Seal.start(it, clientId) }
+        } catch (e: Exception) {
+            RecState.error.value = getString(R.string.seal_failed)
+            finish()
+            return
+        }
         val source: PcmSource = try {
             val wav = if (BuildConfig.DEBUG) intent.getStringExtra(EXTRA_TEST_WAV) else null
             if (wav != null) WavSource(File(wav), intent.getFloatExtra(EXTRA_TEST_SPEED, 1f)) else MicSource(this)
@@ -113,23 +124,24 @@ class RecorderService : Service() {
             finish()
             return
         }
-        val r = store.create(intent.getStringExtra(EXTRA_TITLE) ?: "", intent.getStringExtra(EXTRA_STORAGE) ?: "local")
+        val r = store.create(intent.getStringExtra(EXTRA_TITLE) ?: "", intent.getStringExtra(EXTRA_STORAGE) ?: "local",
+            clientId, seal)
         RecState.error.value = null
         RecState.active.value = RecState.Active(r.clientId, startedMs)
         wakeLock = (getSystemService(POWER_SERVICE) as PowerManager)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "indierecorder:recording")
             .apply { acquire(MAX_RECORDING_MS) }
         running = true
-        Thread({ capture(r.clientId, source, startedMs) }, "recorder").start()
+        Thread({ capture(r.clientId, source, startedMs, seal?.key) }, "recorder").start()
     }
 
-    private fun capture(id: String, source: PcmSource, startedMs: Long) {
+    private fun capture(id: String, source: PcmSource, startedMs: Long, key: ByteArray?) {
         var writer: AacWriter? = null
         var failure: String? = null
         val wave = Waveform()
         fun tooLong() = System.currentTimeMillis() - startedMs > MAX_RECORDING_MS
         try {
-            writer = AacWriter(store, id) { scope.launch { runCatching { Uploader.sync(this@RecorderService, id) } } }
+            writer = AacWriter(store, id, key) { scope.launch { runCatching { Uploader.sync(this@RecorderService, id) } } }
             source.start()
             val buf = ShortArray(1024)
             var muted = false
@@ -368,9 +380,11 @@ class WavSource(file: File, private val speed: Float) : PcmSource {
 
 /**
  * AAC LC encoder writing 30 s chunk files: ADTS frames, so the box can join
- * them into one stream. Chunks are cut by audio time, not wall time.
+ * them into one stream. Chunks are cut by audio time, not wall time, and each
+ * is sealed with the recording's key (null: kept as it is) when it is complete.
  */
-class AacWriter(private val store: Store, private val id: String, private val onChunk: (Int) -> Unit) {
+class AacWriter(private val store: Store, private val id: String, private val key: ByteArray?,
+                private val onChunk: (Int) -> Unit) {
     private val codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC).apply {
         configure(MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, Adts.SAMPLE_RATE, 1).apply {
             setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
@@ -455,7 +469,7 @@ class AacWriter(private val store: Store, private val id: String, private val on
         out.close()
         val part = store.partFile(id, chunk)
         if (written > 0) {
-            part.renameTo(store.chunkFile(id, chunk))
+            store.completeChunk(id, chunk, part.readBytes(), key)
             onChunk(chunk)
             chunk += 1
         } else {

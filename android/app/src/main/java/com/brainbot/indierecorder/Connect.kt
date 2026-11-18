@@ -1,5 +1,8 @@
 package com.brainbot.indierecorder
 
+import android.content.Context
+import android.os.Build
+import android.provider.Settings
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -82,7 +85,19 @@ class Joined(val cfg: BoxConfig, val person: String?, val box: String)
 
 private fun text(o: JSONObject, key: String): String? = o.optString(key).takeIf { it.isNotBlank() && it != "null" }
 
-/** A name for this phone in the person's list of phones: "Pixel 8", "Samsung SM-S911B". */
+/**
+ * A name for this phone in the person's list of phones: the name its owner gave it ("Luis's S24",
+ * Settings, About phone), else its Bluetooth name, else maker and model ("Pixel 8", "Samsung SM-S911B").
+ */
+fun deviceName(ctx: Context): String {
+    val given = sequenceOf(
+        { Settings.Global.getString(ctx.contentResolver, Settings.Global.DEVICE_NAME) },
+        { Settings.Secure.getString(ctx.contentResolver, "bluetooth_name") },    // Android 12 and later may refuse it
+    ).mapNotNull { read -> runCatching(read).getOrNull()?.trim() }.firstOrNull { it.isNotEmpty() }
+    return given?.take(60) ?: readableDevice(Build.MANUFACTURER ?: "", Build.MODEL ?: "")
+}
+
+/** Maker and model, readable: "Pixel 8", "Samsung SM-S911B". */
 fun readableDevice(maker: String, model: String): String {
     val m = maker.trim().takeUnless { it.equals("unknown", ignoreCase = true) } ?: ""   // emulators and some builds
     val d = model.trim()

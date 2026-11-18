@@ -90,4 +90,5 @@
     <string name="battery_ok">Das Telefon nimmt auch bei ausgeschaltetem Bildschirm weiter auf.</string>
     <string name="disconnect">Dieses Telefon trennen</string>
     <string name="version">indie recorder %1$s</string>
+    <string name="seal_failed">Dieses Telefon konnte die Verschlüsselung für die Box nicht einrichten. Es wurde nichts aufgenommen.</string>
 </resources>

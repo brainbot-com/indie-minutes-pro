@@ -43,9 +43,13 @@ object Uploader {
         }
         val api = BoxApi(Pairing.load(ctx) ?: return false)
         try {
-            val rid = r.recordingId ?: api.createRecording(r).getString("recording_id").also { new ->
-                store.update(id) { it.recordingId = new }
-            }
+            val rid = r.recordingId ?: try {
+                api.createRecording(r).getString("recording_id")
+            } catch (e: BoxApi.HttpError) {
+                // The box's sealing key is another one now, and nothing of this recording was sent yet.
+                if (e.code == 409 && r.sealed) return if (resealed(ctx, store, api, r)) syncLocked(ctx, id) else false
+                throw e
+            }.also { new -> store.update(id) { it.recordingId = new } }
             val status = try {
                 api.recording(rid)
             } catch (e: BoxApi.HttpError) {
@@ -79,12 +83,26 @@ object Uploader {
         }
     }
 
+    /**
+     * Seals a stopped recording's chunks again for the box's current key (fetched anew), so it never
+     * goes in the clear; one still recording waits until it stops, a box without a key until it has one.
+     */
+    private fun resealed(ctx: Context, store: Store, api: BoxApi, r: LocalRecording): Boolean {
+        Pairing.saveSealKey(ctx, api.health())
+        val box = Pairing.sealKey(ctx) ?: return false
+        if (box.kid == r.sealKid || r.state != LocalRecording.STOPPED) return false
+        val old = store.chunkKey(r) ?: return false
+        store.reseal(r.clientId, old, Seal.start(box, r.clientId))
+        return true
+    }
+
     private fun done(store: Store, id: String, status: JSONObject): Boolean {
         store.update(id) {
             it.state = LocalRecording.FINALIZED
             it.meetingId = status.optString("meeting_id").takeIf { m -> m.isNotBlank() && m != "null" }
             it.uploaded = it.chunks
             it.error = null
+            it.sealKey = null                        // the chunk key goes with the audio
         }
         store.deleteAudio(id)
         return true

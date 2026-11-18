@@ -25,6 +25,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -75,7 +76,10 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
@@ -93,9 +97,12 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -254,6 +261,101 @@ private fun Page(content: @Composable ColumnScope.() -> Unit) {
 }
 
 /**
+ * The main screen (Ready, Recording, Paused) never scrolls: on a short screen the timer, the
+ * waveform and the gaps get smaller and the blocks give up height (BlockAndList); only the
+ * recordings list scrolls. Where that still leaves the block and the list less than their least
+ * (a small phone with large text), the page turns tight: the gaps close up and the screen leaves
+ * out what it can do without. The content gets the page's height, whether it is tight, and what
+ * to call when it finds it is short of room. key: the screen (tight starts over for another one).
+ */
+@Composable
+private fun FitPage(key: Any?, content: @Composable ColumnScope.(Dp, Boolean, () -> Unit) -> Unit) {
+    BoxWithConstraints(Modifier.fillMaxSize().background(pal().paper).systemBarsPadding().imePadding()) {
+        val h = maxHeight
+        var tight by remember(key, h, LocalDensity.current.fontScale) { mutableStateOf(false) }
+        Column(Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(pageGap(h, tight))) {
+            content(h, tight) { tight = true }
+        }
+    }
+}
+
+/** The main screen's gaps, as in the web app: 22dp, on short screens 2.2% of the height (at least 10dp); 8dp when tight. */
+private fun pageGap(h: Dp, tight: Boolean): Dp = when {
+    tight -> 8.dp
+    h >= 760.dp -> 22.dp
+    else -> (h * 0.022f).coerceAtLeast(10.dp)
+}
+
+/** The timer's height, as in the web app: 12% of the page's, from 56 to 104dp. */
+private fun timerSize(h: Dp): Dp = (h * 0.12f).coerceIn(56.dp, 104.dp)
+
+/** The waveform's height, as in the web app: 10% of the page's, from 56 to 88dp; 40dp when tight. */
+private fun waveHeight(h: Dp, tight: Boolean): Dp = if (tight) 40.dp else (h * 0.1f).coerceIn(56.dp, 88.dp)
+
+/**
+ * The bottom of the main screen: the block (Record, or Pause and Stop) takes what is left between
+ * minBlock and maxBlock, the notes under it what they need, the list the rest, scrolling on its own.
+ * onShort: it got less than the least block, the gap and the least list (listMin) need.
+ */
+@Composable
+private fun BlockAndList(modifier: Modifier, minBlock: Dp, maxBlock: Dp, gap: Dp, onShort: () -> Unit,
+                         block: @Composable () -> Unit, notes: @Composable () -> Unit, list: @Composable () -> Unit,
+                         listMin: Dp = 72.dp) {
+    val least = with(LocalDensity.current) { (minBlock + gap + listMin).roundToPx() }
+    Layout(contents = listOf(block, notes, list), modifier = modifier.onSizeChanged { if (it.height < least) onShort() }) { (b, n, l), c ->
+        val width = c.maxWidth
+        val gapPx = gap.roundToPx()
+        val noteParts = n.map { it.measure(Constraints(maxWidth = width)) }
+        val notesH = noteParts.sumOf { it.height }
+        val room = (c.maxHeight - notesH - gapPx * (if (notesH > 0) 2 else 1)).coerceAtLeast(0)
+        val blockH = (room - listMin.roundToPx()).coerceIn(minBlock.roundToPx(), maxBlock.roundToPx()).coerceAtMost(room)
+        val listH = (room - blockH).coerceAtLeast(0)
+        val blockParts = b.map { it.measure(Constraints.fixed(width, blockH)) }
+        val listParts = l.map { it.measure(Constraints.fixed(width, listH)) }
+        layout(width, c.maxHeight) {
+            var y = 0
+            blockParts.forEach { it.place(0, y) }
+            y += blockH + gapPx
+            noteParts.forEach { it.place(0, y); y += it.height }
+            if (notesH > 0) y += gapPx
+            listParts.forEach { it.place(0, y) }
+        }
+    }
+}
+
+/**
+ * One line that always fits: the largest size from max down (1sp steps, not below min) at which it
+ * fits the width and the height it gets, so a label never clips or breaks, whatever the phone's
+ * width or font size. fitKey is what its width depends on: a running timer refits only when its
+ * shape changes (tabular figures).
+ */
+@Composable
+private fun FitText(text: String, max: TextUnit, color: Color, modifier: Modifier = Modifier, min: TextUnit = 12.sp,
+                    tracking: Float = -0.025f, lineFactor: Float = 1f, tabular: Boolean = false, fitKey: String = text) {
+    val measurer = rememberTextMeasurer()
+    val base = LocalTextStyle.current
+    BoxWithConstraints(modifier) {
+        val c = constraints
+        fun style(size: Float) = base.merge(TextStyle(fontSize = size.sp, fontWeight = FontWeight.W900,
+            letterSpacing = (size * tracking).sp, lineHeight = (size * lineFactor).sp,
+            // a line tighter than the font (the timer's) is as tall as it says, the figures in its middle
+            lineHeightStyle = if (lineFactor < 1f) LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None) else null,
+            fontFeatureSettings = if (tabular) "tnum" else null))
+        val size = remember(fitKey, c.maxWidth, c.maxHeight, max, min, base) {
+            var sz = max.value
+            while (sz > min.value) {
+                val m = measurer.measure(fitKey, style(sz), maxLines = 1, softWrap = false).size
+                if (m.width <= c.maxWidth && (!c.hasBoundedHeight || m.height <= c.maxHeight)) break
+                sz -= 1f
+            }
+            sz
+        }
+        Text(text, color = color, style = style(size), maxLines = 1, softWrap = false)
+    }
+}
+
+/**
  * The top of every screen: the brand (after the red record dot) or Back on the left, Settings or
  * the box's state on the right.
  */
@@ -306,14 +408,14 @@ private fun NumberedRow(n: Int, text: String, side: String? = null) {
 
 class CellSpec(val label: String, val content: @Composable () -> Unit)
 
-/** Label over value, in a grid under a 1dp rule. */
+/** Label over value, in a grid under a 1dp rule; compact (closer) on a short main screen, as in the web app. */
 @Composable
-private fun Cells(columns: Int, cells: List<CellSpec>) {
+private fun Cells(columns: Int, cells: List<CellSpec>, compact: Boolean = false) {
     Column {
         Rule()
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(if (compact) 8.dp else 12.dp))
         cells.chunked(columns).forEachIndexed { i, row ->
-            if (i > 0) Spacer(Modifier.height(14.dp))
+            if (i > 0) Spacer(Modifier.height(if (compact) 8.dp else 14.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 row.forEach { c ->
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -349,16 +451,15 @@ private fun Toggle(on: Boolean, onChange: (Boolean) -> Unit, text: String?, desc
 
 /** A big flat button: a sign at the top, the word at the bottom (Record, Pause, Resume, Stop). */
 @Composable
-private fun Block(label: String, color: Color, pressedColor: Color, textColor: Color, height: Dp, fontSize: TextUnit,
+private fun Block(label: String, color: Color, pressedColor: Color, textColor: Color, fontSize: TextUnit,
                   modifier: Modifier = Modifier, onClick: () -> Unit, sign: @Composable () -> Unit) {
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
-    Column(modifier.height(height).background(if (pressed) pressedColor else color)
+    Column(modifier.background(if (pressed) pressedColor else color)
         .clickable(source, indication = null, role = Role.Button, onClick = onClick).padding(18.dp),
         verticalArrangement = Arrangement.SpaceBetween) {
         sign()
-        Text(label, color = textColor, fontSize = fontSize, fontWeight = FontWeight.W900,
-            letterSpacing = (fontSize.value * -0.025f).sp, lineHeight = fontSize, maxLines = 1, softWrap = false)
+        FitText(label, fontSize, textColor, min = 14.sp)
     }
 }
 
@@ -406,12 +507,15 @@ private fun PlaySign(color: Color) = Canvas(Modifier.size(26.dp)) {
     drawPath(Path().apply { moveTo(4 * u, 2 * u); lineTo(24 * u, 13 * u); lineTo(4 * u, 24 * u); close() }, color)
 }
 
-/** The recorded time, big; it moves to a smaller size past the hour so it still fits. */
+/**
+ * The recorded time, big: as tall as the page allows (timerSize) and never wider than the screen.
+ * Sized in dp, not sp: a picture of the time, it does not grow with the phone's font size.
+ */
 @Composable
-private fun Timer(ms: Long, color: Color) {
-    val size = if (ms >= 3_600_000) 76.sp else 104.sp
-    Text(timer(ms), color = color, fontSize = size, fontWeight = FontWeight.W900, lineHeight = size * 0.92f,
-        letterSpacing = (size.value * -0.05f).sp, style = tnum(), maxLines = 1, softWrap = false)
+private fun Timer(ms: Long, color: Color, max: Dp) {
+    val text = timer(ms)
+    FitText(text, with(LocalDensity.current) { max.toSp() }, color, Modifier.fillMaxWidth(), min = 24.sp,
+        tracking = -0.05f, lineFactor = 0.92f, tabular = true, fitKey = text.replace(Regex("[0-9]"), "0"))
 }
 
 /**
@@ -420,10 +524,10 @@ private fun Timer(ms: Long, color: Color) {
  * middle, at least 2dp tall; dim while paused.
  */
 @Composable
-private fun Wave(bars: List<Float>, paused: Boolean) {
+private fun Wave(bars: List<Float>, paused: Boolean, height: Dp) {
     val color = if (paused) pal().dim else pal().ink
     val description = stringResource(R.string.input_level)
-    Canvas(Modifier.fillMaxWidth().height(88.dp).semantics { contentDescription = description }) {
+    Canvas(Modifier.fillMaxWidth().height(height).semantics { contentDescription = description }) {
         val step = 5.dp.toPx()
         val w = 3.dp.toPx()
         val min = 2.dp.toPx()
@@ -460,12 +564,14 @@ private fun boxLine(box: String?): Pair<String, Color> {
     return ((name ?: stringResource(R.string.box_label)) + " · " + state) to color
 }
 
+/** The box's name and its sealing key, from its health answer (both public). */
 private suspend fun learnName(ctx: Context, api: BoxApi) {
-    withContext(Dispatchers.IO) { runCatching { api.health() } }.getOrNull()?.optString("box")
-        ?.takeIf { it.isNotBlank() }?.let {
-            boxName.value = it
-            Pairing.saveBoxName(ctx, it)
-        }
+    val health = withContext(Dispatchers.IO) { runCatching { api.health() } }.getOrNull() ?: return
+    Pairing.saveSealKey(ctx, health)
+    health.optString("box").takeIf { it.isNotBlank() }?.let {
+        boxName.value = it
+        Pairing.saveBoxName(ctx, it)
+    }
 }
 
 // ---- screens
@@ -526,7 +632,7 @@ private fun PairScreen(initial: String?, auto: Boolean, paired: Boolean, onPaire
     var tokenLink by rememberSaveable { mutableStateOf<String?>(null) }     // an older link, waiting for Connect
     var error by rememberSaveable { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
-    val device = remember { readableDevice(Build.MANUFACTURER ?: "", Build.MODEL ?: "") }
+    val device = remember { deviceName(ctx) }
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = LocalFocusManager.current
     val msgUsed = stringResource(R.string.err_used)
@@ -563,7 +669,9 @@ private fun PairScreen(initial: String?, auto: Boolean, paired: Boolean, onPaire
             boxName.value = box
         }
         boxState.value = "ok"
-        withContext(Dispatchers.IO) { runCatching { BoxApi(cfg).settings() } }.getOrNull()?.let { rememberDefault(ctx, it) }
+        val api = BoxApi(cfg)
+        withContext(Dispatchers.IO) { runCatching { api.settings() } }.getOrNull()?.let { rememberDefault(ctx, it) }
+        learnName(ctx, api)                     // the sealing key too, so the first recording is sealed
         onPaired(cfg)
     }
 
@@ -673,8 +781,8 @@ private fun ConfirmScreen(person: String?, box: String, device: String, paired: 
             CellSpec(stringResource(R.string.box_label)) { Value(box) },
             CellSpec(stringResource(R.string.phone_label)) { Value(device) },
         ))
-        Block(stringResource(R.string.pair_button), if (busy) p.ghost else p.red, p.redDark, p.onRed, 150.dp, 34.sp,
-            Modifier.fillMaxWidth(), onClick = { if (!busy) onConnect() }) {
+        Block(stringResource(R.string.pair_button), if (busy) p.ghost else p.red, p.redDark, p.onRed, 34.sp,
+            Modifier.fillMaxWidth().height(150.dp), onClick = { if (!busy) onConnect() }) {
             Box(Modifier.size(26.dp).clip(CircleShape).background(p.onRed))
         }
         LinkText(stringResource(R.string.cancel), onCancel)
@@ -812,13 +920,40 @@ private fun HomeScreen(cfg: BoxConfig, onOpen: (String) -> Unit, onSettings: () 
     // Whom the recordings go to: the person when the box knows a name, else this phone's name.
     val whom = me?.let { m -> m.person?.let { stringResource(R.string.for_label) to it } ?: (stringResource(R.string.phone_label) to m.device) }
 
-    Page {
+    val list: @Composable () -> Unit = {
+        // the only part of this screen that scrolls
+        Column(Modifier.fillMaxSize()) {
+            Section(stringResource(R.string.recordings))
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                if (items.isEmpty()) Text(stringResource(R.string.none_yet), Modifier.padding(top = 12.dp), color = p.muted)
+                val a = active
+                items.forEachIndexed { i, r ->
+                    val live = r.clientId == a?.clientId
+                    RecordingRow(i + 1, r, r.meetingId?.let { states[it] }, live && paused, if (live) recordedMs else null) {
+                        r.meetingId?.let(onOpen) ?: UploadWorker.enqueue(ctx, r.clientId, now = true)
+                    }
+                }
+            }
+        }
+    }
+
+    FitPage(active == null) { h, tight, onShort ->
+        val short = h < 760.dp
+        val notes: @Composable () -> Unit = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // on a short screen the Microphone cell says it ("Off while paused"), as in the web app
+                if (active != null && paused && !short) Text(stringResource(R.string.paused_note), fontSize = 14.sp, lineHeight = 20.sp)
+                recError?.let { Text(it, color = p.red, fontSize = 14.sp, fontWeight = FontWeight.W700) }
+                if (denied) Text(stringResource(R.string.mic_denied), color = p.red, fontSize = 14.sp, fontWeight = FontWeight.W700)
+            }
+        }
         Bar(stringResource(R.string.brand), stringResource(R.string.settings), onRight = onSettings, mark = true)
         val a = active
         if (a == null) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (tight) Kicker(stringResource(R.string.new_recording))          // the ghost timer gives way
+            else Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Kicker(stringResource(R.string.new_recording))
-                Timer(0, p.ghost)
+                Timer(0, p.ghost, timerSize(h))
             }
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Label(titleLabel)
@@ -828,19 +963,22 @@ private fun HomeScreen(cfg: BoxConfig, onOpen: (String) -> Unit, onSettings: () 
                 add(CellSpec(boxLabel) { Value(boxValue, boxColor) })
                 add(CellSpec(storageLabel) { Toggle(drive, { drive = it; touched = true }, driveName, storeDrive) })
                 whom?.let { (label, name) -> add(CellSpec(label) { Value(name) }) }
-            })
+            }, compact = short)
             val recordLabel = stringResource(R.string.record)
-            Block(recordLabel, p.red, p.redDark, p.onRed, 186.dp, 40.sp, Modifier.fillMaxWidth(), onClick = { record() }) {
-                Box(Modifier.size(30.dp).clip(CircleShape).background(p.onRed))
-            }
+            BlockAndList(Modifier.weight(1f).fillMaxWidth(), minBlock = 112.dp, maxBlock = 186.dp, gap = pageGap(h, tight),
+                onShort = onShort, notes = notes, list = list, block = {
+                Block(recordLabel, p.red, p.redDark, p.onRed, 40.sp, Modifier.fillMaxSize(), onClick = { record() }) {
+                    Box(Modifier.size(30.dp).clip(CircleShape).background(p.onRed))
+                }
+            })
         } else {
             val r = items.firstOrNull { it.clientId == a.clientId }
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (paused) Kicker(stringResource(R.string.kicker_paused), p.ink)
                 else Kicker(stringResource(R.string.kicker_recording), p.red)
-                Timer(recordedMs, if (paused) p.dim else p.ink)
+                Timer(recordedMs, if (paused) p.dim else p.ink, timerSize(h))
             }
-            Wave(wave, paused)
+            Wave(wave, paused, waveHeight(h, tight))
             val untitled = stringResource(R.string.untitled)
             val storageValue = if (r?.storage == "drive") driveName else stringResource(R.string.storage_box)
             val mic = when {
@@ -854,32 +992,22 @@ private fun HomeScreen(cfg: BoxConfig, onOpen: (String) -> Unit, onSettings: () 
                 CellSpec(boxLabel) { if (partsText != null) Value(partsText) else Value(boxValue, boxColor) },
                 CellSpec(storageLabel) { Value(storageValue) },
                 CellSpec(stringResource(R.string.mic_label)) { Value(mic.first, mic.second) },
-            ))
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                if (paused) {
-                    Block(stringResource(R.string.resume), p.ink, p.muted, p.paper, 163.dp, 30.sp, Modifier.weight(1f),
-                        onClick = { RecorderService.resume(ctx) }) { PlaySign(p.paper) }
-                } else {
-                    Block(stringResource(R.string.pause), p.ink, p.muted, p.paper, 163.dp, 30.sp, Modifier.weight(1f),
-                        onClick = { RecorderService.pause(ctx) }) { PauseSign(p.paper) }
+            ), compact = short)
+            BlockAndList(Modifier.weight(1f).fillMaxWidth(), minBlock = 100.dp, maxBlock = 163.dp, gap = pageGap(h, tight),
+                onShort = onShort, notes = notes, list = list, block = {
+                Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    val half = Modifier.weight(1f).fillMaxHeight()
+                    if (paused) {
+                        Block(stringResource(R.string.resume), p.ink, p.muted, p.paper, 30.sp, half,
+                            onClick = { RecorderService.resume(ctx) }) { PlaySign(p.paper) }
+                    } else {
+                        Block(stringResource(R.string.pause), p.ink, p.muted, p.paper, 30.sp, half,
+                            onClick = { RecorderService.pause(ctx) }) { PauseSign(p.paper) }
+                    }
+                    Block(stringResource(R.string.stop), p.red, p.redDark, p.onRed, 30.sp, half,
+                        onClick = { RecorderService.stop(ctx) }) { Box(Modifier.size(26.dp).background(p.onRed)) }
                 }
-                Block(stringResource(R.string.stop), p.red, p.redDark, p.onRed, 163.dp, 30.sp, Modifier.weight(1f),
-                    onClick = { RecorderService.stop(ctx) }) { Box(Modifier.size(26.dp).background(p.onRed)) }
-            }
-            if (paused) Text(stringResource(R.string.paused_note), fontSize = 14.sp, lineHeight = 20.sp)
-        }
-        recError?.let { Text(it, color = p.red, fontSize = 14.sp, fontWeight = FontWeight.W700) }
-        if (denied) Text(stringResource(R.string.mic_denied), color = p.red, fontSize = 14.sp, fontWeight = FontWeight.W700)
-
-        Column {
-            Section(stringResource(R.string.recordings))
-            if (items.isEmpty()) Text(stringResource(R.string.none_yet), Modifier.padding(top = 12.dp), color = p.muted)
-            items.forEachIndexed { i, r ->
-                val live = r.clientId == a?.clientId
-                RecordingRow(i + 1, r, r.meetingId?.let { states[it] }, live && paused, if (live) recordedMs else null) {
-                    r.meetingId?.let(onOpen) ?: UploadWorker.enqueue(ctx, r.clientId, now = true)
-                }
-            }
+            })
         }
     }
 }
