@@ -24,6 +24,11 @@ Follow-ups people approved (GitHub issues and comments, Drive doc entries) wait 
 list_outbox: carry each out with your GitHub and Drive tools, then call ack_outbox_item."""
 
 TOOLS = [
+    {"name": "pending_work",
+     "description": "What there is to do now: meetings whose current summary is still the recorder's first one "
+                    "(write a better one), and approved follow-ups waiting in the outbox (carry them out). Returns "
+                    "nothing at all when there is nothing to do, so a routine can use it as its precheck.",
+     "inputSchema": {"type": "object", "properties": {}}},
     {"name": "list_meetings",
      "description": "Meetings on aibox1, newest first: id, title, start time, duration, language, state, "
                     "number of speakers, current summary version and author, and the link.",
@@ -81,6 +86,16 @@ def mount_mcp(app, s, db, store, followup, token_row):
         return tok if tok and tok["role"] in ("agent", "admin") else None
 
     def call(name, args, tok):
+        if name == "pending_work":
+            since = s.agent_since
+            summaries = [{"meeting_id": m["id"], "title": m["title"], "started_at": m["started_at"],
+                          "language": m["language"], "url": store.link(m["id"])}
+                         for m in store.list(limit=1000)
+                         if m["state"] == "done" and (m["summary_author"] or "").startswith("recorder")
+                         and (m["started_at"] or m["created_at"]) >= since]
+            outbox = [{"proposal_id": p["id"], "kind": p["kind"], "meeting_id": p["meeting_id"]}
+                      for p in followup.outbox()]
+            return "" if not (summaries or outbox) else {"summaries": summaries, "outbox": outbox}
         if name == "list_meetings":
             rows = store.list(limit=1000)
             if args.get("since"):
@@ -146,8 +161,8 @@ def mount_mcp(app, s, db, store, followup, token_row):
                 result = {"tools": TOOLS}
             elif method == "tools/call":
                 data = call(params.get("name"), params.get("arguments") or {}, tok)
-                result = {"content": [{"type": "text", "text": json.dumps(data, ensure_ascii=False, indent=1)}],
-                          "isError": False}
+                text = data if isinstance(data, str) else json.dumps(data, ensure_ascii=False, indent=1)
+                result = {"content": [{"type": "text", "text": text}], "isError": False}
             else:
                 return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32601, "message": f"no method {method}"}}
         except ToolError as e:

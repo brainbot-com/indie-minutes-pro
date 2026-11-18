@@ -175,6 +175,8 @@ def test_mcp_update_summary(app, client, tmp_path):
     assert "version 2 (agent (agent))" in (app.state.store.folder(mid) / "summary.md").read_text()
     phone = {"Authorization": f"Bearer {create_token(app.state.db, 'phone2', 'device')}"}
     assert client.post("/mcp", json={}, headers=phone).status_code == 401
+    pending = {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "pending_work", "arguments": {}}}
+    assert client.post("/mcp", json=pending, headers=h).json()["result"]["content"][0]["text"] == ""
 
 
 @pytest.mark.parametrize("executor", ["agent"])

@@ -34,6 +34,9 @@ class Settings:
         self.drive_api_url = get("DRIVE_API_URL", "").rstrip("/")
         self.followup_auto = get("FOLLOWUP_AUTO", "0") == "1"
         self.followup_on_done = get("FOLLOWUP_ON_DONE", "1") == "1"
+        # The Command Center agent only takes meetings recorded after this
+        # (ISO date), so test meetings from before go-live stay untouched.
+        self.agent_since = get("AGENT_SUMMARIES_SINCE", "")
         self.drive_log_doc = get("DRIVE_LOG_DOC", "Meeting log")
         self.drive_folder = get("DRIVE_FOLDER", "indie-recorder test")
         self.secure_cookies = get("SECURE_COOKIES", "1") == "1"

@@ -148,51 +148,130 @@ never quote the transcript.
 ## Setting up the Agent Command Center agent
 
 The agent writes better summaries with its own context and memory, keeps the
-repo's issues in sync, and carries out approved GitHub and Drive follow-ups.
-It reads full transcripts, so it must run on aibox1 against aibox1's LLM.
+box's copy of the repo's issues fresh, and carries out approved GitHub and
+Drive follow-ups. It reads full transcripts, and an agent's run history keeps
+what its tools returned, so run it in an indie-chat on aibox1 itself, with
+aibox1's model. An indie-chat elsewhere (brainbot:brain on ai-knowledge) would
+store the transcripts there.
 
-1. Token: on `https://10.1.9.7:8443/devices` create a token with role
-   "agent" (or `docker compose exec recorder python -m recorder.cli token add
-   --name "command center" --role agent`).
-2. MCP server: in Agent Command Center add an MCP server with URL
-   `http://127.0.0.1:18000/mcp` (the agent runs on aibox1; no TLS needed) and
-   header `Authorization: Bearer <token>`. From another machine it would be
-   `https://10.1.9.7:8443/mcp` with the box's CA trusted, but then
-   transcripts leave the box, so do not.
-   Tools: `list_meetings`, `get_meeting` (with the full transcript),
-   `update_summary` (new version, becomes current), `sync_issues`,
-   `list_outbox`, `ack_outbox_item`. The same as JSON under `/api/v1/`:
-   `GET /meetings`, `GET /meetings/<id>?transcript=true`,
-   `POST /meetings/<id>/summary`, `PUT /issues-index`, `GET /outbox`,
-   `POST /outbox/<id>/ack`.
-3. Model: pin the agent to aibox1's Ollama, `qwen3.8:27b-ctx65536`. Not
-   StudioLLM (aibox0) or any cloud model.
-4. Accounts: give the agent its GitHub connection (only
-   `brainbot-com/indie-recorder-sandbox` while testing) and its Drive
-   connection (only the test folder, `DRIVE_FOLDER` in `.env`).
-5. Switch the box to agent mode: `FOLLOWUP_EXECUTOR=agent` in `.env`, then
-   `docker compose up -d recorder`.
-6. Routine, hourly, with "start each run fresh" off so it remembers its last
-   run:
+On aibox1 (recorder side):
 
-   > Every hour, using the indie-recorder MCP tools: (1) Read the open and
-   > recently closed issues of brainbot-com/indie-recorder-sandbox with your
-   > GitHub tools and send them with sync_issues. (2) Call list_meetings with
-   > since set to the time of your last run. For each meeting in state done
-   > whose summary_author starts with "recorder", read it with get_meeting and
-   > write a better summary in the meeting's language: TL;DR, decisions,
-   > action items with owner and due date when they were said, open questions,
-   > using what you know about the people and projects. Keep "Speaker N"
-   > labels unless names are set; if you recognise a speaker, say so in the
-   > note instead. Store it with update_summary, including action_items and a
-   > note on what you changed. (3) Call list_outbox and carry out each item
-   > exactly as described (issue, comment, or appending to the Google Doc in
-   > the named folder, creating it if missing), posting bodies unchanged, then
-   > call ack_outbox_item with the URL. Touch nothing outside the sandbox repo
-   > and the test folder. If nothing is new, end without output.
+```bash
+cd ~/indie-recorder
+docker compose exec -T recorder python -m recorder.cli token add --name "command center" --role agent < /dev/null
+# put the printed token into indie-chat's environment as INDIE_RECORDER_TOKEN
+# in .env: hand follow-ups to the agent, and skip meetings from before go-live
+#   FOLLOWUP_EXECUTOR=agent
+#   AGENT_SUMMARIES_SINCE=2026-11-18
+docker compose up -d recorder
+```
 
-7. Check: record a short meeting, approve its proposals on `/review`, and
-   after the next run the review page shows the issue, comment and doc URLs.
+In the indie-chat deployment (config directory, or `MANAGED_MCP_SERVERS` /
+Settings for an Indie Box):
+
+`config/mcp-servers.json` (a managed entry may use the box's loopback address;
+a server added by hand in the UI may not):
+
+```json
+{
+  "indie-recorder": {
+    "url": "http://127.0.0.1:18000/mcp",
+    "headers": { "Authorization": "Bearer ${INDIE_RECORDER_TOKEN}" },
+    "enabled": true
+  }
+}
+```
+
+`config/agents.json` (or create the agent in the UI with the same
+instructions; `backend` is the key in `agent-backends.json` that points at
+aibox1's Ollama with `qwen3.8:27b-ctx65536`):
+
+```json
+[
+  {
+    "key": "meeting-followup",
+    "name": "Meeting follow-up",
+    "description": "Better meeting summaries and the approved GitHub and Drive follow-ups from the recorder.",
+    "instructions": "<the agent instructions below>",
+    "wiki": "read",
+    "backend": "ollama",
+    "refresh": true
+  }
+]
+```
+
+`config/routines.json`:
+
+```json
+[
+  {
+    "key": "meeting-followup-hourly",
+    "title": "Meeting follow-up",
+    "prompt": "Run the meeting follow-up: call pending_work and do what it lists, following your instructions.",
+    "cron": "17 * * * *",
+    "tzOffset": -60,
+    "mode": "agent",
+    "agent": "meeting-followup",
+    "mcp": true,
+    "search": false,
+    "notify": true,
+    "quiet": "[Nothing new]",
+    "precheck": { "tool": "pending_work", "args": {} },
+    "enabled": true
+  }
+]
+```
+
+`precheck` asks `pending_work` before each run; it answers with nothing when
+there is nothing to do, so idle hours cost no model call. If the MCP tool list
+shows the tool with a server prefix, use that name. In the routine's
+settings, turn on "Start each run fresh": the work list comes from the box,
+not from the conversation. Use the agents' restricted internet mode ("No
+internet, except web search"): then the app makes the MCP calls, which is
+what lets the loopback address work. Give the agent its GitHub connection
+(only `brainbot-com/indie-recorder-sandbox` while testing) and its Google
+Drive connection (only the folder `indie-recorder test`).
+
+Agent instructions:
+
+> You are the meeting follow-up agent for the indie-recorder on aibox1. You
+> reach the recorded meetings through the indie-recorder tools.
+>
+> Start every run with pending_work. If it returns nothing, answer
+> "[Nothing new]" and stop.
+>
+> 1. Issues first. If anything is pending, read the open and recently closed
+>    issues of brainbot-com/indie-recorder-sandbox with your GitHub tools and
+>    send them with sync_issues (number, title, body, state, html_url).
+> 2. Better summaries. For each meeting under "summaries", read it with
+>    get_meeting. Write a better summary in the meeting's language with what
+>    you know about the people, projects and earlier meetings: a short TL;DR,
+>    decisions, action items (owner and due date only where they were said),
+>    open questions. Speakers are "Speaker 1", "Speaker 2" unless someone set
+>    names: keep those labels; if you are fairly sure who a speaker is, say so
+>    in the note, do not rename. Never invent decisions, owners or dates.
+>    Store it with update_summary: markdown without a title line,
+>    action_items as a list of {text, owner, due}, and a note on what you
+>    changed and which context you used.
+> 3. Approved follow-ups. For each item under "outbox", read it with
+>    list_outbox and carry it out exactly: github_issue, open an issue in
+>    payload.repo with payload.title and payload.body; github_comment, comment
+>    payload.body on issue payload.issue_number; drive_log, append
+>    payload.markdown to the Google Doc payload.doc in the Drive folder
+>    payload.folder, creating the doc if it is missing. Post the bodies
+>    unchanged: they carry a hidden marker that prevents duplicates. Then call
+>    ack_outbox_item with the URL of what you created. If one fails, leave it
+>    and say why.
+>
+> Work only in brainbot-com/indie-recorder-sandbox and the Drive folder
+> "indie-recorder test". Never copy transcript text into GitHub, Drive or
+> this chat; link to the meeting's url instead. End with one short line per
+> meeting and per follow-up you handled.
+
+Check: record a short meeting (or stream one with `sim/phone_sim.py`),
+approve its proposals on `/review`, then "Run now" on the routine. The
+meeting page shows summary version 2 by the agent, and the review page the
+URLs of the issue, comment and doc.
 
 ## Engines
 
