@@ -20,7 +20,7 @@ from fastapi.templating import Jinja2Templates
 from markdown_it import MarkdownIt
 from pydantic import BaseModel, Field
 
-from . import __version__, audio, vault
+from . import __version__, audio, speakers, vault
 from .config import Settings
 from .connect import CODE_MINUTES, Codes, Guesses, shown
 from .db import open_index
@@ -396,6 +396,12 @@ def create_app(settings=None):
         if not found:
             raise HTTPException(403, "link expired or invalid")
         mid, name = found
+        if name.startswith("clip:"):            # seven seconds of one speaker's voice, to put a name to it
+            card = speakers.profile(store.transcript(mid) or {}).get(name[5:])
+            if not card or not card["clip"] or not store.audio(mid).exists():
+                raise HTTPException(404)
+            return Response(speakers.clip_wav(store.audio(mid), card["clip"]["s"], card["clip"]["e"]),
+                            media_type="audio/wav", headers={"Cache-Control": "private, max-age=600"})
         files = dict(store.drive_files(mid))
         if name not in files:
             raise HTTPException(404)

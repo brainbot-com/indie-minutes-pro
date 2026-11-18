@@ -206,8 +206,16 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 24px 48px; display: flex;
 .sum p { margin: 0; }
 .sum .rows + p, .sum p + .rows { margin-top: 10px; }
 .folds { border-top: 3px solid var(--ink); }
-.names { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px 18px; margin: 0 0 16px; }
-.names label { display: flex; flex-direction: column; gap: 2px; }
+/* one card per speaker: how much they said, a few of their lines, their voice, suggested names */
+.names { display: flex; flex-direction: column; margin: 0 0 16px; }
+.spk { padding: 14px 0; border-bottom: 1px solid var(--ink); display: flex; flex-direction: column; gap: 8px; }
+.spkhead { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto auto; gap: 12px; align-items: baseline; }
+.spkhead .who { font-weight: 700; }
+.said { margin: 0 0 0 52px; color: var(--muted); font-size: 14px; }
+.sugg { margin: 0 0 0 52px; font-size: 14px; }
+.sugg .use { color: var(--red); margin-right: 8px; }
+.spk .cell { margin-left: 52px; max-width: 320px; }
+@media (max-width: 560px) { .said, .sugg, .spk .cell { margin-left: 0; } .spkhead { grid-template-columns: 30px minmax(0, 1fr) auto; } .spkhead .side { display: none; } }
 pre.tr { margin: 0; white-space: pre-wrap; font: 14px/1.6 "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif; max-height: 520px; overflow: auto; }
 .more { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; }
 @media (max-width: 560px) {
@@ -349,7 +357,10 @@ const STR = {
     defaultDrive: 'Store new recordings in Google Drive', folder: 'Drive folder', audio: 'Include the audio',
     storage: 'Storage', storageNote: 'Off: recordings, transcripts and summaries stay on aibox1. You can change it for each meeting.',
     settingsKick: 'Your recorder on aibox1', drive: 'Google Drive', openFolder: 'Open folder', length: 'Length', speakers: 'Speakers',
-    speakerNames: 'Speaker names', saveNames: 'Save names', transcript: 'Transcript', more: 'More', newSummary: 'Write a new summary',
+    speakerNames: 'Speaker names', saveNames: 'Save names', unnamed: (n) => ` · ${n} without a name`,
+    talk: (share, turns, first) => `${share}% of the talk · ${turns} turns · first at ${first}`,
+    play: 'Play', stopPlay: 'Stop', use: (n) => `Use "${n}"`, nameLabel: 'Name',
+    by: { recorder: 'In the meeting', agent: 'Your agent', person: 'You' }, transcript: 'Transcript', more: 'More', newSummary: 'Write a new summary',
     openBox: 'Open on aibox1 (VPN)', noneHead: 'No meetings yet', none1: 'Connect your phone.', none2: 'Record a meeting with it. Its summary shows up here.',
     connected: (n) => `Done: ${n}`,
     today: 'Today', yesterday: 'Yesterday', local: 'Local', processing: 'Processing', failed: 'Failed', notYet: 'Not yet',
@@ -388,7 +399,10 @@ const STR = {
     defaultDrive: 'Neue Aufnahmen in Google Drive ablegen', folder: 'Drive-Ordner', audio: 'Audio mit ablegen',
     storage: 'Ablage', storageNote: 'Aus: Aufnahmen, Transkripte und Zusammenfassungen bleiben auf aibox1. Sie können das für jedes Meeting ändern.',
     settingsKick: 'Ihr Recorder auf aibox1', drive: 'Google Drive', openFolder: 'Ordner öffnen', length: 'Länge', speakers: 'Sprecher',
-    speakerNames: 'Namen der Sprecher', saveNames: 'Namen speichern', transcript: 'Transkript', more: 'Mehr', newSummary: 'Neue Zusammenfassung schreiben',
+    speakerNames: 'Namen der Sprecher', saveNames: 'Namen speichern', unnamed: (n) => ` · ${n} ohne Namen`,
+    talk: (share, turns, first) => `${share} % der Redezeit · ${turns} Beiträge · zuerst bei ${first}`,
+    play: 'Anhören', stopPlay: 'Stopp', use: (n) => `"${n}" übernehmen`, nameLabel: 'Name',
+    by: { recorder: 'Im Meeting', agent: 'Ihr Agent', person: 'Sie' }, transcript: 'Transkript', more: 'Mehr', newSummary: 'Neue Zusammenfassung schreiben',
     openBox: 'Auf aibox1 öffnen (VPN)', noneHead: 'Noch keine Meetings', none1: 'Verbinden Sie Ihr Telefon.', none2: 'Nehmen Sie damit ein Meeting auf. Die Zusammenfassung erscheint hier.',
     connected: (n) => `Erledigt: ${n}`,
     today: 'Heute', yesterday: 'Gestern', local: 'Lokal', processing: 'In Arbeit', failed: 'Fehler', notYet: 'Noch nicht',
@@ -567,6 +581,40 @@ function renderSummary(markdown) {
   return parts.join('');
 }
 
+/* Speaker cards: the most talkative first. Play: seven seconds of the voice
+   from this meeting (a signed link, two hours). Use: puts a suggested name in
+   the field; Save names applies them everywhere. */
+const player = new Audio();
+let playing = null;
+player.addEventListener('ended', () => { if (playing) playing.textContent = t('play'); playing = null; });
+function renderSpeakers(cards) {
+  const open = cards.filter((c) => !c.name).length;
+  $('dSpkBox').hidden = !cards.length;
+  $('dSpkBox').querySelector('summary').textContent = t('speakerNames') + (open ? t('unnamed')(open) : '');
+  $('dSpk').innerHTML = cards.map((c, i) => `<div class="spk">
+      <div class="spkhead"><span class="num">${pad(i + 1)}</span><span class="who">${esc(c.label)}</span>
+        <span class="side">${c.turns ? esc(t('talk')(c.share, c.turns, length(c.first))) : ''}</span>
+        ${c.clip_url ? `<button class="textbtn play" data-url="${esc(c.clip_url)}">${esc(t('play'))}</button>` : '<span></span>'}</div>
+      ${(c.lines || []).map((l) => `<p class="said">"${esc(l)}"</p>`).join('')}
+      ${(c.suggestions || []).map((x) => `<p class="sugg"><button class="textbtn use" data-label="${esc(c.label)}" data-name="${esc(x.name)}">${esc(t('use')(x.name))}</button>` +
+        `<span class="muted">${esc(t('by')[x.by] || '')}${x.why ? ': ' + esc(x.why) : ''}</span></p>`).join('')}
+      <label class="cell"><span class="label">${esc(t('nameLabel'))}</span><input class="line" data-label="${esc(c.label)}" value="${esc(c.name)}"></label>
+    </div>`).join('');
+  $('dSpk').querySelectorAll('.play').forEach((b) => b.addEventListener('click', () => {
+    const again = playing === b;
+    player.pause();
+    if (playing) playing.textContent = t('play');
+    playing = null;
+    if (again) return;
+    player.src = b.dataset.url;
+    player.play().then(() => { playing = b; b.textContent = t('stopPlay'); }).catch(fail);
+  }));
+  $('dSpk').querySelectorAll('.use').forEach((b) => b.addEventListener('click', () => {
+    const input = [...$('dSpk').querySelectorAll('input')].find((x) => x.dataset.label === b.dataset.label);
+    if (input) { input.value = b.dataset.name; input.focus(); }
+  }));
+}
+
 async function openMeeting(id, keepOpen) {
   try {
     const m = await call('get_meeting', { meeting_id: id, include_transcript: false });
@@ -581,9 +629,8 @@ async function openMeeting(id, keepOpen) {
     $('dLink').hidden = !m.drive_url; if (m.drive_url) $('dLink').href = m.drive_url;
     $('dNote').textContent = m.storage !== 'drive' ? t('noteLocal') : (m.drive_url ? t('noteDone') : t('noteWaiting'));
     $('dSum').innerHTML = renderSummary(m.summary_md);
-    $('dSpk').innerHTML = Object.entries(m.speaker_names || {}).map(([label, name]) =>
-      `<label><span class="label">${esc(label)}</span><input class="line" data-label="${esc(label)}" value="${esc(name)}"></label>`).join('');
-    $('dSpkBox').hidden = !Object.keys(m.speaker_names || {}).length;
+    renderSpeakers(m.speakers || Object.entries(m.speaker_names || {}).map(([label, name]) =>
+      ({ label, name, suggestions: [], lines: [], share: 0, turns: 0, first: 0 })));
     $('dBox').href = m.url;
     if (!keepOpen) { $('dTrBox').open = false; $('dTr').textContent = ''; }
   } catch (e) { fail(e); }

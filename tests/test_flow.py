@@ -531,7 +531,8 @@ def test_a_meeting_agent_gets_the_skill_and_the_files(app, client, tmp_path):
 
     setup = call("agent_setup").json()["result"]
     assert "## Set up" in setup["skill"] and "routine_create" in setup["skill"]
-    assert setup["each_run"].startswith("1.") and setup["routine"]["quiet"] == "[Nothing new]"
+    assert "## Each run" in setup["skill"] and setup["routine"]["quiet"] == "[Nothing new]"
+    assert len(json.dumps(setup)) < 12000                # what an agent's data_connector passes on whole
     # a meeting of Ana's, recorded with her phone
     offer = call("pair_phone", caller="user").json()["result"]
     phone = {"Authorization": "Bearer " + redeem(client, offer["url"]).json()["token"]}
@@ -542,3 +543,39 @@ def test_a_meeting_agent_gets_the_skill_and_the_files(app, client, tmp_path):
     assert got.status_code == 200 and got.content.decode() == read_text(app.state.store.folder(mid) / "transcript.md")
     assert link["bytes"] == len(got.content)                              # the plain size, not the encrypted one
     assert call("meeting_files", {"meeting_id": mid}, user="ext-ben-agent").status_code == 400
+
+
+def test_hints_for_naming_speakers(app, client, tmp_path, monkeypatch):
+    """Who said how much and what, a clip of their voice, and suggested names with
+    their reasons: from the transcript (the recorder's summary) and from an agent."""
+    import io
+    import wave
+    said = {**SUMMARY, "speakers": [{"label": "Speaker 2", "name": "Luis", "evidence": "[00:00:12] Speaker 1: Luis, can you send it?"},
+                                    {"label": "Speaker 1", "name": "", "evidence": ""}]}
+    monkeypatch.setattr(wk, "summarize", lambda transcript, settings, log=print: dict(said))
+    service = create_token(app.state.db, "brainbot:agent command", "agent", trusts_identity=True)
+
+    def call(op, args=None, caller="user"):
+        h = {"Authorization": f"Bearer {service}", "X-Indie-User": "ext-cleo", "X-Indie-Caller": caller}
+        return client.post("/api/v1/indiechat", json={"op": op, "args": args or {}}, headers=h).json()["result"]
+
+    phone = {"Authorization": "Bearer " + redeem(client, call("pair_phone")["url"]).json()["token"]}
+    mid, _ = make_meeting(app, client, tmp_path, headers=phone)
+    cards = call("get_meeting", {"meeting_id": mid, "include_transcript": False})["speakers"]
+    assert [c["label"] for c in cards] == sorted([c["label"] for c in cards], key=lambda l: -next(x["words"] for x in cards if x["label"] == l))
+    assert 98 <= sum(c["share"] for c in cards) <= 102 and all(c["lines"] and c["turns"] for c in cards)
+    two = next(c for c in cards if c["label"] == "Speaker 2")
+    assert [(x["name"], x["by"]) for x in two["suggestions"]] == [("Luis", "recorder")] and "Luis, can you" in two["suggestions"][0]["why"]
+    call("suggest_speakers", {"meeting_id": mid, "suggestions": {"Speaker 1": {"name": "Anna", "why": "invited, per the calendar"},
+                                                                  "Speaker 9": {"name": "Nobody"}}}, caller="agent")
+    one = next(c for c in call("get_meeting", {"meeting_id": mid, "include_transcript": False})["speakers"] if c["label"] == "Speaker 1")
+    assert [(x["name"], x["by"]) for x in one["suggestions"]] == [("Anna", "agent")]
+    clip = client.get(one["clip_url"].replace("https://box.test", ""))
+    assert clip.status_code == 200 and clip.headers["content-type"] == "audio/wav"
+    w = wave.open(io.BytesIO(clip.content))
+    assert w.getframerate() == 16000 and 0 < w.getnframes() / 16000 <= 7.01
+    plain = wave.open(io.BytesIO(read_bytes(app.state.store.audio(mid))))
+    from recorder.speakers import profile
+    start = profile(app.state.store.transcript(mid))["Speaker 1"]["clip"]["s"]
+    plain.setpos(int(start * 16000))
+    assert w.readframes(w.getnframes()) == plain.readframes(w.getnframes())

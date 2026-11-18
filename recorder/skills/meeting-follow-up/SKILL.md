@@ -36,6 +36,11 @@ Drive is the person's own, through your Drive tools.
      (two hours). Download the transcript with
      `mkdir -p /workspace/meetings/ID && curl -fsS -o /workspace/meetings/ID/transcript.md "<url>"`
      and read the file. Never copy transcript text into the chat.
+   - A long meeting does not fit your context at once: if the transcript has
+     more than 80,000 characters (`wc -c`), split it
+     (`split -C 60000 transcript.md part-`), read one part at a time, write a
+     few lines of notes per part into /workspace/meetings/ID/notes.md, and
+     write the summary from your notes and the recorder's summary.
    - Write a better summary in the meeting's language with what you know
      about the people, projects and earlier meetings (your memory, the wiki,
      `list_meetings` and `get_meeting` for earlier ones): a short TL;DR,
@@ -46,7 +51,16 @@ Drive is the person's own, through your Drive tools.
    - Store it: `{"op": "update_summary", "args": {"meeting_id": ID, "markdown": "...",
      "action_items": [{"text": "...", "owner": "...", "due": "..."}], "note": "what you changed and which context you used"}}`
      (markdown without a title line).
-3. Google Drive, for each item under "outbox":
+3. Speaker names, for the same meetings: when `get_meeting` shows speakers
+   without a name, suggest who they are with
+   `{"op": "suggest_speakers", "args": {"meeting_id": ID, "suggestions": {"Speaker 2": {"name": "Anna", "why": "..."}}}}`.
+   Base it on the transcript (introductions, people addressed by name; the
+   speakers' "lines" help), your memory and the wiki (who usually attends,
+   who owns which topic), the names the person set in earlier meetings, and
+   the person's calendar if you have it (who was invited at that time). Say
+   in "why" what you based it on. Never rename anyone: the person decides in
+   the app, with your suggestion and a clip of the voice in front of them.
+4. Google Drive, for each item under "outbox":
    - drive_store: `{"op": "drive_files", "args": {"proposal_id": PID}}`. Find
      or create the folder "folder" in My Drive and in it the subfolder
      "subfolder". Download each file with curl into
@@ -58,4 +72,4 @@ Drive is the person's own, through your Drive tools.
      (create it if missing), add payload.markdown at the end and keep what is
      there, then ack it with the doc's link.
    - If one fails, leave it for the next run and say why.
-4. End with one short line per meeting and per item you handled.
+5. End with one short line per meeting and per item you handled.

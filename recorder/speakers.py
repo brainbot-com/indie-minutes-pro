@@ -1,0 +1,87 @@
+"""Help with naming the speakers of a meeting: how much each one said and when,
+a few of their lines, seven seconds of their voice to listen to, and names
+suggested from what was said (the recorder's summary) or from what a person's
+agent knows (memory, wiki, calendar). Nothing is renamed without the person.
+No voiceprints: a clip is cut from the meeting's own audio when someone asks
+for it, and nothing about a voice is kept or compared across meetings."""
+import struct
+
+from . import vault
+from .render import words_to_segments
+from .util import now_iso, read_json, write_json
+
+CLIP_S = 7.0
+WHO = ("recorder", "agent", "person")
+
+
+def profile(transcript):
+    """Per label: words, share of all words (%), turns, first time (s), three of
+    their longest lines, and the clip: a window inside their longest turn."""
+    words = [w for w in (transcript or {}).get("words", []) if (w.get("w") or "").strip()]
+    total = len(words) or 1
+    segs = words_to_segments(words)
+    labels = (transcript or {}).get("speakers") or sorted({s["spk"] for s in segs})
+    out = {}
+    for label in labels:
+        mine = [s for s in segs if s["spk"] == label]
+        n = sum(1 for w in words if w.get("spk") == label)
+        longest = sorted(mine, key=lambda s: s["e"] - s["s"], reverse=True)
+        clip = None
+        if longest:
+            top = longest[0]
+            start = top["s"] + min(0.3, (top["e"] - top["s"]) / 4)
+            clip = {"s": round(start, 2), "e": round(min(top["e"], start + CLIP_S), 2)}
+        out[label] = {"words": n, "share": round(100 * n / total), "turns": len(mine),
+                      "first": round(mine[0]["s"], 1) if mine else None,
+                      "lines": [_line(s["text"]) for s in sorted(longest[:3], key=lambda s: s["s"])],
+                      "clip": clip}
+    return out
+
+
+def _line(text, n=140):
+    text = " ".join(text.split())
+    return text if len(text) <= n else text[:n].rsplit(" ", 1)[0] + " ..."
+
+
+def hints(folder):
+    return read_json(folder / "speaker_hints.json", {}) or {}
+
+
+def suggest(folder, labels, suggestions, by):
+    """suggestions: {label: {name, why}}. One per author and label: a newer one
+    replaces that author's older one; an empty name withdraws it."""
+    if by not in WHO:
+        raise ValueError(f"by must be one of {WHO}")
+    cur = hints(folder)
+    for label, s in (suggestions or {}).items():
+        if label not in labels or not isinstance(s, dict):
+            continue
+        keep = [x for x in cur.get(label, []) if x.get("by") != by]
+        name = " ".join(str(s.get("name") or "").split())[:60]
+        if name:
+            keep.append({"name": name, "why": " ".join(str(s.get("why") or "").split())[:300], "by": by, "at": now_iso()})
+        cur[label] = keep
+    write_json(folder / "speaker_hints.json", cur)
+    return cur
+
+
+def clip_wav(path, start, end):
+    """Seconds start..end of a 16-bit PCM WAV (encrypted at rest or not) as a WAV of their own."""
+    v = vault.VAULT
+    head = b"".join(v.stream(path, 0, 4096))
+    i, fmt, data = 12, None, None
+    while i + 8 <= len(head):
+        cid, size = head[i:i + 4], struct.unpack("<I", head[i + 4:i + 8])[0]
+        if cid == b"fmt ":
+            fmt = head[i + 8:i + 24]
+        if cid == b"data":
+            data = i + 8
+            break
+        i += 8 + size + (size & 1)
+    if fmt is None or data is None:
+        raise ValueError("not a PCM WAV")
+    _, channels, rate, _, align, bits = struct.unpack("<HHIIHH", fmt)
+    pcm = b"".join(v.stream(path, data + int(start * rate) * align, data + int(end * rate) * align))
+    return (b"RIFF" + struct.pack("<I", 36 + len(pcm)) + b"WAVEfmt " +
+            struct.pack("<IHHIIHH", 16, 1, channels, rate, rate * align, align, bits) +
+            b"data" + struct.pack("<I", len(pcm)) + pcm)

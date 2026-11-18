@@ -11,7 +11,7 @@ from pathlib import Path
 from fastapi import Request
 from fastapi.responses import JSONResponse, Response
 
-from . import __version__, vault
+from . import __version__, speakers, vault
 from .people import resolve
 from .util import read_text
 
@@ -115,6 +115,15 @@ TOOLS = [
                     "Transcript.md. Download a long transcript with curl -o and read the file: it never has to "
                     "pass through the conversation, which would cut it.",
      "inputSchema": {"type": "object", "required": ["meeting_id"], "properties": {"meeting_id": {"type": "string"}}}},
+    {"name": "suggest_speakers",
+     "description": "Suggest who a speaker label is, e.g. {\"Speaker 2\": {\"name\": \"Anna\", \"why\": \"addressed as Anna at "
+                    "00:12:03; leads the sales topics like in earlier meetings\"}}. The person sees each suggestion with its "
+                    "reason and decides; nothing is renamed. A new suggestion of yours for a label replaces your older one; an "
+                    "empty name withdraws it.",
+     "inputSchema": {"type": "object", "required": ["meeting_id", "suggestions"], "properties": {
+         "meeting_id": {"type": "string"},
+         "suggestions": {"type": "object", "additionalProperties": {"type": "object", "properties": {
+             "name": {"type": "string"}, "why": {"type": "string"}}}}}}},
     {"name": "agent_setup",
      "description": "The meeting-follow-up skill (SKILL.md): how a person's own agent sets itself up to write "
                     "better summaries and store meetings in Google Drive, and what each run does.",
@@ -143,6 +152,25 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
     def visible(who, mid):
         m = store.meta(mid) if mid else None
         return m if who.sees(m) else None
+
+    def author(who):
+        """Who makes a suggestion: the person in the app, or an agent (theirs through
+        the connector, or one with a recorder token of its own)."""
+        if who.token.get("trusts_identity"):
+            return "person" if who.caller == "user" else "agent"
+        return "agent" if who.token["role"] == "agent" else "person"
+
+    def speaker_cards(mid):
+        """Each speaker with what helps to name them, the most talkative first; the
+        clip is a signed link (two hours) to seven seconds of their voice."""
+        from .signing import sign
+        prof = speakers.profile(store.transcript(mid) or {})
+        names, sugg, audio = store.names(mid), speakers.hints(store.folder(mid)), store.audio(mid).exists()
+        cards = [{"label": label, "name": names.get(label, ""), "suggestions": sugg.get(label, []),
+                  **{k: p[k] for k in ("share", "words", "turns", "first", "lines")},
+                  "clip_url": f"{s.files_base_url}/{sign(s, mid, 'clip:' + label)}" if audio and p["clip"] else None}
+                 for label, p in prof.items()]
+        return sorted(cards, key=lambda c: -c["words"])
 
     def outbox(who):
         return [p for p in followup.outbox() if visible(who, p["meeting_id"])]
@@ -201,13 +229,20 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
                     "files": [{"name": n, "bytes": vault.VAULT.size(path),
                                "url": f"{s.files_base_url}/{sign(s, mid, n)}"} for n, path in store.drive_files(mid)]}
         if name == "agent_setup":
-            text = SKILL.read_text()
-            return {"skill": text, "each_run": text.split("## Each run", 1)[1].strip(),
-                    "routine": {"title": "Meeting follow-up", "schedule": "every hour", "quiet": "[Nothing new]"}}
+            # the routine's prompt is the skill's "Each run" part; one copy keeps the answer
+            # well under what an agent's data_connector passes on (12,000 characters)
+            return {"skill": SKILL.read_text(),
+                    "routine": {"title": "Meeting follow-up", "schedule": "every hour", "quiet": "[Nothing new]",
+                                "prompt": "the whole text under \"## Each run\" in the skill"}}
         mid = args.get("meeting_id", "")
-        if name in ("get_meeting", "update_summary", "set_storage", "rename_speakers", "new_summary", "meeting_files") \
-                and not visible(who, mid):
+        if name in ("get_meeting", "update_summary", "set_storage", "rename_speakers", "new_summary", "meeting_files",
+                    "suggest_speakers") and not visible(who, mid):
             raise ToolError(f"no meeting {mid!r}")
+        if name == "suggest_speakers":
+            try:
+                return speakers.suggest(store.folder(mid), set(store.names(mid)), args.get("suggestions") or {}, author(who))
+            except ValueError as e:
+                raise ToolError(str(e))
         if name == "meeting_files":
             from .signing import sign
             return {"meeting_id": mid, "files": [{"name": n, "bytes": vault.VAULT.size(path),
@@ -238,7 +273,8 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
                    "summary_md": _read(store.folder(mid) / "summary.md"),
                    "action_items": store.actions(mid).get("items", []),
                    "summary_versions": [{k: v.get(k) for k in ("version", "author", "created_at", "note")}
-                                        for v in store.summary_versions(mid)]}
+                                        for v in store.summary_versions(mid)],
+                   "speakers": speaker_cards(mid)}
             if args.get("include_transcript", True):
                 out["transcript_md"] = _read(store.folder(mid) / "transcript.md")
             return out

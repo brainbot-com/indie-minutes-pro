@@ -7,7 +7,7 @@ import threading
 import time
 import traceback
 
-from . import audio, vault
+from . import audio, speakers, vault
 from .summarize import summarize
 from .util import now_iso, read_text, write_text
 
@@ -160,4 +160,9 @@ class Worker:
         t0 = time.monotonic()
         summary = summarize(transcript, self.s, log=log)
         version = self.store.add_summary(mid, summary, author="recorder")
+        # names the transcript itself gives (introductions, people addressed by name): suggestions only
+        named = {x.get("label"): {"name": x.get("name"), "why": x.get("evidence")}
+                 for x in summary.get("speakers") or [] if (x.get("name") or "").strip()}
+        if named:
+            speakers.suggest(self.store.folder(mid), set(self.store.names(mid)), named, by="recorder")
         log(f"summary v{version} ({self.s.llm_model}, {time.monotonic() - t0:.1f} s)")
