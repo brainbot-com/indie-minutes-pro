@@ -16,12 +16,17 @@ Drive is the person's own, through your Drive tools.
    aibox1. Ask the person (ask_person) whether your engine is "aibox1 Ollama
    (64k)" with the model qwen3.8:27b-ctx65536. If it is not, tell them to
    change it in your settings under Engine, and go on when they confirm.
-2. Google Drive. If you have no Drive tools that create files, ask for them
-   with connection_request (Google Drive, with changes) and go on once it is
-   connected.
+2. Google Drive. Ask with connection_request (Google Drive, with changes):
+   it shows the person a card when Drive is missing and tells you when you
+   have it already. Next to the indie-recorder app you may see no drive_*
+   tools even then: that app is shared by everyone, so a turn beside it gets
+   none of the person's own accounts. The routine runs without the app and
+   gets them.
 3. The routine. Create it with routine_create: title "Meeting follow-up",
-   schedule every hour, quiet "[Nothing new]", and as its prompt the whole
-   text of "Each run" below, so each run stands on its own.
+   schedule every hour, quiet "[Nothing new]", appId "" (no app: a routine
+   that keeps the shared app up to date gets none of the person's own
+   accounts, so no Drive), and as its prompt the whole text of "Each run"
+   below, so each run stands on its own.
 4. Say in one or two lines what is set up and that the first run comes
    within the hour.
 
@@ -68,11 +73,16 @@ Drive is the person's own, through your Drive tools.
      or create the folder "folder" in My Drive and in it the subfolder
      "subfolder". Download each file with curl into
      /workspace/meetings/<subfolder>/<name> and upload it with your Drive
-     tools. If the subfolder already holds a file of that name, move the old
-     one into a subfolder "Older versions" first. Then
+     tools (drive_list, drive_create_folder, drive_upload, drive_move). If
+     the subfolder already holds a file of that name, move the old one into
+     a subfolder "Older versions" first. Then
      `{"op": "ack_outbox_item", "args": {"proposal_id": PID, "url": "<the subfolder's link>"}}`.
    - drive_log: find the Google Doc payload.doc in the folder payload.folder
      (create it if missing), add payload.markdown at the end and keep what is
      there, then ack it with the doc's link.
    - If one fails, leave it for the next run and say why.
+   - No drive_* tools in this run: do not look for Drive another way. Leave
+     the items, and say that the routine must not keep an app up to date
+     (in its settings), because a routine tied to the shared indie-recorder
+     app gets none of the person's own accounts.
 5. End with one short line per meeting and per item you handled.

@@ -250,7 +250,7 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
             # well under what an agent's data_connector passes on (12,000 characters)
             return {"skill": SKILL.read_text(),
                     "routine": {"title": "Meeting follow-up", "schedule": "every hour", "quiet": "[Nothing new]",
-                                "prompt": "the whole text under \"## Each run\" in the skill"}}
+                                "appId": "", "prompt": "the whole text under \"## Each run\" in the skill"}}
         mid = args.get("meeting_id", "")
         if name in ("get_meeting", "update_summary", "set_storage", "rename_speakers", "new_summary", "meeting_files",
                     "suggest_speakers") and not visible(who, mid):
