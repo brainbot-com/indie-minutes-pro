@@ -57,6 +57,15 @@
     <string name="mic_denied">Die App braucht das Mikrofon, um aufzunehmen.</string>
 
     <string name="recordings">Aufnahmen</string>
+    <string name="on_this_phone">Auf diesem Telefon</string>
+    <plurals name="n_uploading">
+        <item quantity="one">%d lädt hoch</item>
+        <item quantity="other">%d laden hoch</item>
+    </plurals>
+    <plurals name="n_processing">
+        <item quantity="one">%d in Arbeit</item>
+        <item quantity="other">%d in Arbeit</item>
+    </plurals>
     <string name="none_yet">Noch nichts aufgenommen.</string>
     <string name="untitled">Aufnahme</string>
     <string name="st_recording">Aufnahme</string>

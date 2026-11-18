@@ -60,6 +60,15 @@
     <string name="mic_denied">The app needs the microphone to record.</string>
 
     <string name="recordings">Recordings</string>
+    <string name="on_this_phone">On this phone</string>
+    <plurals name="n_uploading">
+        <item quantity="one">%d uploading</item>
+        <item quantity="other">%d uploading</item>
+    </plurals>
+    <plurals name="n_processing">
+        <item quantity="one">%d processing</item>
+        <item quantity="other">%d processing</item>
+    </plurals>
     <string name="none_yet">Nothing recorded yet.</string>
     <string name="untitled">Recording</string>
     <string name="st_recording">Recording</string>

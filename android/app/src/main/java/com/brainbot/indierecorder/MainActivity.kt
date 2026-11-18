@@ -66,6 +66,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
@@ -76,12 +77,16 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.layout.FirstBaseline
 import androidx.compose.ui.layout.Layout
-import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -230,8 +235,8 @@ private fun tnum() = LocalTextStyle.current.merge(TextStyle(fontFeatureSettings 
 
 /** Small capitals over a screen's title or the timer. */
 @Composable
-private fun Kicker(text: String, color: Color = pal().muted) =
-    Text(text.uppercase(), fontSize = 12.sp, fontWeight = FontWeight.W700, letterSpacing = 0.5.sp, color = color)
+private fun Kicker(text: String, color: Color = pal().muted, modifier: Modifier = Modifier) =
+    Text(text.uppercase(), modifier, fontSize = 12.sp, fontWeight = FontWeight.W700, letterSpacing = 0.5.sp, color = color)
 
 /** A cell's or a field's label. */
 @Composable
@@ -261,24 +266,47 @@ private fun Page(content: @Composable ColumnScope.() -> Unit) {
 }
 
 /**
- * The main screen (Ready, Recording, Paused) never scrolls: on a short screen the timer, the
- * waveform and the gaps get smaller and the blocks give up height (BlockAndList); only the
- * recordings list scrolls. Where that still leaves the block and the list less than their least
- * (a small phone with large text), the page turns tight: the gaps close up and the screen leaves
- * out what it can do without. The content gets the page's height, whether it is tight, and what
- * to call when it finds it is short of room. key: the screen (tight starts over for another one).
+ * The main screen (Ready, Recording, Paused) never scrolls. Its parts stand one under the other
+ * with the page's gaps (Close: 4dp, a kicker over its timer), the last one, the Recordings button,
+ * at the bottom. The parts that grow (Grow: the block, the timer, the waveform) get their full size
+ * where the page has room for it and give way on a short screen (growHeights). Where not even their
+ * least fits (a small phone with large text), the page turns tight: the gaps close up and the screen
+ * leaves out what it can do without. The content gets the page's height and whether it is tight.
+ * key: the screen (tight starts over for another one).
  */
 @Composable
-private fun FitPage(key: Any?, content: @Composable ColumnScope.(Dp, Boolean, () -> Unit) -> Unit) {
+private fun FitPage(key: Any?, content: @Composable (Dp, Boolean) -> Unit) {
     BoxWithConstraints(Modifier.fillMaxSize().background(pal().paper).systemBarsPadding().imePadding()) {
         val h = maxHeight
         var tight by remember(key, h, LocalDensity.current.fontScale) { mutableStateOf(false) }
-        Column(Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, bottom = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(pageGap(h, tight))) {
-            content(h, tight) { tight = true }
+        val gap = pageGap(h, tight)
+        Layout({ content(h, tight) }, Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, bottom = 16.dp)) { parts, c ->
+            val grow = parts.map { it.layoutId as? Grow }
+            val loose = Constraints(maxWidth = c.maxWidth, maxHeight = c.maxHeight)
+            val fixed = parts.mapIndexed { i, part -> if (grow[i] == null) part.measure(loose) else null }
+            val after = parts.map { (if (it.layoutId == Close) 4.dp else gap).roundToPx() }
+            val least = grow.map { it?.least?.roundToPx() ?: 0 }
+            val room = c.maxHeight - fixed.sumOf { it?.height ?: 0 } - after.dropLast(1).sum()
+            if (room < least.sum()) tight = true
+            val heights = growHeights(room, least, grow.map { it?.full?.roundToPx() ?: 0 }, grow.map { it?.first == true })
+            val placed = parts.mapIndexed { i, part -> fixed[i] ?: part.measure(Constraints.fixed(c.maxWidth, heights[i])) }
+            layout(c.maxWidth, c.maxHeight) {
+                var y = 0
+                placed.forEachIndexed { i, p ->
+                    if (i == placed.lastIndex) y = maxOf(y, c.maxHeight - p.height)      // what the parts leave free stays above it
+                    p.place(0, y)
+                    y += p.height + after[i]
+                }
+            }
         }
     }
 }
+
+/** A part of the main screen that grows with the page from least to full; first: the room goes to it before the others. */
+private class Grow(val least: Dp, val full: Dp, val first: Boolean = false)
+
+/** A part that stays close to the part under it: a kicker over its timer. */
+private object Close
 
 /** The main screen's gaps, as in the web app: 22dp, on short screens 2.2% of the height (at least 10dp); 8dp when tight. */
 private fun pageGap(h: Dp, tight: Boolean): Dp = when {
@@ -287,42 +315,11 @@ private fun pageGap(h: Dp, tight: Boolean): Dp = when {
     else -> (h * 0.022f).coerceAtLeast(10.dp)
 }
 
-/** The timer's height, as in the web app: 12% of the page's, from 56 to 104dp. */
+/** The timer's least, as in the web app: 12% of the page's height, from 56 to 104dp. */
 private fun timerSize(h: Dp): Dp = (h * 0.12f).coerceIn(56.dp, 104.dp)
 
-/** The waveform's height, as in the web app: 10% of the page's, from 56 to 88dp; 40dp when tight. */
-private fun waveHeight(h: Dp, tight: Boolean): Dp = if (tight) 40.dp else (h * 0.1f).coerceIn(56.dp, 88.dp)
-
-/**
- * The bottom of the main screen: the block (Record, or Pause and Stop) takes what is left between
- * minBlock and maxBlock, the notes under it what they need, the list the rest, scrolling on its own.
- * onShort: it got less than the least block, the gap and the least list (listMin) need.
- */
-@Composable
-private fun BlockAndList(modifier: Modifier, minBlock: Dp, maxBlock: Dp, gap: Dp, onShort: () -> Unit,
-                         block: @Composable () -> Unit, notes: @Composable () -> Unit, list: @Composable () -> Unit,
-                         listMin: Dp = 72.dp) {
-    val least = with(LocalDensity.current) { (minBlock + gap + listMin).roundToPx() }
-    Layout(contents = listOf(block, notes, list), modifier = modifier.onSizeChanged { if (it.height < least) onShort() }) { (b, n, l), c ->
-        val width = c.maxWidth
-        val gapPx = gap.roundToPx()
-        val noteParts = n.map { it.measure(Constraints(maxWidth = width)) }
-        val notesH = noteParts.sumOf { it.height }
-        val room = (c.maxHeight - notesH - gapPx * (if (notesH > 0) 2 else 1)).coerceAtLeast(0)
-        val blockH = (room - listMin.roundToPx()).coerceIn(minBlock.roundToPx(), maxBlock.roundToPx()).coerceAtMost(room)
-        val listH = (room - blockH).coerceAtLeast(0)
-        val blockParts = b.map { it.measure(Constraints.fixed(width, blockH)) }
-        val listParts = l.map { it.measure(Constraints.fixed(width, listH)) }
-        layout(width, c.maxHeight) {
-            var y = 0
-            blockParts.forEach { it.place(0, y) }
-            y += blockH + gapPx
-            noteParts.forEach { it.place(0, y); y += it.height }
-            if (notesH > 0) y += gapPx
-            listParts.forEach { it.place(0, y) }
-        }
-    }
-}
+/** The waveform's least, as in the web app: 10% of the page's height, from 56 to 88dp. */
+private fun waveHeight(h: Dp): Dp = (h * 0.1f).coerceIn(56.dp, 88.dp)
 
 /**
  * One line that always fits: the largest size from max down (1sp steps, not below min) at which it
@@ -489,6 +486,64 @@ private fun OutlineButton(label: String, onClick: () -> Unit) {
     }
 }
 
+/**
+ * The way from the main screen to the recordings, an outlined button as in the web app: the word on
+ * the left, how many there are and an arrow on the right, and before them in red what is under way
+ * ("1 uploading"). Where one line is too narrow for all of it (large text), the red note goes under
+ * the word, so nothing is cut off.
+ */
+@Composable
+private fun RecordingsButton(count: Int, busy: String?, height: Dp, onClick: () -> Unit) {
+    val p = pal()
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val ink = if (pressed) p.paper else p.ink
+    val word = stringResource(R.string.recordings)
+    Layout(contents = listOf(
+        { Text(word, color = ink, fontSize = 15.sp, lineHeight = 20.sp, fontWeight = FontWeight.W700, maxLines = 1, softWrap = false) },
+        { busy?.let { Text(it, color = p.red, fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.W700, maxLines = 1, softWrap = false) } },
+        { Text("$count", color = ink, fontSize = 15.sp, lineHeight = 20.sp, fontWeight = FontWeight.W700, style = tnum()) },
+        { Chevron(ink) },
+    ), Modifier.fillMaxWidth().heightIn(min = height).background(if (pressed) p.ink else Color.Transparent).border(2.dp, p.ink)
+        .clickable(source, indication = null, role = Role.Button, onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp)
+    ) { (w, b, n, a), c ->
+        val loose = Constraints(maxWidth = c.maxWidth, maxHeight = c.maxHeight)
+        val label = w.first().measure(loose)
+        val note = b.firstOrNull()?.measure(loose)
+        val num = n.first().measure(loose)
+        val arrow = a.first().measure(loose)
+        val gap = 14.dp.roundToPx()
+        val wide = 18.dp.roundToPx()
+        val end = num.width + wide + arrow.width
+        val below = note != null && label.width + wide + note.width + gap + end > c.maxWidth
+        val left = label.height + if (below) note!!.height else 0
+        val height = maxOf(c.minHeight, left, num.height, arrow.height)
+        layout(c.maxWidth, height) {
+            label.place(0, (height - left) / 2)
+            num.place(c.maxWidth - end, (height - num.height) / 2)
+            arrow.place(c.maxWidth - arrow.width, (height - arrow.height) / 2)
+            note?.let {
+                if (below) it.place(0, (height - left) / 2 + label.height)
+                else it.place(c.maxWidth - end - gap - it.width, (height - num.height) / 2 + num[FirstBaseline] - it[FirstBaseline])
+            }
+        }
+    }
+}
+
+/** The arrow of a button that leads to another screen, as in the web app: a square's top and right side, turned to point right. */
+@Composable
+private fun Chevron(color: Color) = Canvas(Modifier.size(16.dp)) {
+    val s = 10.dp.toPx()
+    val w = 3.dp.toPx()
+    translate(left = -2.5.dp.toPx()) {          // the point stands right of the square's middle
+        rotate(45f) {
+            val o = Offset((size.width - s) / 2, (size.height - s) / 2)
+            drawRect(color, o, Size(s, w))
+            drawRect(color, Offset(o.x + s - w, o.y), Size(w, s))
+        }
+    }
+}
+
 @Composable
 private fun LinkText(label: String, onClick: () -> Unit) =
     Text(label, Modifier.clickable(onClick = onClick).padding(vertical = 6.dp), fontSize = 14.sp,
@@ -508,26 +563,28 @@ private fun PlaySign(color: Color) = Canvas(Modifier.size(26.dp)) {
 }
 
 /**
- * The recorded time, big: as tall as the page allows (timerSize) and never wider than the screen.
- * Sized in dp, not sp: a picture of the time, it does not grow with the phone's font size.
+ * The recorded time, big: a part of the main screen that grows (Grow), its figures from least to
+ * 104dp as the page allows, never wider than the screen. Sized in dp, not sp: a picture of the time,
+ * it does not grow with the phone's font size.
  */
 @Composable
-private fun Timer(ms: Long, color: Color, max: Dp) {
+private fun Timer(ms: Long, color: Color, least: Dp) {
     val text = timer(ms)
-    FitText(text, with(LocalDensity.current) { max.toSp() }, color, Modifier.fillMaxWidth(), min = 24.sp,
-        tracking = -0.05f, lineFactor = 0.92f, tabular = true, fitKey = text.replace(Regex("[0-9]"), "0"))
+    // its line is 0.92 of the figures' size
+    FitText(text, with(LocalDensity.current) { 104.dp.toSp() }, color, Modifier.layoutId(Grow(least * 0.92f, 104.dp * 0.92f)).fillMaxWidth(),
+        min = 24.sp, tracking = -0.05f, lineFactor = 0.92f, tabular = true, fitKey = text.replace(Regex("[0-9]"), "0"))
 }
 
 /**
  * The live waveform, the same as the PWA's: one bar per 100 ms (Waveform),
  * 3dp wide on a 5dp step, the newest at the right edge, mirrored around the
- * middle, at least 2dp tall; dim while paused.
+ * middle, at least 2dp tall; dim while paused. Its height comes with the modifier.
  */
 @Composable
-private fun Wave(bars: List<Float>, paused: Boolean, height: Dp) {
+private fun Wave(bars: List<Float>, paused: Boolean, modifier: Modifier) {
     val color = if (paused) pal().dim else pal().ink
     val description = stringResource(R.string.input_level)
-    Canvas(Modifier.fillMaxWidth().height(height).semantics { contentDescription = description }) {
+    Canvas(modifier.fillMaxWidth().semantics { contentDescription = description }) {
         val step = 5.dp.toPx()
         val w = 3.dp.toPx()
         val min = 2.dp.toPx()
@@ -547,6 +604,19 @@ private val boxState = MutableStateFlow<String?>(null)
 
 /** The box's name ("aibox1") from its health answer; null until it has said. */
 private val boxName = MutableStateFlow<String?>(null)
+
+/** How far the box is with the meetings the phone's recordings became ("done", "failed", ...), by meeting id. */
+private val meetingStates = mutableStateMapOf<String, String>()
+
+/** Asks the box about the meetings it is not done with yet. */
+private suspend fun askStates(api: BoxApi, items: List<LocalRecording>) {
+    for (r in items) {
+        val mid = r.meetingId ?: continue
+        if (meetingStates[mid] == "done" || meetingStates[mid] == "failed") continue
+        withContext(Dispatchers.IO) { runCatching { api.meeting(mid).optString("state") } }
+            .onSuccess { meetingStates[mid] = it }
+    }
+}
 
 @Composable
 private fun boxText(box: String?): Pair<String, Color> = when (box) {
@@ -578,14 +648,27 @@ private suspend fun learnName(ctx: Context, api: BoxApi) {
 
 private sealed interface Screen {
     data object Home : Screen
+    data object Recordings : Screen
     data class Detail(val meetingId: String) : Screen
     data object Settings : Screen
 }
 
 /** The open screen survives a rotation or a switch to dark mode (both recreate the activity). */
 private val ScreenSaver = Saver<Screen, String>(
-    save = { s -> when (s) { Screen.Home -> "home"; Screen.Settings -> "settings"; is Screen.Detail -> "detail:" + s.meetingId } },
-    restore = { v -> when { v == "settings" -> Screen.Settings; v.startsWith("detail:") -> Screen.Detail(v.removePrefix("detail:")); else -> Screen.Home } },
+    save = { s ->
+        when (s) {
+            Screen.Home -> "home"; Screen.Recordings -> "recordings"; Screen.Settings -> "settings"
+            is Screen.Detail -> "detail:" + s.meetingId
+        }
+    },
+    restore = { v ->
+        when {
+            v == "recordings" -> Screen.Recordings
+            v == "settings" -> Screen.Settings
+            v.startsWith("detail:") -> Screen.Detail(v.removePrefix("detail:"))
+            else -> Screen.Home
+        }
+    },
 )
 
 @Composable
@@ -593,6 +676,8 @@ fun Root(link: MutableState<String?>, autoPair: Boolean) {
     val ctx = LocalContext.current
     var cfg by remember { mutableStateOf(Pairing.load(ctx)) }
     var screen by rememberSaveable(stateSaver = ScreenSaver) { mutableStateOf<Screen>(Screen.Home) }
+    // what the main screen and the list keep while another screen is open: a typed title, how far the list is scrolled
+    val kept = rememberSaveableStateHolder()
     val pending = link.value
     val current = cfg
     if (boxName.value == null) boxName.value = Pairing.boxName(ctx)
@@ -604,15 +689,23 @@ fun Root(link: MutableState<String?>, autoPair: Boolean) {
     }
     when (val s = screen) {
         is Screen.Detail -> {
+            BackHandler { screen = Screen.Recordings }
+            DetailScreen(current, s.meetingId, onBack = { screen = Screen.Recordings })
+        }
+        Screen.Recordings -> {
             BackHandler { screen = Screen.Home }
-            DetailScreen(current, s.meetingId, onBack = { screen = Screen.Home })
+            kept.SaveableStateProvider("recordings") {
+                RecordingsScreen(current, onOpen = { screen = Screen.Detail(it) }, onBack = { screen = Screen.Home })
+            }
         }
         Screen.Settings -> {
             BackHandler { screen = Screen.Home }
             SettingsScreen(current, onBack = { screen = Screen.Home },
                 onDisconnect = { Pairing.clear(ctx); boxState.value = null; boxName.value = null; cfg = null; screen = Screen.Home })
         }
-        Screen.Home -> HomeScreen(current, onOpen = { screen = Screen.Detail(it) }, onSettings = { screen = Screen.Settings })
+        Screen.Home -> kept.SaveableStateProvider("home") {
+            HomeScreen(current, onRecordings = { screen = Screen.Recordings }, onSettings = { screen = Screen.Settings })
+        }
     }
 }
 
@@ -831,7 +924,7 @@ private fun rememberDefault(ctx: Context, settings: JSONObject) {
 }
 
 @Composable
-private fun HomeScreen(cfg: BoxConfig, onOpen: (String) -> Unit, onSettings: () -> Unit) {
+private fun HomeScreen(cfg: BoxConfig, onRecordings: () -> Unit, onSettings: () -> Unit) {
     val ctx = LocalContext.current
     val p = pal()
     val store = remember { Store(ctx) }
@@ -850,7 +943,6 @@ private fun HomeScreen(cfg: BoxConfig, onOpen: (String) -> Unit, onSettings: () 
     var me by remember { mutableStateOf(Pairing.me(ctx)) }
     var items by remember { mutableStateOf(store.list()) }
     var parts by remember { mutableIntStateOf(0) }
-    val states = remember { mutableStateMapOf<String, String>() }
     var denied by remember { mutableStateOf(false) }
 
     // While the screen is visible: the phone's list every 2 s, the box every 15 s, and whom the phone
@@ -878,14 +970,7 @@ private fun HomeScreen(cfg: BoxConfig, onOpen: (String) -> Unit, onSettings: () 
                     }
                     learnName(ctx, api)
                 }
-                if (tick % 3 == 0) {
-                    for (r in items) {
-                        val mid = r.meetingId ?: continue
-                        if (states[mid] == "done" || states[mid] == "failed") continue
-                        withContext(Dispatchers.IO) { runCatching { api.meeting(mid).optString("state") } }
-                            .onSuccess { states[mid] = it }
-                    }
-                }
+                if (tick % 3 == 0) askStates(api, items)
                 tick++
                 delay(2000)
             }
@@ -920,39 +1005,24 @@ private fun HomeScreen(cfg: BoxConfig, onOpen: (String) -> Unit, onSettings: () 
     // Whom the recordings go to: the person when the box knows a name, else this phone's name.
     val whom = me?.let { m -> m.person?.let { stringResource(R.string.for_label) to it } ?: (stringResource(R.string.phone_label) to m.device) }
 
-    val list: @Composable () -> Unit = {
-        // the only part of this screen that scrolls
-        Column(Modifier.fillMaxSize()) {
-            Section(stringResource(R.string.recordings))
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-                if (items.isEmpty()) Text(stringResource(R.string.none_yet), Modifier.padding(top = 12.dp), color = p.muted)
-                val a = active
-                items.forEachIndexed { i, r ->
-                    val live = r.clientId == a?.clientId
-                    RecordingRow(i + 1, r, r.meetingId?.let { states[it] }, live && paused, if (live) recordedMs else null) {
-                        r.meetingId?.let(onOpen) ?: UploadWorker.enqueue(ctx, r.clientId, now = true)
-                    }
-                }
-            }
-        }
+    // On the Recordings button: how many, and in red what is under way: what the box does not have
+    // all of yet (the one being recorded too, as in the web app), else the meetings it works on.
+    val uploading = items.count { it.state != LocalRecording.FINALIZED }
+    val working = items.count { r -> r.meetingId?.let { meetingStates[it] }.let { it != null && it != "done" && it != "failed" } }
+    val busy = when {
+        uploading > 0 -> pluralStringResource(R.plurals.n_uploading, uploading, uploading)
+        working > 0 -> pluralStringResource(R.plurals.n_processing, working, working)
+        else -> null
     }
 
-    FitPage(active == null) { h, tight, onShort ->
+    FitPage(active == null) { h, tight ->
         val short = h < 760.dp
-        val notes: @Composable () -> Unit = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                // on a short screen the Microphone cell says it ("Off while paused"), as in the web app
-                if (active != null && paused && !short) Text(stringResource(R.string.paused_note), fontSize = 14.sp, lineHeight = 20.sp)
-                recError?.let { Text(it, color = p.red, fontSize = 14.sp, fontWeight = FontWeight.W700) }
-                if (denied) Text(stringResource(R.string.mic_denied), color = p.red, fontSize = 14.sp, fontWeight = FontWeight.W700)
-            }
-        }
         Bar(stringResource(R.string.brand), stringResource(R.string.settings), onRight = onSettings, mark = true)
         val a = active
         if (a == null) {
             if (tight) Kicker(stringResource(R.string.new_recording))          // the ghost timer gives way
-            else Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Kicker(stringResource(R.string.new_recording))
+            else {
+                Kicker(stringResource(R.string.new_recording), modifier = Modifier.layoutId(Close))
                 Timer(0, p.ghost, timerSize(h))
             }
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -964,21 +1034,16 @@ private fun HomeScreen(cfg: BoxConfig, onOpen: (String) -> Unit, onSettings: () 
                 add(CellSpec(storageLabel) { Toggle(drive, { drive = it; touched = true }, driveName, storeDrive) })
                 whom?.let { (label, name) -> add(CellSpec(label) { Value(name) }) }
             }, compact = short)
-            val recordLabel = stringResource(R.string.record)
-            BlockAndList(Modifier.weight(1f).fillMaxWidth(), minBlock = 112.dp, maxBlock = 186.dp, gap = pageGap(h, tight),
-                onShort = onShort, notes = notes, list = list, block = {
-                Block(recordLabel, p.red, p.redDark, p.onRed, 40.sp, Modifier.fillMaxSize(), onClick = { record() }) {
-                    Box(Modifier.size(30.dp).clip(CircleShape).background(p.onRed))
-                }
-            })
+            Block(stringResource(R.string.record), p.red, p.redDark, p.onRed, 40.sp,
+                Modifier.layoutId(Grow(112.dp, 186.dp, first = true)).fillMaxWidth(), onClick = { record() }) {
+                Box(Modifier.size(30.dp).clip(CircleShape).background(p.onRed))
+            }
         } else {
             val r = items.firstOrNull { it.clientId == a.clientId }
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (paused) Kicker(stringResource(R.string.kicker_paused), p.ink)
-                else Kicker(stringResource(R.string.kicker_recording), p.red)
-                Timer(recordedMs, if (paused) p.dim else p.ink, timerSize(h))
-            }
-            Wave(wave, paused, waveHeight(h, tight))
+            if (paused) Kicker(stringResource(R.string.kicker_paused), p.ink, Modifier.layoutId(Close))
+            else Kicker(stringResource(R.string.kicker_recording), p.red, Modifier.layoutId(Close))
+            Timer(recordedMs, if (paused) p.dim else p.ink, timerSize(h))
+            Wave(wave, paused, if (tight) Modifier.height(40.dp) else Modifier.layoutId(Grow(waveHeight(h), 88.dp)))
             val untitled = stringResource(R.string.untitled)
             val storageValue = if (r?.storage == "drive") driveName else stringResource(R.string.storage_box)
             val mic = when {
@@ -993,21 +1058,76 @@ private fun HomeScreen(cfg: BoxConfig, onOpen: (String) -> Unit, onSettings: () 
                 CellSpec(storageLabel) { Value(storageValue) },
                 CellSpec(stringResource(R.string.mic_label)) { Value(mic.first, mic.second) },
             ), compact = short)
-            BlockAndList(Modifier.weight(1f).fillMaxWidth(), minBlock = 100.dp, maxBlock = 163.dp, gap = pageGap(h, tight),
-                onShort = onShort, notes = notes, list = list, block = {
-                Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    val half = Modifier.weight(1f).fillMaxHeight()
-                    if (paused) {
-                        Block(stringResource(R.string.resume), p.ink, p.muted, p.paper, 30.sp, half,
-                            onClick = { RecorderService.resume(ctx) }) { PlaySign(p.paper) }
-                    } else {
-                        Block(stringResource(R.string.pause), p.ink, p.muted, p.paper, 30.sp, half,
-                            onClick = { RecorderService.pause(ctx) }) { PauseSign(p.paper) }
-                    }
-                    Block(stringResource(R.string.stop), p.red, p.redDark, p.onRed, 30.sp, half,
-                        onClick = { RecorderService.stop(ctx) }) { Box(Modifier.size(26.dp).background(p.onRed)) }
+            Row(Modifier.layoutId(Grow(100.dp, 163.dp, first = true)).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                val half = Modifier.weight(1f).fillMaxHeight()
+                if (paused) {
+                    Block(stringResource(R.string.resume), p.ink, p.muted, p.paper, 30.sp, half,
+                        onClick = { RecorderService.resume(ctx) }) { PlaySign(p.paper) }
+                } else {
+                    Block(stringResource(R.string.pause), p.ink, p.muted, p.paper, 30.sp, half,
+                        onClick = { RecorderService.pause(ctx) }) { PauseSign(p.paper) }
                 }
-            })
+                Block(stringResource(R.string.stop), p.red, p.redDark, p.onRed, 30.sp, half,
+                    onClick = { RecorderService.stop(ctx) }) { Box(Modifier.size(26.dp).background(p.onRed)) }
+            }
+        }
+        // on a short screen the Microphone cell says it ("Off while paused"), as in the web app
+        val pausedNote = a != null && paused && !short
+        if (pausedNote || recError != null || denied) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (pausedNote) Text(stringResource(R.string.paused_note), fontSize = 14.sp, lineHeight = 20.sp)
+            recError?.let { Text(it, color = p.red, fontSize = 14.sp, fontWeight = FontWeight.W700) }
+            if (denied) Text(stringResource(R.string.mic_denied), color = p.red, fontSize = 14.sp, fontWeight = FontWeight.W700)
+        }
+        RecordingsButton(items.size, busy, if (short) 56.dp else 64.dp, onRecordings)
+    }
+}
+
+/**
+ * The recordings on this phone, newest first: title, length and how far each is; a row opens its
+ * meeting, one the box does not have yet is sent again. This screen scrolls like the others.
+ */
+@Composable
+private fun RecordingsScreen(cfg: BoxConfig, onOpen: (String) -> Unit, onBack: () -> Unit) {
+    val ctx = LocalContext.current
+    val store = remember { Store(ctx) }
+    val api = remember(cfg) { BoxApi(cfg) }
+    val active by RecState.active.collectAsState()
+    val paused by RecState.paused.collectAsState()
+    val recordedMs by RecState.recordedMs.collectAsState()
+    val box by boxState.collectAsState()
+    var items by remember { mutableStateOf(store.list()) }
+
+    // While the screen is visible: the phone's list every 2 s, the meetings on the box every 6 s.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(cfg) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            var tick = 0
+            while (true) {
+                items = withContext(Dispatchers.IO) { store.list() }
+                if (tick % 3 == 0) askStates(api, items)
+                tick++
+                delay(2000)
+            }
+        }
+    }
+
+    val (boxValue, boxColor) = boxLine(box)
+    Page {
+        Bar(stringResource(R.string.back), boxValue, onLeft = onBack, rightColor = boxColor)
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Kicker(stringResource(R.string.on_this_phone))
+            H1(stringResource(R.string.recordings))
+        }
+        Column {
+            Rule(thick = true)
+            if (items.isEmpty()) Text(stringResource(R.string.none_yet), Modifier.padding(top = 12.dp), color = pal().muted)
+            val a = active
+            items.forEachIndexed { i, r ->
+                val live = r.clientId == a?.clientId
+                RecordingRow(i + 1, r, r.meetingId?.let { meetingStates[it] }, live && paused, if (live) recordedMs else null) {
+                    r.meetingId?.let(onOpen) ?: UploadWorker.enqueue(ctx, r.clientId, now = true)
+                }
+            }
         }
     }
 }

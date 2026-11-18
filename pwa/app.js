@@ -50,7 +50,7 @@ const STR = {
     forWhom: 'Aufnahme für', forShort: 'Für', phone: 'Telefon', record: 'Aufnehmen', pause: 'Pause', resume: 'Weiter', stop: 'Stopp',
     pausedNote: 'Pausiert. Das Mikrofon ist aus; bis Sie fortsetzen, wird nichts aufgenommen.',
     recordings: 'Aufnahmen', onPhone: 'Auf diesem Telefon', noRecs: 'Noch nichts aufgenommen.',
-    nUploading: n => `${n} lädt hoch`, nWorking: n => `${n} in Arbeit`, settings: 'Einstellungen', thisPhone: 'Dieses Telefon', thisPhoneIs: 'Dieses Telefon',
+    nUploading: n => `${n} ${n === 1 ? 'lädt' : 'laden'} hoch`, nWorking: n => `${n} in Arbeit`, settings: 'Einstellungen', thisPhone: 'Dieses Telefon', thisPhoneIs: 'Dieses Telefon',
     voice: 'Sprachverarbeitung (Echo- und Rauschunterdrückung)', voiceNote: 'Aus ist besser, wenn das Telefon auf dem Tisch liegt.',
     connection: 'Verbindung', webView: 'Meetings auf der Box', webViewCommand: 'Meetings in brainbot:agent command', unpair: 'Dieses Telefon trennen',
     unpairAsk: 'Dieses Telefon von der Box trennen? Noch nicht gesendete Aufnahmen bleiben auf dem Telefon.',

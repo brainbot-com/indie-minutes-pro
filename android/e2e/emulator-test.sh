@@ -270,7 +270,7 @@ record "Emulator test"
 sleep 20; shots 2-recording
 wait_final "Emulator test" 240
 sealed "Emulator test"
-shot 3-list
+if tap_text "Recordings"; then sleep 2; shot 3-list; A shell input keyevent 4; sleep 2; else echo "no Recordings button on the screen"; fi
 
 say "2. network cut during the recording: chunks wait on the phone, sealed"
 wait_box_free
@@ -328,28 +328,29 @@ sealed "Emulator pause test"
 
 say "5. a small phone with large text: 360 x 640 dp, font scale 1.3, English and German"
 A shell wm size 1080x1920; A shell wm density 480; A shell settings put system font_scale 1.3
-fit_check() {  # name, texts: the page does not scroll (one scrollable area, the list, low on the screen); the texts show
+fit_check() {  # name, texts: nothing on the page scrolls; the texts show, the last one (the Recordings button) above the navigation bar
 	A shell uiautomator dump /sdcard/ui.xml > /dev/null
 	A shell cat /sdcard/ui.xml | python3 -c "
 import re, sys
 x = sys.stdin.read()
-areas = [tuple(map(int, m)) for m in re.findall(r'scrollable=\"true\"[^>]*bounds=\"\[(\d+),(\d+)\]\[(\d+),(\d+)\]\"', x)]
+areas = re.findall(r'scrollable=\"true\"', x)
 texts = set(re.findall(r'(?:text|content-desc)=\"([^\"]+)\"', x))
 want = [w for w in sys.argv[2:] if w not in texts]
-low = all(a[1] > 1920 * 0.45 for a in areas)
-print(sys.argv[1] + ':', len(areas), 'scrollable area(s)', 'low on the screen (the list)' if low else 'NOT only the list',
+b = re.search(r'text=\"' + re.escape(sys.argv[-1]) + r'\"[^>]*bounds=\"\[\d+,\d+\]\[\d+,(\d+)\]\"', x)
+on = b is not None and int(b[1]) <= 1920 - 144
+print(sys.argv[1] + ':', len(areas), 'scrollable areas,', 'the Recordings button on the screen' if on else 'the Recordings button NOT on the screen',
       '| labels shown' if not want else '| MISSING ' + ', '.join(want))
-sys.exit(0 if len(areas) <= 1 and low and not want else 1)" "$1" "${@:2}" || { echo "fit check failed: $1"; FIT_FAILED=1; }
+sys.exit(0 if not areas and on and not want else 1)" "$1" "${@:2}" || { echo "fit check failed: $1"; FIT_FAILED=1; }
 }
 FIT_FAILED=0
 for lang in en de; do
 	if [ $lang = de ]; then
 		A shell cmd locale set-app-locales $PKG --locales de-DE
 		A shell am force-stop $PKG; A shell am start -W -n $PKG/.MainActivity > /dev/null; sleep 3
-		L_REC=Aufnehmen; L_PAUSE=Pause; L_RESUME=Weiter; L_STOP=Stopp; L_LIST=AUFNAHMEN
+		L_REC=Aufnehmen; L_PAUSE=Pause; L_RESUME=Weiter; L_STOP=Stopp; L_LIST=Aufnahmen
 	else
 		A shell am start -W -n $PKG/.MainActivity > /dev/null; sleep 3
-		L_REC=Record; L_PAUSE=Pause; L_RESUME=Resume; L_STOP=Stop; L_LIST=RECORDINGS
+		L_REC=Record; L_PAUSE=Pause; L_RESUME=Resume; L_STOP=Stop; L_LIST=Recordings
 	fi
 	shot fit-ready-$lang; fit_check "ready ($lang)" "$L_REC" "$L_LIST"
 	wait_box_free
@@ -361,7 +362,7 @@ for lang in en de; do
 done
 A shell cmd locale set-app-locales $PKG --locales en-US
 A shell wm size reset; A shell wm density reset; A shell settings put system font_scale 1.0
-[ "$FIT_FAILED" = 0 ] && echo "fit: no page scroll, every label and the list shown on Ready, Recording and Paused, in English and German" ||
+[ "$FIT_FAILED" = 0 ] && echo "fit: no page scroll, every label and the Recordings button shown on Ready, Recording and Paused, in English and German" ||
 	echo "fit: FAILED (see above)"
 
 say "the meetings on the box"
@@ -412,12 +413,13 @@ sys.exit(1 if bad else 0)"
 LEFT=$(A shell "run-as $PKG sh -c 'ls files/recordings/*/'" | tr -d '\r' | grep -c '\.aac' || true)
 [ "$LEFT" = 0 ] && echo "no audio left on the phone" || { echo "$LEFT audio files left on the phone"; exit 1; }
 
-say "the summary and the settings on the phone"
+say "the recordings, a summary and the settings on the phone"
 A shell am start -n $PKG/.MainActivity > /dev/null
 sleep 3
-A shell input swipe 540 2000 540 600 300; sleep 1         # the list is under the record block
+if tap_text "Recordings"; then sleep 3; shots 6-recordings; else echo "no Recordings button on the screen"; fi
 if tap_text "Emulator test"; then sleep 4; shots 6-meeting; else echo "no row for the meeting on the screen"; fi
-A shell input keyevent 4; sleep 2
+A shell input keyevent 4; sleep 2                         # back to the recordings
+A shell input keyevent 4; sleep 2                         # back to the main screen
 if tap_text "SETTINGS"; then sleep 2; shots 7-settings; else echo "no settings link on the screen"; fi
 
 say "done; screenshots in $OUT${KEEP:+ (kept: docker rm -f android-emu; then person $PERSON with their tokens and meetings on the box)}"
