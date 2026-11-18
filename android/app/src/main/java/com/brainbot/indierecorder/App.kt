@@ -23,10 +23,11 @@ class App : Application() {
             when (r.state) {
                 LocalRecording.RECORDING -> {
                     val chunks = store.recoverParts(r.clientId)
+                    val ms = store.audioMs(r.clientId)
                     store.update(r.clientId) {
                         it.state = LocalRecording.STOPPED
                         it.chunks = chunks
-                        it.durationMs = chunks * 30_000L
+                        it.durationMs = ms
                         it.interrupted = true
                     }
                     UploadWorker.enqueue(this, r.clientId)

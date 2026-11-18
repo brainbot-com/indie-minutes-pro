@@ -45,6 +45,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
@@ -156,6 +157,15 @@ private fun Page(content: @Composable ColumnScope.() -> Unit) {
             verticalArrangement = Arrangement.spacedBy(12.dp), content = content,
         )
     }
+}
+
+/** Off: a light track with a white knob, as in the web view (Material's default reads as disabled here). */
+@Composable
+private fun switchColors() = MaterialTheme.colorScheme.let {
+    SwitchDefaults.colors(
+        checkedTrackColor = it.primary, checkedThumbColor = it.surface, checkedBorderColor = it.primary,
+        uncheckedTrackColor = it.outline, uncheckedThumbColor = it.surface, uncheckedBorderColor = it.outline,
+    )
 }
 
 @Composable
@@ -344,7 +354,7 @@ private fun HomeScreen(cfg: BoxConfig, onOpen: (String) -> Unit, onSettings: () 
             OutlinedTextField(title, { title = it }, label = { Text(stringResource(R.string.title_hint)) },
                 singleLine = true, modifier = Modifier.fillMaxWidth())
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Switch(drive, { drive = it; touched = true })
+                Switch(drive, { drive = it; touched = true }, colors = switchColors())
                 Spacer(Modifier.width(12.dp))
                 Column {
                     Text(stringResource(R.string.drive))
@@ -456,13 +466,14 @@ private fun DetailScreen(cfg: BoxConfig, mid: String, onBack: () -> Unit) {
         }
         H1(mm.optString("title").ifBlank { mid })
         val speakers = mm.optInt("speakers")
-        Text(when_(mm.optString("started_at")) + " · " + clock((mm.optDouble("duration_s", 0.0) * 1000).toLong()) +
-            if (speakers > 0) " · $speakers" else "", fontSize = 14.sp, color = muted())
+        val who = if (speakers > 0) " · " + ctx.resources.getQuantityString(R.plurals.speakers, speakers, speakers) else ""
+        Text(when_(mm.optString("started_at")) + " · " + clock((mm.optDouble("duration_s", 0.0) * 1000).toLong()) + who,
+            fontSize = 14.sp, color = muted())
         Row(verticalAlignment = Alignment.CenterVertically) {
             Switch(drive, { v ->
                 drive = v
                 scope.launch(Dispatchers.IO) { runCatching { api.setStorage(mid, if (v) "drive" else "local") } }
-            })
+            }, colors = switchColors())
             Spacer(Modifier.width(12.dp))
             Text(stringResource(R.string.store_drive))
             mm.optString("drive_url").takeIf { it.startsWith("https://") }?.let { url ->

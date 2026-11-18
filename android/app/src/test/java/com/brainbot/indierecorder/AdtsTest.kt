@@ -19,6 +19,8 @@ class AdtsTest {
         assertEquals(f1.size + f2.size, Adts.completeLength(f1 + f2 + cut))
         assertEquals(f1.size, Adts.completeLength(f1))
         assertEquals(0, Adts.completeLength(byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8)))
+        assertEquals(2, Adts.frameCount(f1 + f2 + cut))
+        assertEquals(64, Adts.FRAME_MS)
     }
 
     @Test

@@ -105,6 +105,10 @@ class Store(ctx: Context) {
         return completeChunks(id).size
     }
 
+    /** The length of what the complete chunks hold, from their frames. */
+    fun audioMs(id: String): Long =
+        completeChunks(id).sumOf { Adts.frameCount(chunkFile(id, it).readBytes()).toLong() } * Adts.FRAME_MS
+
     fun deleteAudio(id: String) {
         (dir(id).listFiles { f -> f.name.contains(".aac") } ?: emptyArray()).forEach { it.delete() }
     }

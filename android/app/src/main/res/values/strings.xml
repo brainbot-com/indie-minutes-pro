@@ -43,4 +43,8 @@
     <string name="disconnect">Disconnect this phone</string>
     <string name="interrupted">The recording was interrupted; what was recorded is kept.</string>
     <string name="retry">Try again now</string>
+    <plurals name="speakers">
+        <item quantity="one">%d speaker</item>
+        <item quantity="other">%d speakers</item>
+    </plurals>
 </resources>

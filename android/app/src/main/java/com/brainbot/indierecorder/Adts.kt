@@ -25,8 +25,16 @@ object Adts {
     }
 
     /** Bytes up to the end of the last whole frame: a file cut off mid-write keeps its complete frames. */
-    fun completeLength(data: ByteArray): Int {
+    fun completeLength(data: ByteArray): Int = scan(data).first
+
+    /** Whole frames in the data; each holds 1024 samples, 64 ms at 16 kHz. */
+    fun frameCount(data: ByteArray): Int = scan(data).second
+
+    const val FRAME_MS = 1024 * 1000 / SAMPLE_RATE
+
+    private fun scan(data: ByteArray): Pair<Int, Int> {
         var pos = 0
+        var frames = 0
         while (pos + 7 <= data.size) {
             if (data[pos] != 0xFF.toByte() || (data[pos + 1].toInt() and 0xF6) != 0xF0) break
             val len = ((data[pos + 3].toInt() and 3) shl 11) or
@@ -34,7 +42,8 @@ object Adts {
                 ((data[pos + 5].toInt() and 0xE0) shr 5)
             if (len < 7 || pos + len > data.size) break
             pos += len
+            frames++
         }
-        return pos
+        return pos to frames
     }
 }

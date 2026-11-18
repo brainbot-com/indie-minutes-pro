@@ -42,4 +42,8 @@
     <string name="disconnect">Dieses Telefon trennen</string>
     <string name="interrupted">Die Aufnahme wurde unterbrochen; das Aufgenommene bleibt erhalten.</string>
     <string name="retry">Jetzt erneut versuchen</string>
+    <plurals name="speakers">
+        <item quantity="one">%d Sprecher</item>
+        <item quantity="other">%d Sprecher</item>
+    </plurals>
 </resources>
