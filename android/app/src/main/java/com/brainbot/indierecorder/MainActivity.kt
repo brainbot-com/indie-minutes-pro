@@ -44,6 +44,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
@@ -74,14 +76,23 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -93,16 +104,16 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.time.format.FormatStyle
 
 class MainActivity : ComponentActivity() {
     private val link = mutableStateOf<String?>(null)
@@ -114,8 +125,15 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge(statusBarStyle = clear, navigationBarStyle = clear)
         if (Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
         super.onCreate(savedInstanceState)
-        take(intent)
+        // A rotation or a switch to dark mode recreates the activity with the same intent: its link
+        // (or test hook) was handled already, and the screens keep their own state.
+        if (savedInstanceState == null) take(intent) else link.value = savedInstanceState.getString("link")
         setContent { Theme { Root(link, autoPair.value) } }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString("link", link.value)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -132,8 +150,14 @@ class MainActivity : ComponentActivity() {
         if (BuildConfig.DEBUG && intent != null) testHooks(intent)
     }
 
-    /** Debug builds only, for the end-to-end test over adb: record a WAV file or the microphone, pause, resume, stop. */
+    /**
+     * Debug builds only, for the end-to-end test over adb: where typed connect codes are looked up
+     * (the emulator has no VPN to ai-knowledge, so the box itself with its CA), and record a WAV
+     * file or the microphone, pause, resume, stop.
+     */
     private fun testHooks(intent: Intent) {
+        intent.getStringExtra("test_connect_base")?.let { ConnectApi.base = it.trimEnd('/') }
+        intent.getStringExtra("test_connect_ca")?.let { ConnectApi.baseCa = PairLink.decodeCa(it) }
         val title = intent.getStringExtra("test_title") ?: ""
         intent.getStringExtra("test_wav")?.let { wav ->
             RecorderService.start(this, title, intent.getStringExtra("test_storage") ?: "local") {
@@ -229,13 +253,16 @@ private fun Page(content: @Composable ColumnScope.() -> Unit) {
     )
 }
 
-/** The top of every screen: the brand or Back on the left, Settings or the box's state on the right. */
+/**
+ * The top of every screen: the brand (after the red record dot) or Back on the left, Settings or
+ * the box's state on the right.
+ */
 @Composable
 private fun Bar(left: String, right: String?, onLeft: (() -> Unit)? = null, onRight: (() -> Unit)? = null,
-                rightColor: Color = pal().ink) {
+                rightColor: Color = pal().ink, mark: Boolean = false) {
     Column {
         Row(Modifier.fillMaxWidth().height(40.dp)) {
-            BarItem(left, onLeft, pal().ink, Modifier.weight(1f))
+            BarItem(left, onLeft, pal().ink, Modifier.weight(1f), mark)
             right?.let {
                 Spacer(Modifier.width(12.dp))
                 BarItem(it, onRight, rightColor)
@@ -247,11 +274,15 @@ private fun Bar(left: String, right: String?, onLeft: (() -> Unit)? = null, onRi
 }
 
 @Composable
-private fun BarItem(text: String, onClick: (() -> Unit)?, color: Color, modifier: Modifier = Modifier) {
+private fun BarItem(text: String, onClick: (() -> Unit)?, color: Color, modifier: Modifier = Modifier, mark: Boolean = false) {
     Box(modifier.fillMaxHeight().let { if (onClick != null) it.clickable(onClick = onClick) else it },
         contentAlignment = Alignment.BottomStart) {
-        Text(text.uppercase(), fontSize = 12.sp, fontWeight = FontWeight.W700, letterSpacing = 0.5.sp, color = color,
-            maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // the mark of all the recorder's faces (the PWA's and web view's .brand::before): 0.8em, 0.45em gap
+            if (mark) Box(Modifier.padding(end = 5.dp).size(10.dp).clip(CircleShape).background(pal().red))
+            Text(text.uppercase(), fontSize = 12.sp, fontWeight = FontWeight.W700, letterSpacing = 0.5.sp, color = color,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
 }
 
@@ -460,9 +491,9 @@ fun Root(link: MutableState<String?>, autoPair: Boolean) {
     val current = cfg
     if (boxName.value == null) boxName.value = Pairing.boxName(ctx)
     if (pending != null || current == null) {
-        PairScreen(pending, autoPair,
+        PairScreen(pending, autoPair, paired = current != null,
             onPaired = { cfg = it; link.value = null; screen = Screen.Home },
-            onCancel = if (current != null) ({ link.value = null }) else null)
+            onLeave = { link.value = null })
         return
     }
     when (val s = screen) {
@@ -479,51 +510,129 @@ fun Root(link: MutableState<String?>, autoPair: Boolean) {
     }
 }
 
+/**
+ * Connecting: a code typed here, or a link from the connect page (the code, the box's address and
+ * its CA), is looked at first, so the person sees whose account the phone will record into; Connect
+ * spends the code for the phone's own token. The older links with a token in them still work,
+ * behind the same question.
+ */
 @Composable
-private fun PairScreen(initial: String?, auto: Boolean, onPaired: (BoxConfig) -> Unit, onCancel: (() -> Unit)?) {
+private fun PairScreen(initial: String?, auto: Boolean, paired: Boolean, onPaired: (BoxConfig) -> Unit, onLeave: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    var text by remember(initial) { mutableStateOf(initial ?: "") }
+    var code by rememberSaveable { mutableStateOf("") }
+    var offerJson by rememberSaveable { mutableStateOf<String?>(null) }    // what the code connects to, once looked at
+    var offerCode by rememberSaveable { mutableStateOf("") }
+    var tokenLink by rememberSaveable { mutableStateOf<String?>(null) }     // an older link, waiting for Connect
+    var error by rememberSaveable { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
+    val device = remember { readableDevice(Build.MANUFACTURER ?: "", Build.MODEL ?: "") }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focus = LocalFocusManager.current
+    val msgUsed = stringResource(R.string.err_used)
+    val msgMany = stringResource(R.string.err_many)
+    val msgUnreachable = stringResource(R.string.err_unreachable)
+    val msgOther = stringResource(R.string.err_other)
     val bad = stringResource(R.string.pair_bad)
-    val unreachable = stringResource(R.string.box_unreachable)
     val rejected = stringResource(R.string.box_rejected)
 
-    fun connect() {
-        val cfg = BoxConfig.parse(text) ?: run { error = bad; return }
+    fun explain(e: Throwable): String = when ((e as? ConnectApi.Failure)?.kind) {
+        ConnectApi.Kind.USED -> msgUsed
+        ConnectApi.Kind.TOO_MANY -> msgMany
+        ConnectApi.Kind.UNREACHABLE -> msgUnreachable
+        else -> String.format(msgOther, e.message ?: "")
+    }
+
+    // What a code connects to: a typed one through the connect address, one from a link at the box itself.
+    fun look(c: String, base: String, ca: ByteArray?) {
         busy = true
         error = null
         scope.launch {
-            // Only a box that knows the token (and shows the CA from the link) is saved.
-            val api = BoxApi(cfg)
-            val result = withContext(Dispatchers.IO) { runCatching { api.settings() } }
-            result.onSuccess { s ->
-                Pairing.save(ctx, cfg)
-                rememberDefault(ctx, s)
-                boxState.value = "ok"
-                withContext(Dispatchers.IO) { runCatching { api.me() } }.getOrNull()?.let { Pairing.saveMe(ctx, it) }
-                learnName(ctx, api)
-                busy = false
-                onPaired(cfg)
-            }.onFailure {
-                busy = false
-                error = if (it is BoxApi.HttpError && it.code == 401) rejected else unreachable
-            }
+            withContext(Dispatchers.IO) { runCatching { ConnectApi(base, ca).peek(c) } }
+                .onSuccess { offerJson = it.toJson(); offerCode = c }
+                .onFailure { error = explain(it) }
+            busy = false
         }
     }
-    LaunchedEffect(initial) { if (auto && initial != null) connect() }
+
+    suspend fun saved(cfg: BoxConfig, person: String?, box: String) {
+        Pairing.save(ctx, cfg)
+        Pairing.saveMe(ctx, JSONObject().put("device", cfg.name).put("person", person ?: JSONObject.NULL))
+        if (box.isNotBlank()) {
+            Pairing.saveBoxName(ctx, box)
+            boxName.value = box
+        }
+        boxState.value = "ok"
+        withContext(Dispatchers.IO) { runCatching { BoxApi(cfg).settings() } }.getOrNull()?.let { rememberDefault(ctx, it) }
+        onPaired(cfg)
+    }
+
+    fun connect() {
+        val offer = Offer.parse(offerJson) ?: return
+        busy = true
+        error = null
+        scope.launch {
+            withContext(Dispatchers.IO) { runCatching { ConnectApi(offer.boxUrl, offer.caDer).redeem(offerCode, device) } }
+                .onSuccess { j -> offerJson = null; saved(j.cfg, j.person, j.box.ifBlank { offer.box }) }
+                .onFailure {
+                    error = explain(it)
+                    if ((it as? ConnectApi.Failure)?.kind == ConnectApi.Kind.USED) offerJson = null
+                }
+            busy = false
+        }
+    }
+
+    // An older link: the token is in it; only a box that knows the token is saved.
+    fun connectToken(cfg: BoxConfig) {
+        busy = true
+        error = null
+        scope.launch {
+            val api = BoxApi(cfg)
+            withContext(Dispatchers.IO) { runCatching { api.settings() } }
+                .onSuccess { s ->
+                    Pairing.save(ctx, cfg)
+                    rememberDefault(ctx, s)
+                    boxState.value = "ok"
+                    withContext(Dispatchers.IO) { runCatching { api.me() } }.getOrNull()?.let { Pairing.saveMe(ctx, it) }
+                    learnName(ctx, api)
+                    tokenLink = null
+                    onPaired(cfg)
+                }
+                .onFailure { error = if (it is BoxApi.HttpError && it.code == 401) rejected else msgUnreachable }
+            busy = false
+        }
+    }
+
+    LaunchedEffect(initial) {
+        when (val l = initial?.let { PairLink.parse(it) }) {
+            is PairLink.Code -> if (offerJson == null || offerCode != l.code) {
+                code = l.code
+                look(l.code, l.url, l.caDer)
+            }
+            is PairLink.Token -> if (auto) connectToken(l.cfg) else tokenLink = initial
+            null -> if (initial != null) error = bad
+        }
+    }
+
+    val offer = Offer.parse(offerJson)
+    val older = tokenLink?.let { (PairLink.parse(it) as? PairLink.Token)?.cfg }
+    if (offer != null || older != null) {
+        ConfirmScreen(offer?.person, offer?.box ?: older!!.host, device, paired, busy, error,
+            onConnect = { if (offer != null) connect() else older?.let { connectToken(it) } },
+            onCancel = { offerJson = null; tokenLink = null; error = null; onLeave() })
+        return
+    }
 
     Page {
-        Bar(stringResource(if (onCancel != null) R.string.back else R.string.brand), stringResource(R.string.not_connected),
-            onLeft = onCancel)
+        Bar(stringResource(if (paired) R.string.back else R.string.brand), if (paired) null else stringResource(R.string.not_connected),
+            onLeft = if (paired) onLeave else null, mark = !paired)
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Kicker(stringResource(R.string.pair_kicker), pal().red)
             H1(stringResource(R.string.pair_title))
         }
         Column {
             Rule(thick = true)
-            listOf(R.string.pair_step1, R.string.pair_step2, R.string.pair_step3).forEachIndexed { i, step ->
+            listOf(R.string.pair_step1, R.string.pair_step2).forEachIndexed { i, step ->
                 Row(Modifier.fillMaxWidth().padding(vertical = 14.dp)) {
                     Text("%02d".format(i + 1), Modifier.width(40.dp), fontWeight = FontWeight.W700)
                     Text(stringResource(step), Modifier.weight(1f), lineHeight = 23.sp)
@@ -531,14 +640,79 @@ private fun PairScreen(initial: String?, auto: Boolean, onPaired: (BoxConfig) ->
                 Rule()
             }
         }
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Label(stringResource(R.string.pair_link))
-            BoxedField(text, { text = it }, stringResource(R.string.pair_hint))
-            BoxConfig.parse(text)?.let { Text(it.host + if (it.name.isNotBlank()) " · " + it.name else "", fontSize = 13.sp, color = pal().muted) }
+        val ready = !busy && code.length == ConnectCode.LENGTH
+        // The keyboard goes away, so the answer under the field is in view.
+        fun submit() {
+            if (!ready) return
+            keyboard?.hide()
+            focus.clearFocus()
+            look(code, ConnectApi.base, ConnectApi.baseCa)
         }
-        WideButton(stringResource(R.string.pair_button), enabled = !busy && text.isNotBlank()) { connect() }
-        error?.let { Text(it, color = pal().red, fontSize = 14.sp, fontWeight = FontWeight.W700) }
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Label(stringResource(R.string.code_label))
+            CodeField(code, { code = ConnectCode.normalize(it) }) { submit() }
+            error?.let { Text(it, Modifier.padding(top = 4.dp), color = pal().red, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.W700) }
+        }
+        WideButton(stringResource(R.string.pair_button), enabled = ready) { submit() }
         Text(stringResource(R.string.pair_note), fontSize = 13.sp, lineHeight = 19.sp, color = pal().muted)
+    }
+}
+
+/** Before a code is spent: whose account, which box, which phone. */
+@Composable
+private fun ConfirmScreen(person: String?, box: String, device: String, paired: Boolean, busy: Boolean, error: String?,
+                          onConnect: () -> Unit, onCancel: () -> Unit) {
+    val p = pal()
+    Page {
+        Bar(stringResource(R.string.brand), if (paired) null else stringResource(R.string.not_connected), mark = true)
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Kicker(stringResource(R.string.confirm_kicker), p.red)
+            H1(person?.let { stringResource(R.string.confirm_title_for, it) } ?: stringResource(R.string.confirm_title), 36.sp)
+        }
+        Cells(2, listOf(
+            CellSpec(stringResource(R.string.box_label)) { Value(box) },
+            CellSpec(stringResource(R.string.phone_label)) { Value(device) },
+        ))
+        Block(stringResource(R.string.pair_button), if (busy) p.ghost else p.red, p.redDark, p.onRed, 150.dp, 34.sp,
+            Modifier.fillMaxWidth(), onClick = { if (!busy) onConnect() }) {
+            Box(Modifier.size(26.dp).clip(CircleShape).background(p.onRed))
+        }
+        LinkText(stringResource(R.string.cancel), onCancel)
+        error?.let { Text(it, color = p.red, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.W700) }
+        Text(stringResource(R.string.pair_note), fontSize = 13.sp, lineHeight = 19.sp, color = p.muted)
+    }
+}
+
+/** The connect code in a 2dp box, shown as XXXX-XXXX whatever was typed or pasted. */
+@Composable
+private fun CodeField(value: String, onChange: (String) -> Unit, onGo: () -> Unit) {
+    val p = pal()
+    val style = LocalTextStyle.current.copy(fontSize = 30.sp, lineHeight = 36.sp, fontWeight = FontWeight.W900,
+        letterSpacing = 1.5.sp, color = p.ink, fontFeatureSettings = "tnum")
+    BasicTextField(value, onChange, Modifier.fillMaxWidth().border(2.dp, p.ink).padding(horizontal = 14.dp, vertical = 12.dp),
+        singleLine = true, cursorBrush = SolidColor(p.ink), textStyle = style, visualTransformation = CodeDash,
+        // The password keyboard offers no word suggestions (one tapped would garble the code); the
+        // field still shows what was typed, through its own transformation.
+        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters, autoCorrectEnabled = false,
+            keyboardType = KeyboardType.Password, imeAction = ImeAction.Go),
+        keyboardActions = KeyboardActions(onGo = { onGo() }),
+        decorationBox = { inner ->
+            Box {
+                if (value.isEmpty()) Text(stringResource(R.string.code_hint), style = style.copy(color = p.ghost))
+                inner()
+            }
+        })
+}
+
+/** Shows a dash after the fourth character; the code itself has none. */
+private object CodeDash : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText {
+        val t = text.text
+        if (t.length <= 4) return TransformedText(text, OffsetMapping.Identity)
+        return TransformedText(AnnotatedString(t.take(4) + "-" + t.drop(4)), object : OffsetMapping {
+            override fun originalToTransformed(offset: Int) = if (offset > 4) offset + 1 else offset
+            override fun transformedToOriginal(offset: Int) = (if (offset > 4) offset - 1 else offset).coerceAtMost(t.length)
+        })
     }
 }
 
@@ -639,7 +813,7 @@ private fun HomeScreen(cfg: BoxConfig, onOpen: (String) -> Unit, onSettings: () 
     val whom = me?.let { m -> m.person?.let { stringResource(R.string.for_label) to it } ?: (stringResource(R.string.phone_label) to m.device) }
 
     Page {
-        Bar(stringResource(R.string.brand), stringResource(R.string.settings), onRight = onSettings)
+        Bar(stringResource(R.string.brand), stringResource(R.string.settings), onRight = onSettings, mark = true)
         val a = active
         if (a == null) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -723,20 +897,6 @@ private fun LineField(value: String, onChange: (String) -> Unit, hint: String) {
                     inner()
                 }
                 Rule()
-            }
-        })
-}
-
-/** A text field in a 2dp box, for the pairing link. */
-@Composable
-private fun BoxedField(value: String, onChange: (String) -> Unit, hint: String) {
-    val p = pal()
-    BasicTextField(value, onChange, Modifier.fillMaxWidth().border(2.dp, p.ink).padding(horizontal = 12.dp, vertical = 14.dp),
-        maxLines = 3, cursorBrush = SolidColor(p.ink), textStyle = LocalTextStyle.current.copy(color = p.ink),
-        decorationBox = { inner ->
-            Box {
-                if (value.isEmpty()) Text(hint, color = p.muted)
-                inner()
             }
         })
 }

@@ -14,14 +14,21 @@
     <string name="not_connected">Not connected</string>
     <string name="pair_kicker">Set up</string>
     <string name="pair_title">Connect to your recorder</string>
-    <string name="pair_step1">In brainbot:agent command, open Meetings, then Settings, then Connect a phone.</string>
-    <string name="pair_step2">Scan the code with this phone\'s camera. The app opens and connects to your account.</string>
-    <string name="pair_step3">No camera at hand? Paste the link below.</string>
-    <string name="pair_link">Pairing link</string>
-    <string name="pair_hint" translatable="false">indierecorder://pair?…</string>
+    <string name="pair_step1">In brainbot:agent command: Meetings, Settings, Connect a phone.</string>
+    <string name="pair_step2">Scan the code with the phone\'s camera, or type it here:</string>
+    <string name="code_label">Connect code</string>
+    <string name="code_hint" translatable="false">XXXX-XXXX</string>
     <string name="pair_button">Connect</string>
-    <string name="pair_bad">This is not a pairing link from the recorder.</string>
-    <string name="pair_note">The code carries the box\'s own certificate, so there is nothing to install in the phone\'s settings. Recordings go to this box and nowhere else.</string>
+    <string name="pair_bad">This link is not from the recorder.</string>
+    <string name="pair_note">Recordings go from this phone to the box over the VPN and nowhere else.</string>
+    <string name="confirm_kicker">Connect this phone</string>
+    <string name="confirm_title_for">Record into %1$s\'s account</string>
+    <string name="confirm_title">Record into your account</string>
+    <string name="cancel">Cancel</string>
+    <string name="err_used">This code is used or expired. Make a new one in Meetings, Settings, Connect a phone.</string>
+    <string name="err_many">Too many wrong codes. Wait a few minutes, then try again.</string>
+    <string name="err_unreachable">The box is not reachable. Is the VPN on?</string>
+    <string name="err_other">Connecting did not work (%1$s).</string>
 
     <string name="box_label">Box</string>
     <string name="box_ready">Ready</string>

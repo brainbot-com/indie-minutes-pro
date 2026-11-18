@@ -29,7 +29,7 @@ import javax.net.ssl.X509TrustManager
 class BoxConfig(val url: String, val token: String, val caDer: ByteArray, val name: String) {
     companion object {
         /**
-         * The link in the QR code on the recorder's Devices page:
+         * The older pairing link with the phone's token in it (connect codes replaced it, PairLink):
          * indierecorder://pair?u=<https url>&t=<token>&ca=<CA certificate, base64url DER>&n=<name>.
          * The CA comes with the link, so the phone trusts that box and nothing else.
          */
@@ -135,19 +135,7 @@ object Pairing {
 class BoxApi(val cfg: BoxConfig) {
     class HttpError(val code: Int, val body: String) : IOException("HTTP $code: ${body.take(200)}")
 
-    private val http: OkHttpClient = run {
-        val ca = CertificateFactory.getInstance("X.509").generateCertificate(ByteArrayInputStream(cfg.caDer))
-        val ks = KeyStore.getInstance(KeyStore.getDefaultType()).apply { load(null, null); setCertificateEntry("box", ca) }
-        val tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm()).apply { init(ks) }
-        val tm = tmf.trustManagers.first { it is X509TrustManager } as X509TrustManager
-        val ssl = SSLContext.getInstance("TLS").apply { init(null, arrayOf(tm), null) }
-        OkHttpClient.Builder()
-            .sslSocketFactory(ssl.socketFactory, tm)
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(90, TimeUnit.SECONDS)
-            .writeTimeout(120, TimeUnit.SECONDS)
-            .build()
-    }
+    private val http: OkHttpClient = client(cfg.caDer)
     private fun send(method: String, path: String, body: ByteArray? = null, type: String = "application/json",
                      headers: Map<String, String> = emptyMap()): String {
         val b = Request.Builder().url(cfg.url + path).header("Authorization", "Bearer " + cfg.token)
@@ -190,6 +178,21 @@ class BoxApi(val cfg: BoxConfig) {
     }
 
     companion object {
+        /** HTTPS that trusts only the box's own CA; a box that sent none is checked against the phone's trust store. */
+        fun client(caDer: ByteArray): OkHttpClient {
+            val b = OkHttpClient.Builder()
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(90, TimeUnit.SECONDS)
+                .writeTimeout(120, TimeUnit.SECONDS)
+            if (caDer.isEmpty()) return b.build()
+            val ca = CertificateFactory.getInstance("X.509").generateCertificate(ByteArrayInputStream(caDer))
+            val ks = KeyStore.getInstance(KeyStore.getDefaultType()).apply { load(null, null); setCertificateEntry("box", ca) }
+            val tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm()).apply { init(ks) }
+            val tm = tmf.trustManagers.first { it is X509TrustManager } as X509TrustManager
+            val ssl = SSLContext.getInstance("TLS").apply { init(null, arrayOf(tm), null) }
+            return b.sslSocketFactory(ssl.socketFactory, tm).build()
+        }
+
         fun sha256(data: ByteArray): String =
             MessageDigest.getInstance("SHA-256").digest(data).joinToString("") { "%02x".format(it) }
 

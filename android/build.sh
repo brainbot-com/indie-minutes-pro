@@ -22,6 +22,7 @@ if [ ! -f secrets/android-release.jks ]; then
 fi
 docker run --rm --cpus 8 --user "$(id -u):$(id -g)" -e HOME=/cache/home -e GRADLE_USER_HOME=/cache/gradle \
 	-e RELEASE_KEYSTORE=/secrets/android-release.jks -e RELEASE_KEYSTORE_PASSWORD_FILE=/secrets/android-release.pass \
+	${CONNECT_BASE:+-e CONNECT_BASE="$CONNECT_BASE"} \
 	-v "$PWD/android:/src" -v "$PWD/secrets:/secrets:ro" -v "$HOME/android-build/cache:/cache" -w /src \
 	indie-recorder-android ./gradlew --no-daemon --max-workers 4 -q testDebugUnitTest assembleDebug assembleRelease
 install -m 644 android/app/build/outputs/apk/release/app-release.apk secrets/tls/public/indie-recorder.apk

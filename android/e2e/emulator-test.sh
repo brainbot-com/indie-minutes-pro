@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
-# End to end on aibox1: an Android emulator (KVM) with the debug app pairs
-# through a person's pairing link, records a speech file in place of the
-# microphone, uploads it to the running recorder, and the box transcribes it.
-# Then the same with the network cut during the recording, with the app
-# killed in the middle of one, and with a pause. From ~/indie-recorder on aibox1:
+# End to end on aibox1: an Android emulator (KVM) with the debug app connects
+# to a test person's account with connect codes (typed, then through the
+# connect page's link; a used code is refused), records a speech file in place
+# of the microphone, uploads it to the running recorder, and the box
+# transcribes it. Then the same with the network cut during the recording,
+# with the app killed in the middle of one, and with a pause. From
+# ~/indie-recorder on aibox1:
 #
 #   android/e2e/emulator-test.sh
 #
 # Needs the image indie-recorder-android (android/Dockerfile), a debug APK
 # (./gradlew assembleDebug) and the recorder stack. Screenshots (light and
-# dark) and the log go to data/test/android/. At the end the test meetings,
-# the emulator's token and the test person are deleted again.
+# dark) and the log go to data/test/android/. At the end the test meetings and
+# the test person (with the emulator's tokens) are deleted again.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 PKG=com.brainbot.indierecorder
@@ -36,6 +38,7 @@ shots() {
 box() { docker compose exec -T recorder python -c "$1" < /dev/null; }
 cli() { docker compose exec -T recorder python -m recorder.cli "$@" < /dev/null; }
 ui_has() { A shell uiautomator dump /sdcard/ui.xml > /dev/null; A shell cat /sdcard/ui.xml | grep -q "text=\"$1\""; }
+ui_contains() { A shell uiautomator dump /sdcard/ui.xml > /dev/null; A shell cat /sdcard/ui.xml | grep -qF "$1"; }
 tap_text() {  # taps the first thing on the screen that shows this text; false when there is none
 	A shell uiautomator dump /sdcard/ui.xml > /dev/null
 	local xy
@@ -46,37 +49,51 @@ print((int(m[1]) + int(m[3])) // 2, (int(m[2]) + int(m[4])) // 2) if m else prin
 	[ -n "$xy" ] && A shell input tap $xy
 }
 
+tap_field() {  # taps the first text field on the screen
+	A shell uiautomator dump /sdcard/ui.xml > /dev/null
+	local xy
+	xy=$(A shell cat /sdcard/ui.xml | python3 -c "
+import re, sys
+m = re.search(r'class=\"android.widget.EditText\"[^>]*bounds=\"\[(\d+),(\d+)\]\[(\d+),(\d+)\]\"', sys.stdin.read())
+print((int(m[1]) + int(m[3])) // 2, (int(m[2]) + int(m[4])) // 2) if m else print('')")
+	[ -n "$xy" ] && A shell input tap $xy
+}
+
 say "test audio: 75 s of German conversation (MLS, stitched)"
 docker compose exec -T recorder ffmpeg -nostdin -loglevel error -y -t 75 -i /data/bench/datasets/mls-de/conv1/audio.wav \
 	-ac 1 -ar 16000 -c:a pcm_s16le /$OUT/test.wav < /dev/null
 
-say "a test person, a device token for the emulator in that person's name, and its pairing link"
+say "a test person; the emulator connects to their account with connect codes"
 PERSON=$(cli user add --ext-id "emulator-test-$(date +%s)" --name "Emulator Test" | python3 -c "import json, sys; print(json.load(sys.stdin)['id'])")
-TOKEN=$(cli token add --name "Android emulator test" --role device --user "$PERSON" | tail -1 | tr -d '\r')
-LINK=$(python3 - "$TOKEN" <<'PY'
-import base64, sys
-from urllib.parse import quote
+BOX=https://10.1.9.7:8443
+CA=$(python3 - <<'PY'
+import base64
 pem = open("secrets/tls/ca.crt").read()
 der = base64.b64decode("".join(l for l in pem.splitlines() if l and not l.startswith("-----")))
-ca = base64.urlsafe_b64encode(der).decode().rstrip("=")
-print(f"indierecorder://pair?u={quote('https://10.1.9.7:8443', safe='')}&t={sys.argv[1]}&ca={ca}&n={quote('Android emulator test', safe='')}")
+print(base64.urlsafe_b64encode(der).decode().rstrip("="))
 PY
 )
-TOKEN_ID=$(box "
+code() {  # a fresh connect code for the test person, without its dash
+	cli connect --user "$PERSON" | python3 -c "import json, sys; print(json.load(sys.stdin)['code'].replace('-', ''))"
+}
+TOKENS="SELECT id FROM tokens WHERE user_id = '$PERSON'"     # the emulator's tokens: one per connect
+tokens_of_person() {
+	box "
 from recorder.config import Settings; from recorder.db import DB
-print(DB(Settings().db_path).one(\"SELECT id FROM tokens WHERE name = 'Android emulator test' AND revoked_at IS NULL ORDER BY created_at DESC\")['id'])")
+for r in DB(Settings().db_path).all(\"SELECT name, revoked_at FROM tokens WHERE user_id = '$PERSON' ORDER BY created_at\"):
+    print(r['name'] + (' (revoked)' if r['revoked_at'] else ''))"
+}
 
 meetings() {  # the meeting ids of everything the emulator recorded
 	box "
 from recorder.config import Settings; from recorder.db import DB
 db = DB(Settings().db_path)
-print(' '.join(r['meeting_id'] for r in db.all(\"SELECT meeting_id FROM recordings WHERE token_id = ? AND meeting_id IS NOT NULL\", '$TOKEN_ID')))"
+print(' '.join(r['meeting_id'] for r in db.all(\"SELECT meeting_id FROM recordings WHERE token_id IN ($TOKENS) AND meeting_id IS NOT NULL\")))"
 }
-cleanup_box() {  # the test meetings, the token and the test person
+cleanup_box() {  # the test meetings, then the test person with the emulator's tokens
 	local mids
 	mids=$(meetings)
 	[ -z "$mids" ] || cli delete $mids | grep -v "^[{}]" || true
-	cli token revoke "$TOKEN_ID" > /dev/null
 	cli user remove "$PERSON" | tr -d '\n' && echo || echo "the test person $PERSON is still there (a meeting of theirs is still being processed)"
 }
 finish() {
@@ -90,7 +107,7 @@ docker run -d --name android-emu --device /dev/kvm --network host \
 	-v "$PWD/$OUT:/out" -v "$PWD/android:/src:ro" indie-recorder-android bash -c '
 	echo no | avdmanager -s create avd -n t -k "'"$SYSIMG"'" -d pixel_6 --force > /dev/null &&
 	exec emulator -avd t -no-window -no-audio -gpu swiftshader_indirect -no-snapshot -no-boot-anim -port 5560' > /dev/null
-# KEEP=1 leaves the emulator running and the token, the person and the meetings on the box, for a look afterwards.
+# KEEP=1 leaves the emulator running and the person, their tokens and meetings on the box, for a look afterwards.
 [ -n "${KEEP:-}" ] || trap finish EXIT
 timeout 600 docker exec android-emu bash -c "until adb -s $SERIAL shell getprop sys.boot_completed 2>/dev/null | grep -q 1; do sleep 3; done"
 A install -r -g /src/app/build/outputs/apk/debug/app-debug.apk > /dev/null
@@ -98,16 +115,62 @@ A shell settings put global window_animation_scale 0
 A shell cmd uimode night no > /dev/null
 A root > /dev/null; sleep 2
 
-say "the connect screen, before pairing"
+paired() { A shell "run-as $PKG cat shared_prefs/box.xml" 2> /dev/null | grep -q 'name="url"'; }   # Disconnect leaves an empty file
+type_code() {  # into the code field, the way a person types it
+	tap_field
+	sleep 1
+	A shell input text "$1"
+	sleep 1
+}
+
+say "the connect screen, before connecting"
 A shell am start -W -n $PKG/.MainActivity > /dev/null
 sleep 4
 shots 0-connect
 
-say "pairing through the deep link"
-A shell "am start -W -a android.intent.action.VIEW -d '$LINK' --ez auto true $PKG" > /dev/null
+say "connect by typing a code (looked up at the connect address, ai-knowledge, as on a phone)"
+CODE1=$(code)
+type_code "$CODE1"
+shots 0-connect-typed
+tap_text "Connect"
+sleep 5
+if ui_contains "The box is not reachable"; then
+	echo "the emulator does not reach ai-knowledge: typed codes are looked up at the box itself (debug override)"
+	A shell "am start -n $PKG/.MainActivity --es test_connect_base $BOX --es test_connect_ca $CA" > /dev/null
+	sleep 2; tap_text "Connect"; sleep 5
+fi
+ui_contains "Record into Emulator Test" && echo "the phone asks: Record into Emulator Test's account" ||
+	{ echo "NO confirmation"; shot confirm-failed; exit 1; }
+shots 0-confirm
+tap_text "Connect"
 sleep 6
-A shell run-as $PKG ls shared_prefs | grep -q box.xml && echo "paired" || { echo "NOT paired"; shot pair-failed; exit 1; }
-ui_has "Emulator Test" && echo "the ready screen names the person: Emulator Test" || echo "the ready screen does not name the person (yet)"
+paired && echo "connected by the typed code" || { echo "NOT connected"; shot pair-failed; exit 1; }
+echo "the person's tokens on the box: $(tokens_of_person | tr '\n' ',')"
+
+say "a used code is refused"
+tap_text "SETTINGS"; sleep 2
+tap_text "Disconnect this phone"; sleep 3
+paired && { echo "still connected after Disconnect"; exit 1; } || echo "disconnected"
+type_code "$CODE1"
+tap_text "Connect"
+sleep 5
+ui_contains "This code is used or expired" && echo "refused: This code is used or expired. Make a new one in Meetings, ..." ||
+	{ echo "the used code was NOT refused"; shot used-failed; exit 1; }
+shots 0-error
+
+say "connect through the connect page's link (code, the box's address and its certificate)"
+CODE2=$(code)
+LINK="indierecorder://pair?c=$CODE2&u=$(python3 -c "from urllib.parse import quote; print(quote('$BOX', safe=''))")&ca=$CA"
+A shell "am start -W -a android.intent.action.VIEW -d '$LINK' $PKG" > /dev/null
+sleep 5
+ui_contains "Record into Emulator Test" && echo "the link asks the same: Record into Emulator Test's account" ||
+	{ echo "NO confirmation from the link"; shot link-failed; exit 1; }
+tap_text "Connect"
+sleep 6
+paired && echo "connected by the link" || { echo "NOT connected"; shot pair-failed; exit 1; }
+echo "the person's tokens on the box: $(tokens_of_person | tr '\n' ',')"
+sleep 4
+ui_has "Emulator Test" && echo "the ready screen names the person (from /api/v1/me): Emulator Test" || echo "the ready screen does not name the person (yet)"
 shots 1-ready
 A push /out/test.wav /data/local/tmp/test.wav > /dev/null
 A shell run-as $PKG cp /data/local/tmp/test.wav files/test.wav
@@ -122,7 +185,7 @@ recording_of() {  # title -> "state chunks meeting_id"
 	box "
 from recorder.config import Settings; from recorder.db import DB
 db = DB(Settings().db_path)
-r = db.one(\"SELECT * FROM recordings WHERE token_id = ? AND title = ? ORDER BY created_at DESC\", '$TOKEN_ID', '$1')
+r = db.one(\"SELECT * FROM recordings WHERE token_id IN ($TOKENS) AND title = ? ORDER BY created_at DESC\", '$1')
 n = db.one(\"SELECT COUNT(*) n FROM chunks WHERE recording_id = ?\", r['id'])['n'] if r else 0
 print(r['state'] if r else 'none', r['total_chunks'] if r and r['total_chunks'] else n, r['meeting_id'] if r else '')"
 }
@@ -220,4 +283,4 @@ if tap_text "Emulator test"; then sleep 4; shots 6-meeting; else echo "no row fo
 A shell input keyevent 4; sleep 2
 if tap_text "SETTINGS"; then sleep 2; shots 7-settings; else echo "no settings link on the screen"; fi
 
-say "done; screenshots in $OUT${KEEP:+ (kept: docker rm -f android-emu; then token $TOKEN_ID, person $PERSON and their meetings on the box)}"
+say "done; screenshots in $OUT${KEEP:+ (kept: docker rm -f android-emu; then person $PERSON with their tokens and meetings on the box)}"

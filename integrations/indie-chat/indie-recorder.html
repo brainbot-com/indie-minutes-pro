@@ -165,7 +165,13 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 24px 48px; display: flex;
   grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto 1fr; gap: 10px 16px; }
 .hero .dot { width: 30px; height: 30px; border-radius: 50%; background: var(--on-red); }
 .hero .count { font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; text-align: right; }
-.hero .words { grid-column: 1 / -1; align-self: end; display: flex; flex-direction: column; gap: 6px; }
+.hero .words { align-self: end; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+/* the way to connect a phone, always on the main screen: white on the red, the phone app's square */
+.hero .add { align-self: end; justify-self: end; display: inline-flex; align-items: center; gap: 14px; min-height: 44px;
+  padding: 10px 14px; border: 0; background: var(--on-red); color: var(--red); font-size: 15px; font-weight: 700; cursor: pointer; }
+.hero .add::after { content: ""; width: 12px; height: 12px; background: var(--red); flex: none; }
+.hero .add:hover { background: var(--ink); color: var(--paper); }
+.hero .add:hover::after { background: var(--paper); }
 .hero .kick { font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .hero h1 { margin: 0; font-size: 56px; font-weight: 900; letter-spacing: -.04em; line-height: .95; }
 .list { display: flex; flex-direction: column; gap: 30px; }
@@ -206,6 +212,9 @@ pre.tr { margin: 0; white-space: pre-wrap; font: 14px/1.6 "Inter", "Helvetica Ne
   .h1 { font-size: 36px; } .h2 { font-size: 30px; } .hero h1 { font-size: 44px; } .hero { min-height: 150px; }
   .mrow { grid-template-columns: 30px minmax(0, 1fr) 70px 70px; gap: 10px; }
   .mrow .when, .bar .extra, .brand .name { display: none; }
+  .hero { grid-template-columns: minmax(0, 1fr); }
+  .hero .count { display: none; }
+  .hero .add { justify-self: start; }
   .setting .line { width: 160px; }
   .connect { grid-template-columns: minmax(0, 1fr); }
 }
@@ -234,6 +243,7 @@ pre.tr { margin: 0; white-space: pre-wrap; font: 14px/1.6 "Inter", "Helvetica Ne
       <span class="dot" aria-hidden="true"></span>
       <span class="count" id="count"></span>
       <div class="words"><span class="kick" data-t="private"></span><h1 data-t="title"></h1></div>
+      <button class="add" id="heroConnect" data-t="connectPhone" hidden></button>
     </div>
     <div class="list" id="list"></div>
   </section>
@@ -450,6 +460,8 @@ function stateCell(m) {
 
 function renderHome() {
   $('count').textContent = meetings.length ? t('countN')(meetings.length) : '';
+  // on a new account the first step below has the same button: not twice
+  $('heroConnect').hidden = !meetings.length && !(phoneList && phoneList[0]);
   if (!meetings.length) {
     // the first steps, with the phone step done once a phone is connected
     const phone = phoneList && phoneList[0];
@@ -638,6 +650,7 @@ $('back').addEventListener('click', () => {
   current = null; show('home'); load();
 });
 $('pairBtn').addEventListener('click', () => openConnect('settings'));
+$('heroConnect').addEventListener('click', () => openConnect('home'));
 $('newCode').addEventListener('click', () => openConnect(backTo));
 $('connectDone').addEventListener('click', () => $('back').click());
 switchTo($('defDrive'), (v) => updateSettings({ storage_default: v ? 'drive' : 'local' }));

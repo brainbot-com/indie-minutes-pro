@@ -402,9 +402,14 @@ through the phone simulator into the running recorder, end to end.
 ## Android app
 
 `android/`: a native app (Kotlin, Jetpack Compose, Android 8 and later) for
-what the PWA cannot do: record with the screen off. Version 0.2.0 has the
+what the PWA cannot do: record with the screen off. Version 0.3.0 has the
 shared Swiss look (see Design): Connect, Ready, Recording, Paused, a meeting,
-Settings.
+Settings; it connects with a connect code (see "Connecting a phone"), scanned
+(the connect page opens the app) or typed as XXXX-XXXX, asks "Record into
+<person>'s account" before it connects, and names itself ("Pixel 8"). Typed
+codes are looked up at `CONNECT_BASE` (set when it is built, default the
+brain-tls address); old token links still work. Disconnect on the phone
+forgets the token; remove the phone in Meetings to lock it out.
 
 - Records in a foreground service of type microphone (a notification with a
   timer, Pause or Resume, and Stop; a partial wake lock): 16 kHz mono from the speech
@@ -447,7 +452,8 @@ Build and test, on aibox1 from `~/indie-recorder`:
   it: Android installs an update only with the same key), copied to
   `secrets/tls/public/indie-recorder.apk`.
 - `android/e2e/emulator-test.sh`: an Android 14 emulator (KVM) with the debug
-  build pairs through the deep link as a test person, records a 75 s speech
+  build connects as a test person by a typed code (a used code is then
+  refused) and by the connect page's link (`recorder.cli connect`), records a 75 s speech
   file in place of the microphone (a debug-only hook), and the box transcribes
   it; then the same with the network cut during the recording, with the app
   killed after 40 s, and with a pause (30 s, about 23 s paused, 30 s: the
