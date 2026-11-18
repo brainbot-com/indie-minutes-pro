@@ -3,24 +3,26 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}indie recorder{% endblock %}</title>
+<title>{% block title %}Indie recorder{% endblock %}</title>
+<link rel="preload" href="/static/Inter.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/swiss.css">
 <link rel="stylesheet" href="/static/style.css">
 <link rel="icon" href="/favicon.ico">
 {% block head %}{% endblock %}
 </head>
 <body>
-<header class="top">
-  <a class="brand" href="/"><span class="dot"></span>indie recorder</a>
+<header class="top bar">
+  <span>{% block barleft %}<a href="/">Indie recorder</a>{% endblock %}</span>
   {% if tok %}
-  <nav>
+  <nav class="end">
     <a href="/app/">Record</a>
-    {% if tok.role == 'admin' %}<a href="/devices" class="muted">Devices</a>{% endif %}
+    {% if tok.role == 'admin' %}<a href="/devices">Devices</a>{% endif %}
   </nav>
   {% endif %}
 </header>
 <main>
 {% block main %}{% endblock %}
 </main>
-<footer>indie recorder {{ version }} · <a href="/review">follow-ups</a> · <a href="/logout">log out</a></footer>
+<footer>Indie recorder {{ version }} · <a href="/review">Follow-ups</a> · <a href="/logout">Log out</a></footer>
 </body>
 </html>

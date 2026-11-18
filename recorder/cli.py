@@ -38,8 +38,8 @@ def main(argv=None):
     t.add_argument("--trusts-identity", action="store_true",
                    help="brainbot:agent command's service token: speaks for the person in X-Indie-User")
     u = sub.add_parser("user", help="people (accounts come from brainbot:agent command)")
-    u.add_argument("action", choices=["add", "list", "claim"])
-    u.add_argument("id", nargs="?", help="claim: the person's user id")
+    u.add_argument("action", choices=["add", "list", "claim", "remove"])
+    u.add_argument("id", nargs="?", help="claim, remove: the person's user id")
     u.add_argument("--ext-id", help="the person's user id in brainbot:agent command")
     u.add_argument("--email")
     u.add_argument("--name")
@@ -78,6 +78,16 @@ def main(argv=None):
             out = add_person(db, ext_id=a.ext_id, email=a.email, name=a.name)
         elif a.action == "list":
             out = db.all("SELECT * FROM users ORDER BY created_at")
+        elif a.action == "remove":
+            # a person who left, or a test person: their phones stop working; meetings stay
+            if not a.id or not db.one("SELECT 1 FROM users WHERE id = ?", a.id):
+                raise SystemExit("remove needs an existing user id")
+            owned = db.one("SELECT COUNT(*) AS n FROM meetings WHERE owner_id = ?", a.id)["n"]
+            if owned:
+                raise SystemExit(f"{owned} meeting(s) still belong to this person: delete them or claim them for someone else first")
+            out = {"tokens_revoked": db.run("UPDATE tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL", now_iso(), a.id),
+                   "settings": db.run("DELETE FROM user_settings WHERE user_id = ?", a.id),
+                   "removed": db.run("DELETE FROM users WHERE id = ?", a.id)}
         else:
             if not a.id or not db.one("SELECT 1 FROM users WHERE id = ?", a.id):
                 raise SystemExit("claim needs an existing user id")

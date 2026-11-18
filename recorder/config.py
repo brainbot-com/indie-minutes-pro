@@ -13,6 +13,7 @@ class Settings:
 
         self.data_dir = Path(get("DATA_DIR", "/data"))
         self.public_url = get("PUBLIC_URL", "https://10.1.9.7:8443").rstrip("/")
+        self.box_name = get("BOX_NAME", "aibox1")   # what the apps call this box: "aibox1 · ready"
         self.display_tz = get("DISPLAY_TZ", "Europe/Berlin")
         # LLM on aibox1's own Ollama. The -ctx65536 tag is the one the company
         # brain keeps loaded; passing other options (num_ctx) would load a

@@ -102,6 +102,8 @@ def test_pipeline_and_speaker_renames(app, client, tmp_path):
     assert "**Luis**" in (f / "transcript.md").read_text()
     page = client.get(f"/m/{mid}", headers=h)
     assert page.status_code == 200 and "Luis" in page.text
+    home = client.get("/", headers=h)
+    assert home.status_code == 200 and f'href="/m/{mid}"' in home.text and 'class="row mrow"' in home.text
 
 
 class StubGitHub:
@@ -358,3 +360,25 @@ def test_brainbot_connector_speaks_for_the_person(app, client, tmp_path):
                        headers={"Authorization": f"Bearer {plain}", "X-Indie-User": "ext-ana"}).status_code == 401
     assert client.post("/api/v1/indiechat", json={"op": "whoami"},
                        headers={"Authorization": f"Bearer {service}"}).status_code == 401
+
+
+def test_me_names_the_person_a_phone_records_for(app, client):
+    from recorder.people import add_person
+    db = app.state.db
+    ana = add_person(db, ext_id="ext-ana-me", email="ana@example.com", name="Ana")
+    raw = create_token(db, "Ana's phone", "device", user_id=ana["id"])
+    me = client.get("/api/v1/me", headers={"Authorization": f"Bearer {raw}"}).json()
+    assert me == {"device": "Ana's phone", "role": "device", "person": "Ana"}
+    loose = create_token(db, "box phone", "device")
+    assert client.get("/api/v1/me", headers={"Authorization": f"Bearer {loose}"}).json()["person"] is None
+    # a person who came in through the connector has only an id until they pick a name
+    service = create_token(db, "brainbot:agent command", "agent", trusts_identity=True)
+    hdr = {"Authorization": f"Bearer {service}", "X-Indie-User": "ext-ben-me", "X-Indie-Caller": "user"}
+    pair = client.post("/api/v1/indiechat", json={"op": "pair_phone", "args": {"name": "Ben's phone"}}, headers=hdr).json()["result"]
+    phone = {"Authorization": "Bearer " + pair["pair"].split("#pair=")[1]}
+    assert client.get("/api/v1/me", headers=phone).json()["person"] is None
+    agent = dict(hdr, **{"X-Indie-Caller": "agent"})
+    assert client.post("/api/v1/indiechat", json={"op": "set_name", "args": {"name": "Ben"}}, headers=agent).status_code == 400
+    assert client.post("/api/v1/indiechat", json={"op": "set_name", "args": {"name": " Ben "}}, headers=hdr).json()["result"] == {"name": "Ben"}
+    assert client.get("/api/v1/me", headers=phone).json()["person"] == "Ben"
+    assert client.post("/api/v1/indiechat", json={"op": "whoami"}, headers=hdr).json()["result"]["name"] == "Ben"

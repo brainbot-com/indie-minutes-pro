@@ -1,17 +1,23 @@
 {% extends "base.html" %}
 {% block head %}{% if jobs %}<meta http-equiv="refresh" content="10">{% endif %}{% endblock %}
 {% block main %}
-<h1>Meetings</h1>
-{% if not meetings %}<p class="muted">No meetings yet. Record one with the phone app.</p>{% endif %}
-<ul class="list">
+<div class="head">
+  <span class="kicker">{% if tok and tok.role == 'admin' %}Everyone's meetings (admin){% else %}Only you see your meetings{% endif %}</span>
+  <h1>Meetings</h1>
+</div>
+{% if not meetings %}
+<div><p class="lead">No meetings yet.</p><p class="note muted">Record one with the phone app.</p></div>
+{% else %}
+<div class="rows list">
 {% for m in meetings %}
-  <li><a href="/m/{{ m.id }}">
-    <span class="main"><span class="title">{{ m.title or m.id }}</span>
-    <span class="sub">{{ local_time(m.started_at or m.created_at) }} · {{ fmt_duration(m.duration_s or 0) }}{% if m.speakers %} · {{ m.speakers }} speakers{% endif %}</span></span>
-    {% if m.state == 'failed' %}<span class="chip err">failed</span>
-    {% elif m.state != 'done' %}<span class="chip busy">processing</span>
-    {% elif m.storage == 'drive' %}<span class="chip">Drive</span>{% endif %}
-  </a></li>
+  <a class="row mrow" href="/m/{{ m.id }}"><span class="num">{{ '%02d' % loop.index }}</span>
+    <span class="title">{{ m.title or m.id }}</span>
+    <span class="when tnum">{{ local_time(m.started_at or m.created_at) }}</span>
+    <span class="len tnum">{{ fmt_clock(m.duration_s) }}</span>
+    {% if m.state == 'failed' %}<span class="state busy">Failed</span>
+    {% elif m.state != 'done' %}<span class="state busy">Processing</span>
+    {% else %}<span class="state">{{ 'Drive' if m.storage == 'drive' else 'Local' }}</span>{% endif %}</a>
 {% endfor %}
-</ul>
+</div>
+{% endif %}
 {% endblock %}

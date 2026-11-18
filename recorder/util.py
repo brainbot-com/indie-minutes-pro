@@ -93,6 +93,14 @@ def fmt_ts(seconds):
     return f"{h:02d}:{m:02d}:{s:02d}"
 
 
+def fmt_clock(seconds):
+    """A length as the apps show it: 47:12, or 1:46:43 from an hour on."""
+    seconds = max(0, int(round(seconds or 0)))
+    h, rest = divmod(seconds, 3600)
+    m, s = divmod(rest, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+
+
 def fmt_duration(seconds):
     minutes = round((seconds or 0) / 60)
     if minutes < 60:

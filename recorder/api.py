@@ -5,6 +5,7 @@ listens on the host's loopback (published 127.0.0.1:18000) and on the internal
 Docker network, never on the LAN."""
 import base64
 import contextlib
+import mimetypes
 import shutil
 import threading
 from pathlib import Path
@@ -26,12 +27,13 @@ from .followup import Followup
 from .people import label, resolve
 from .render import display_name, local_time, render_summary_md, words_to_segments
 from .store import Store
-from .util import (fmt_duration, fmt_ts, hash_token, new_id, new_meeting_id, new_token, now_iso,
+from .util import (fmt_clock, fmt_duration, fmt_ts, hash_token, new_id, new_meeting_id, new_token, now_iso,
                    parse_iso, sha256_hex, write_bytes)
 from .worker import Worker
 
 HERE = Path(__file__).parent
 PWA_DIR = HERE.parent / "pwa"
+mimetypes.add_type("font/woff2", ".woff2")   # the slim image does not know it
 COOKIE = "ir_token"
 READERS = ("device", "admin")
 WRITERS = ("agent", "admin")
@@ -104,7 +106,7 @@ def create_app(settings=None):
     worker = Worker(s, db, store, engines, followup)
     md = MarkdownIt("commonmark", {"html": False}).enable("table")
     templates = Jinja2Templates(directory=HERE / "templates")
-    templates.env.globals.update(fmt_ts=fmt_ts, fmt_duration=fmt_duration, version=__version__,
+    templates.env.globals.update(fmt_ts=fmt_ts, fmt_duration=fmt_duration, fmt_clock=fmt_clock, version=__version__,
                                  local_time=lambda iso: local_time(iso, s.display_tz))
     def page_md(text):
         # The meeting page shows title, date and Drive link itself: skip the header
@@ -340,6 +342,12 @@ def create_app(settings=None):
     def get_settings(who=Depends(person("device", "agent", "admin"))):
         return store.settings(who.user_id)
 
+    @app.get("/api/v1/me")
+    def me(who=Depends(person("device", "agent", "admin"))):
+        """Who a token records for: the phone shows it as "Recording for ..."."""
+        owner = db.one("SELECT * FROM users WHERE id = ?", who.user_id) if who.user_id else None
+        return {"device": who.name, "role": who.token["role"], "person": (owner or {}).get("name") or (owner or {}).get("email")}
+
     @app.put("/api/v1/settings")
     def put_settings(body: SettingsIn, who=Depends(person("agent", "admin"))):
         try:
@@ -378,7 +386,7 @@ def create_app(settings=None):
     @app.get("/api/v1/health")
     def health():
         alive = bool(worker.thread and worker.thread.is_alive())
-        return {"ok": True, "version": __version__, "worker": alive, "engine": s.engine, "llm": s.llm_model}
+        return {"ok": True, "version": __version__, "worker": alive, "engine": s.engine, "llm": s.llm_model, "box": s.box_name}
 
     # -- follow-up proposals and the Drive outbox ------------------------------
 
@@ -607,11 +615,17 @@ def create_app(settings=None):
             return JSONResponse({"ok": False, "error": "send {op, args}"}, status_code=400)
         op, args = body["op"], body.get("args") if isinstance(body.get("args"), dict) else {}
         try:
-            if op in ("pair_phone", "phones", "remove_phone") and who.caller != "user":
-                raise ToolError("only a person can pair or remove phones, not an agent")
+            if op in ("pair_phone", "phones", "remove_phone", "set_name") and who.caller != "user":
+                raise ToolError("only a person can pair or remove phones or set their name, not an agent")
             if op == "whoami":
+                me = db.one("SELECT name FROM users WHERE id = ?", who.user_id)
                 result = {"meetings": len(store.list(limit=10000, who=who)), "caller": who.caller,
-                          "phones": len(phones(who))}
+                          "phones": len(phones(who)), "name": me["name"]}
+            elif op == "set_name":
+                # brainbot:agent command names people only by id; the person picks the name their phones show
+                name = str(args.get("name") or "").strip()[:80] or None
+                db.run("UPDATE users SET name = ? WHERE id = ?", name, who.user_id)
+                result = {"name": name}
             elif op == "phones":
                 result = phones(who)
             elif op == "pair_phone":
