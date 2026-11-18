@@ -11,7 +11,7 @@
 {% block head %}{% endblock %}
 </head>
 <body>
-<header class="top bar">
+<header class="top"><div class="bar">
   <span>{% block barleft %}<a href="/">Indie recorder</a>{% endblock %}</span>
   {% if tok %}
   <nav class="end">
@@ -19,7 +19,7 @@
     {% if tok.role == 'admin' %}<a href="/devices">Devices</a>{% endif %}
   </nav>
   {% endif %}
-</header>
+</div></header>
 <main>
 {% block main %}{% endblock %}
 </main>

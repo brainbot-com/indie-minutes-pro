@@ -335,10 +335,12 @@ through the phone simulator into the running recorder, end to end.
 ## Android app
 
 `android/`: a native app (Kotlin, Jetpack Compose, Android 8 and later) for
-what the PWA cannot do: record with the screen off.
+what the PWA cannot do: record with the screen off. Version 0.2.0 has the
+shared Swiss look (see Design): Connect, Ready, Recording, Paused, a meeting,
+Settings.
 
 - Records in a foreground service of type microphone (a notification with a
-  timer and Stop, a partial wake lock): 16 kHz mono from the speech
+  timer, Pause or Resume, and Stop; a partial wake lock): 16 kHz mono from the speech
   recognition microphone source, AAC LC at 48 kbit/s in 30 s chunk files
   (ADTS frames, so the box joins them as `audio/aac`; about 22 MB an hour).
 - Each chunk goes to the box as soon as it is complete, with the PWA's
@@ -347,10 +349,18 @@ what the PWA cannot do: record with the screen off.
   has the whole recording; only then are the chunks deleted. When the app is
   killed mid-recording, its whole chunks are kept (a half-written one is cut
   back to its last whole frame) and sent at the next start.
+- Pause stops the microphone (Android's mic indicator goes off) until Resume;
+  the timer and the stored length count recorded audio only, and the chunks
+  stay one continuous recording. A crash while paused is recovered like one
+  while recording.
+- A live waveform (the spec under Design) replaces the level meter.
 - Says when a call takes the microphone.
-- Pairing: the Devices page shows a second QR code for the app
-  (`indierecorder://pair?...`) that carries the address, the phone's token and
-  the box's CA certificate. The app trusts that CA for the box and nothing
+- Pairing: in brainbot:agent command, Meetings, Settings, Connect a phone shows
+  a QR code for the app (`indierecorder://pair?...`; an admin's Devices page
+  has one too) that carries the address, the phone's token and the box's CA
+  certificate. The token belongs to the person who made the code: the Ready
+  screen shows "For <their name>" (from `/api/v1/me`, read again whenever the
+  app comes to the front), or the phone's name while they have set none. The app trusts that CA for the box and nothing
   else, so the phone needs no CA in its settings. The token is encrypted with
   an Android Keystore key; recordings and token are excluded from cloud backup.
 - Per recording a title and "Save to Google Drive" (the box's default); the
@@ -358,8 +368,9 @@ what the PWA cannot do: record with the screen off.
   Drive switch. English and German, light and dark.
 
 Install: on the phone (VPN on) open `http://10.1.9.7:8480/indie-recorder.apk`,
-allow installs from the browser, install. Then create a phone token on the
-Devices page and scan the Android code with the camera.
+allow installs from the browser, install. Then scan the code from Meetings,
+Settings, Connect a phone with the camera. Inter is bundled under the SIL Open
+Font License (`assets/licenses/Inter-OFL.txt` in the APK).
 
 Build and test, on aibox1 from `~/indie-recorder`:
 
@@ -369,10 +380,14 @@ Build and test, on aibox1 from `~/indie-recorder`:
   it: Android installs an update only with the same key), copied to
   `secrets/tls/public/indie-recorder.apk`.
 - `android/e2e/emulator-test.sh`: an Android 14 emulator (KVM) with the debug
-  build pairs through the deep link, records a 75 s speech file in place of
-  the microphone (a debug-only hook), and the box transcribes it; then the
-  same with the network cut during the recording, and with the app killed
-  after 40 s. Screenshots in `data/test/android/`.
+  build pairs through the deep link as a test person, records a 75 s speech
+  file in place of the microphone (a debug-only hook), and the box transcribes
+  it; then the same with the network cut during the recording, with the app
+  killed after 40 s, and with a pause (30 s, about 23 s paused, 30 s: the
+  phone and the box both count 60 s). Light and dark screenshots of every
+  screen in `data/test/android/`. On exit it deletes its meetings, revokes its
+  token and removes the test person (`recorder.cli user remove`); `KEEP=1`
+  keeps everything for a look.
 
 Not in the app yet: a VPN of its own (it shows "Box not reachable (VPN?)" and
 waits), choosing the microphone (an external one is used when Android routes

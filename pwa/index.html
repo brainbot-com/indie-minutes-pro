@@ -17,7 +17,7 @@
 <main>
   <header class="bar">
     <span id="barLeft"><span data-t="brand"></span><button id="back" data-t="back" hidden></button></span>
-    <span id="status" data-t="notConnected"></span>
+    <span class="end"><span id="status" data-t="notConnected"></span><button id="gear" type="button" data-t="settings" hidden></button></span>
   </header>
 
   <section class="view" id="pair" hidden>
@@ -50,7 +50,7 @@
       <div class="cell"><span class="label" id="lDrive" data-t="storage"></span>
         <button class="toggle" id="driveBtn" type="button"><span class="switch" role="switch" aria-checked="false" id="drive" aria-labelledby="lDrive"></span><span id="driveLabel"></span></button></div>
       <div class="cell" id="micCell" hidden><span class="label" data-t="mic"></span><span class="v" id="micNow"></span></div>
-      <div class="cell" id="forCell" hidden><span class="label" data-t="forWhom"></span><span class="v" id="forNow"></span></div>
+      <div class="cell" id="forCell" hidden><span class="label" id="forLabel"></span><span class="v" id="forNow"></span></div>
     </div>
     <button class="recbtn" id="rec" type="button"><span class="dot" aria-hidden="true"></span><span data-t="record"></span></button>
     <div class="pair2" id="live" hidden>
@@ -64,7 +64,6 @@
       <p class="note error" id="net" hidden></p>
       <div class="rows" id="recs"></div>
     </div>
-    <div><button class="textbtn" id="gear" type="button" data-t="settings"></button></div>
   </section>
 
   <section class="view" id="settings" hidden>

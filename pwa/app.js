@@ -19,7 +19,7 @@ const STR = {
     pairAgain: "The box no longer accepts this phone's token. Connect it again.",
     newRecording: 'New recording', recording: 'Recording', paused: 'Paused', title: 'Title', optional: 'Optional', untitled: 'Recording',
     box: 'Box', storage: 'Storage', drive: 'Google Drive', local: 'On the box', mic: 'Microphone', micOn: 'On', micOff: 'Off while paused',
-    forWhom: 'Recording for', record: 'Record', pause: 'Pause', resume: 'Resume', stop: 'Stop',
+    forWhom: 'Recording for', forShort: 'For', phone: 'Phone', record: 'Record', pause: 'Pause', resume: 'Resume', stop: 'Stop',
     pausedNote: 'Paused. The microphone is off; nothing is recorded until you resume.',
     recordings: 'Recordings', settings: 'Settings', thisPhone: 'This phone', thisPhoneIs: 'This phone',
     voice: 'Voice processing (echo and noise suppression)', voiceNote: 'Off is better for a phone lying on the table.',
@@ -44,7 +44,7 @@ const STR = {
     pairAgain: 'Die Box nimmt das Token dieses Telefons nicht mehr an. Bitte neu verbinden.',
     newRecording: 'Neue Aufnahme', recording: 'Aufnahme läuft', paused: 'Pausiert', title: 'Titel', optional: 'Optional', untitled: 'Aufnahme',
     box: 'Box', storage: 'Ablage', drive: 'Google Drive', local: 'Auf der Box', mic: 'Mikrofon', micOn: 'An', micOff: 'Aus, solange pausiert',
-    forWhom: 'Aufnahme für', record: 'Aufnehmen', pause: 'Pause', resume: 'Weiter', stop: 'Stopp',
+    forWhom: 'Aufnahme für', forShort: 'Für', phone: 'Telefon', record: 'Aufnehmen', pause: 'Pause', resume: 'Weiter', stop: 'Stopp',
     pausedNote: 'Pausiert. Das Mikrofon ist aus; bis Sie fortsetzen, wird nichts aufgenommen.',
     recordings: 'Aufnahmen', settings: 'Einstellungen', thisPhone: 'Dieses Telefon', thisPhoneIs: 'Dieses Telefon',
     voice: 'Sprachverarbeitung (Echo- und Rauschunterdrückung)', voiceNote: 'Aus ist besser, wenn das Telefon auf dem Tisch liegt.',
@@ -395,6 +395,9 @@ function show(name, error) {
   for (const v of ['pair', 'ready', 'settings']) $(v).hidden = v !== name;
   $('back').hidden = name !== 'settings';
   $('barLeft').firstElementChild.hidden = name === 'settings';
+  // like the Android app: Settings in the bar on the recorder, the box's state everywhere else
+  $('gear').hidden = name !== 'ready';
+  $('status').hidden = name === 'ready';
   if (name === 'pair') { $('pairError').textContent = error || ''; $('status').textContent = t('notConnected'); }
   else showBox();
   window.scrollTo(0, 0);
@@ -424,8 +427,12 @@ async function whoAmI() {
     if (!r.ok) return;
     const me = await r.json();
     $('device').textContent = me.device || '';
-    $('forCell').hidden = $('personRow').hidden = !me.person;
-    $('forNow').textContent = $('person').textContent = me.person || '';
+    $('personRow').hidden = !me.person;
+    $('person').textContent = me.person || '';
+    // whose account this phone records into; without a name, at least which phone it is
+    $('forCell').hidden = !me.person && !me.device;
+    $('forLabel').textContent = me.person ? t('forShort') : t('phone');
+    $('forNow').textContent = me.person || me.device || '';
   } catch (e) { /* offline, or an old box without /me: nothing to show */ }
 }
 
