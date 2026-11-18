@@ -38,7 +38,7 @@ phone (Chrome PWA, VPN)                         aibox1 (10.1.9.7)
   decides per meeting (web view, Meetings app, phone app); the default for new
   recordings starts as `STORAGE_DEFAULT` and is a setting after that.
 - Everything listens on the box only: Caddy binds 10.1.9.7 and admits only
-  `ALLOW_CIDRS` (VPN clients, the phone's address, ai-knowledge for
+  `ALLOW_CIDRS` (the VPN client pools, ai-knowledge for
   brainbot:agent command, the box itself for the simulator). The recorder listens on
   127.0.0.1:18000, the engines only on an internal Docker network. aibox1 has
   no VPN interface of its own; VPN clients reach its LAN address unNATed,
