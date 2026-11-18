@@ -1,13 +1,13 @@
-# Meetings in brainbot:brain
+# Meetings in brainbot:agent command
 
-The recorder on aibox1 in brainbot:brain (indie-chat on ai-knowledge): the
+The recorder on aibox1 in brainbot:agent command (indie-chat on ai-knowledge): the
 Meetings app to read and steer your meetings, and a meeting agent that writes
 better summaries with what it knows and stores meetings in Google Drive.
 
 - `indie-recorder.html`: the Meetings app (an app template). List by day, a
   meeting's summary, action items and transcript, speaker names, "Store in
   Google Drive" per meeting and the default for new recordings. English and
-  German, follows brainbot:brain's light and dark theme. Its WebMCP tools
+  German, follows brainbot:agent command's light and dark theme. Its WebMCP tools
   (`list_meetings`, `open_meeting`, `set_storage`, `set_default_storage`,
   `rename_speakers`) let the app's agent drive it.
 - `install-ai-knowledge.sh`: the one-time change on ai-knowledge.
@@ -16,13 +16,13 @@ better summaries with what it knows and stores meetings in Google Drive.
 
 - Recording, transcription and the first summary happen on aibox1 only, with
   aibox1's own models.
-- brainbot:brain reaches the recorder only through
+- brainbot:agent command reaches the recorder only through
   `https://ai-knowledge.mz.brainbot.com/indie-recorder/mcp` (needs your
   recorder token) and `/indie-recorder/api/v1/files/...` (signed links that
   expire after two hours). Nothing else of the recorder is reachable there.
 - Each meeting is either local or in Drive (your choice per meeting; the
   default for new recordings is a setting). A local meeting stays on aibox1:
-  the Meetings app shows it through brainbot:brain's server to your browser,
+  the Meetings app shows it through brainbot:agent command's server to your browser,
   nothing is stored on the way. A Drive meeting is uploaded by your meeting
   agent: `Summary.md`, `Action items.md`, `Transcript.md` (and the recording,
   if you switch that on) into a folder per meeting, plus an entry in the
@@ -56,7 +56,7 @@ SHA-256 fingerprint is the recorder's (`E6:89:A7:83:...:07:F1:2D:9F`), then:
 3. puts the Meetings template into `/opt/kb/indiechat-config` (no `seed`:
    it waits in the template picker, nobody gets it unasked),
 4. recreates the indie-chat app container (a few seconds) and checks that
-   brainbot:brain answers again; if not, it puts `.env` and the templates back.
+   brainbot:agent command answers again; if not, it puts `.env` and the templates back.
 
 Each changed file is backed up once as `<file>.pre-indie-recorder`. Running it
 again changes nothing that is already in place, except a newer
@@ -72,10 +72,10 @@ delete `/opt/kb/indiechat-config/app-templates/indie-recorder.html` and run
 ## For each person
 
 1. **A recorder token.** On aibox1, `cd ~/indie-recorder && docker compose
-   exec -T recorder python -m recorder.cli token add --name "brainbot:brain
+   exec -T recorder python -m recorder.cli token add --name "agent command
    <name>" --role agent < /dev/null` prints one (or an admin makes one on the
    recorder's Devices page). Luis's is in `~/indie-recorder/secrets/command_center_token`.
-2. **Your own MCP server.** brainbot:brain's form for MCP servers has no field
+2. **Your own MCP server.** brainbot:agent command's form for MCP servers has no field
    for a header yet, so add it once from the browser console: open
    https://ai-knowledge.mz.brainbot.com, press F12, Console, and run
 

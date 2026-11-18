@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Connects brainbot:brain (indie-chat on ai-knowledge) to the indie-recorder on
+# Connects brainbot:agent command (indie-chat on ai-knowledge) to the indie-recorder on
 # aibox1, for the Meetings app and a meeting agent. Run as root on ai-knowledge
 # from a copy of this folder:
 #
@@ -22,7 +22,7 @@
 #   3. /opt/kb/indiechat-config: the Meetings app template. No "seed": it waits
 #      in the template picker, nobody gets it unasked.
 #   4. Recreates the indie-chat app container (a few seconds) for 2 and 3, and
-#      puts 2 and 3 back if brainbot:brain does not come up again.
+#      puts 2 and 3 back if brainbot:agent command does not come up again.
 # Running it again changes nothing that is already in place.
 set -euo pipefail
 
@@ -61,7 +61,7 @@ else
 import os, sys
 s = open(sys.argv[1]).read()
 route = """	# indie-recorder on aibox1: its MCP endpoint and signed file links, for the
-	# Meetings app and meeting agents in brainbot:brain. The MCP needs the
+	# Meetings app and meeting agents in brainbot:agent command. The MCP needs the
 	# recorder's agent token, a file link is signed and expires after two hours;
 	# nothing else of the recorder is passed through. Added by
 	# indie-recorder/integrations/indie-chat/install-ai-knowledge.sh.
@@ -102,7 +102,7 @@ case $code in
 	403) echo "WARNING: aibox1 does not admit this host yet: ALLOW_CIDRS in ~/indie-recorder/.env there needs 10.1.1.26/32" ;;
 	*) echo "WARNING: the route answered $code (expected 401)" ;;
 esac
-echo "brainbot:brain: $(curl -s -o /dev/null -w "%{http_code}" "https://$HOST/api/branding")"
+echo "brainbot:agent command: $(curl -s -o /dev/null -w "%{http_code}" "https://$HOST/api/branding")"
 
 echo "== 2. INDIE_PRIVATE_HOSTS"
 cp -p $SRC/.env "$tmp/env.before"
@@ -165,10 +165,10 @@ up() {
 	return 1
 }
 if up; then
-	echo "brainbot:brain is up again"
+	echo "brainbot:agent command is up again"
 	docker logs --since 3m indiechat-app-1 2>&1 | grep -iE "template|private host|error" | tail -5 || true
 else
-	echo "brainbot:brain did not come up: putting .env and the templates back" >&2
+	echo "brainbot:agent command did not come up: putting .env and the templates back" >&2
 	docker logs --since 3m indiechat-app-1 2>&1 | tail -15 >&2 || true
 	cp -p "$tmp/env.before" $SRC/.env
 	cp -p "$tmp/templates.before" $CFG/app-templates.json

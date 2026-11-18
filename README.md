@@ -5,9 +5,9 @@ the VPN to the box (aibox1: Ryzen AI Max+ 395, Radeon 8060S, 128 GB unified
 memory), the box transcribes it with speaker labels and summarizes it with its
 own LLM. Per meeting the person chooses where it lives: only on the box, or
 also in Google Drive (summary, action items, transcript, optionally the
-audio). A meeting agent in brainbot:brain (the Agent Command Center) does the
+audio). A meeting agent in brainbot:agent command does the
 Drive part and writes a better summary from its own context and memory; the
-Meetings app in brainbot:brain shows and steers it all.
+Meetings app in brainbot:agent command shows and steers it all.
 
 ```
 phone (Chrome PWA, VPN)                         aibox1 (10.1.9.7)
@@ -21,10 +21,10 @@ phone (Chrome PWA, VPN)                         aibox1 (10.1.9.7)
                                                  |-> summary v1: qwen3.8:27b on the box's Ollama
                                                data/meetings/<id>/ + index.sqlite
                                                  |
-       follow-up agent: meeting set to Drive -> outbox -> meeting agent (brainbot:brain) -> Google Drive
+       follow-up agent: meeting set to Drive -> outbox -> meeting agent (brainbot:agent command) -> Google Drive
                         GitHub (optional): /review -> approved -> outbox -> agent -> issue or comment
        meeting agent (MCP) -> better summary v2, v3 ... (its context and memory)
-       Meetings app in brainbot:brain (MCP) -> meetings, summaries, speakers, Drive or local
+       Meetings app in brainbot:agent command (MCP) -> meetings, summaries, speakers, Drive or local
 ```
 
 ## What stays on the box
@@ -39,11 +39,11 @@ phone (Chrome PWA, VPN)                         aibox1 (10.1.9.7)
   recordings starts as `STORAGE_DEFAULT` and is a setting after that.
 - Everything listens on the box only: Caddy binds 10.1.9.7 and admits only
   `ALLOW_CIDRS` (VPN clients, the phone's address, ai-knowledge for
-  brainbot:brain, the box itself for the simulator). The recorder listens on
+  brainbot:agent command, the box itself for the simulator). The recorder listens on
   127.0.0.1:18000, the engines only on an internal Docker network. aibox1 has
   no VPN interface of its own; VPN clients reach its LAN address unNATed,
   which is why the allowlist works.
-- brainbot:brain reaches the recorder through a route on ai-knowledge that
+- brainbot:agent command reaches the recorder through a route on ai-knowledge that
   passes only the MCP endpoint (token) and signed file links (two hours); see
   [integrations/indie-chat](integrations/indie-chat/README.md).
 - Agents that read transcripts must use aibox1's LLM (the meeting agent uses
@@ -82,7 +82,7 @@ kernel 6.14 OEM, Mesa 25.2 RADV, ROCm 7.0.1, Docker 2x), as a user in the
    4 GB of ROCm wheels) and start them with `docker compose up -d`.
 5. Follow-ups: `.env.example` runs the follow-up loop against the mock
    GitHub and Drive on the box (`FOLLOWUP_EXECUTOR=direct`). For the real
-   Drive (and GitHub), set up the meeting agent in brainbot:brain
+   Drive (and GitHub), set up the meeting agent in brainbot:agent command
    ([integrations/indie-chat](integrations/indie-chat/README.md)) and switch
    to `FOLLOWUP_EXECUTOR=agent`; the box itself holds no GitHub or Drive login.
 6. Check: `curl -s http://127.0.0.1:18000/api/v1/health` and
@@ -171,7 +171,7 @@ for the targets in `FOLLOWUP_TARGETS` (default `drive`):
   `docker compose exec -T recorder python -m recorder.followup run --json-in - <<< '{"auto": false}'`,
   plus `list`, `approve ID`, `reject ID`, `outbox`, `ack ID --url URL`.
 
-## Agent Command Center (brainbot:brain)
+## brainbot:agent command (meeting agent and Meetings app)
 
 Setup, step by step: [integrations/indie-chat](integrations/indie-chat/README.md)
 (a script for ai-knowledge, your own MCP server, the Meetings app, the meeting
@@ -184,7 +184,7 @@ agent with its instructions and hourly routine). In short:
   `set_storage`, `rename_speakers`, `new_summary`, `drive_files` (signed
   download links for a `drive_store` item), `list_outbox`, `ack_outbox_item`,
   `sync_issues`.
-- brainbot:brain reaches it as
+- brainbot:agent command reaches it as
   `https://ai-knowledge.mz.brainbot.com/indie-recorder/mcp`, a personal MCP
   server of each person (their token, only their agents and apps).
 - `AGENT_SUMMARIES_SINCE` keeps meetings from before go-live out of
@@ -296,7 +296,7 @@ through the phone simulator into the running recorder, end to end.
   Chrome on Android trusts user-installed CAs for websites without asking
   for Certificate Transparency; a CA placed in the system store (rooted
   phones) would need CT and fail.
-- brainbot:brain's MCP form has no field for a header, so the personal
+- brainbot:agent command's MCP form has no field for a header, so the personal
   server (with the recorder token) and the routine's pre-check are set once
   from the browser console (see integrations/indie-chat).
 - Drive: a new summary version uploads the meeting's files again; the agent
@@ -359,7 +359,7 @@ to it), editing speaker names (the web view and the Meetings app have it).
 
 `recorder/` service, worker, engines (clients), follow-up agent, MCP, web
 templates · `pwa/` phone web app · `android/` Android app · `integrations/`
-brainbot:brain · `sim/` phone simulator · `engines/` engine
+brainbot:agent command · `sim/` phone simulator · `engines/` engine
 containers · `bench/` benchmark · `deploy/` Caddy, CA, systemd, deploy and
 model scripts.
 
