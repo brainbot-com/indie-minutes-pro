@@ -11,14 +11,28 @@ main { max-width: 520px; margin: 0 auto; padding: 24px 24px calc(28px + env(safe
 #clock.paused { color: var(--dim); }
 
 /* the waveform: one bar per 100 ms, newest on the right (drawn in app.js) */
-.wave { height: 88px; }
-.wave canvas { display: block; width: 100%; height: 88px; }
+.wave { height: clamp(56px, 10dvh, 88px); }
+.wave canvas { display: block; width: 100%; height: 100%; }
+
+/* The recorder screen fits the phone without scrolling the page: the timer and
+   the blocks give way on short screens, labels on narrow ones, and only the
+   list of recordings scrolls. */
+main:has(#ready:not([hidden])) { height: 100dvh; overflow-y: auto; }
+#ready:not([hidden]) { flex: 1; min-height: 0; }
+#clock { font-size: clamp(56px, 12dvh, 104px); }
+#listBox { flex: 1; min-height: 72px; overflow-y: auto; }
+@media (max-height: 760px) {
+  main, .view { gap: clamp(10px, 2.2dvh, 22px); }
+  main { padding-top: 14px; }
+  .cells { row-gap: 8px; padding-top: 8px; }
+  #pausedNote { display: none; }       /* the Microphone cell says "Off while paused" already */
+}
 
 /* Record: the big red block of the Ready screen */
 .recbtn {
-  height: 186px; border: 0; border-radius: 0; background: var(--red); color: var(--on-red); padding: 18px; cursor: pointer;
+  height: clamp(112px, 22dvh, 186px); flex: none; border: 0; border-radius: 0; background: var(--red); color: var(--on-red); padding: 18px; cursor: pointer;
   display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start;
-  font-size: 40px; font-weight: 900; letter-spacing: -.03em;
+  font-size: clamp(30px, 9vw, 40px); font-weight: 900; letter-spacing: -.03em; white-space: nowrap;
 }
 .recbtn:active { background: var(--red-dark); }
 .recbtn .dot { width: 30px; height: 30px; border-radius: 50%; background: var(--on-red); }
@@ -26,9 +40,9 @@ main { max-width: 520px; margin: 0 auto; padding: 24px 24px calc(28px + env(safe
 /* Pause or Resume, and Stop, side by side while recording */
 .pair2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .blk {
-  height: 163px; border: 0; border-radius: 0; padding: 16px; cursor: pointer;
+  height: clamp(100px, 19dvh, 163px); min-width: 0; border: 0; border-radius: 0; padding: 16px; cursor: pointer;
   display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start;
-  font-size: 30px; font-weight: 900; letter-spacing: -.02em;
+  font-size: clamp(20px, 6.8vw, 30px); font-weight: 900; letter-spacing: -.02em; white-space: nowrap;
 }
 .blk.ink { background: var(--ink); color: var(--paper); }
 .blk.ink svg { fill: var(--paper); }

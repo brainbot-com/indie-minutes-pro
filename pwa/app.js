@@ -296,9 +296,9 @@ function tick() {
 // Bars 3 px wide every 5 px, as tall as their level (at least 2 px), centred,
 // the newest at the right edge; grey while paused.
 function drawWave() {
-  const c = $('wave'), w = c.clientWidth, h = 88, dpr = window.devicePixelRatio || 1;
+  const c = $('wave'), w = c.clientWidth, h = c.clientHeight || 88, dpr = window.devicePixelRatio || 1;
   if (!w) return;
-  if (c.width !== Math.round(w * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+  if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
   const g = c.getContext('2d');
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
   g.clearRect(0, 0, w, h);
