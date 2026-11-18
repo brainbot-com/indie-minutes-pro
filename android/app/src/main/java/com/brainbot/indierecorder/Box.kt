@@ -52,6 +52,9 @@ class BoxConfig(val url: String, val token: String, val caDer: ByteArray, val na
     val host: String get() = url.removePrefix("https://").substringBefore('/')
 }
 
+/** Whom the phone records for, as the box last said (GET /api/v1/me): the person and this phone's name. */
+class Me(val person: String?, val device: String)
+
 /** The pairing as stored on the phone; the token is encrypted with an Android Keystore key. */
 object Pairing {
     private const val PREFS = "box"
@@ -71,6 +74,27 @@ object Pairing {
             .putString("token", encrypt(cfg.token))
             .putString("ca", Base64.getEncoder().encodeToString(cfg.caDer))
             .putString("name", cfg.name)
+            .remove("me_device").remove("me_person")       // a new pairing may record for someone else
+            .remove("box_name")
+            .apply()
+    }
+
+    /** The box's own name from its health answer ("aibox1"), for the screens' top bars. */
+    fun boxName(ctx: Context): String? = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("box_name", null)
+
+    fun saveBoxName(ctx: Context, name: String) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("box_name", name).apply()
+    }
+
+    fun me(ctx: Context): Me? {
+        val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return Me(p.getString("me_person", null), p.getString("me_device", null) ?: return null)
+    }
+
+    fun saveMe(ctx: Context, me: JSONObject) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString("me_device", me.optString("device"))
+            .putString("me_person", me.optString("person").takeIf { it.isNotBlank() && it != "null" })
             .apply()
     }
 
@@ -142,6 +166,13 @@ class BoxApi(val cfg: BoxConfig) {
     fun settings(): JSONObject = JSONObject(send("GET", "/api/v1/settings"))
     fun recording(rid: String): JSONObject = JSONObject(send("GET", "/api/v1/recordings/$rid"))
     fun meeting(mid: String): JSONObject = JSONObject(send("GET", "/api/v1/meetings/$mid"))
+
+    /** Whom this phone records for; null from a box that does not tell yet (404). */
+    fun me(): JSONObject? = try {
+        JSONObject(send("GET", "/api/v1/me"))
+    } catch (e: HttpError) {
+        if (e.code == 404) null else throw e
+    }
 
     fun createRecording(r: LocalRecording): JSONObject = post("/api/v1/recordings", JSONObject()
         .put("client_id", r.clientId).put("mime", "audio/aac").put("title", r.title.ifBlank { JSONObject.NULL })

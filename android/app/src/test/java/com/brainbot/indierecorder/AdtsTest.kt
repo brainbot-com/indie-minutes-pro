@@ -28,5 +28,8 @@ class AdtsTest {
         assertEquals("0:05", clock(5_000))
         assertEquals("12:34", clock(754_000))
         assertEquals("1:02:03", clock(3_723_000))
+        assertEquals("00:05", timer(5_000))
+        assertEquals("12:34", timer(754_000))
+        assertEquals("1:02:03", timer(3_723_000))
     }
 }

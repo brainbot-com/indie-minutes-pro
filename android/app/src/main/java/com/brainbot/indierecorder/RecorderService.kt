@@ -39,15 +39,20 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import kotlin.math.log10
-import kotlin.math.sqrt
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
 /** What the screen shows while a recording runs (one process, one recording at a time). */
 object RecState {
     class Active(val clientId: String, val startedMs: Long)
 
     val active = MutableStateFlow<Active?>(null)
-    val level = MutableStateFlow(0f)
+    val paused = MutableStateFlow(false)
+    /** Recorded audio so far: the timer, which stands still while the recording is paused. */
+    val recordedMs = MutableStateFlow(0L)
+    /** The waveform's bars, oldest first (Waveform.GAP where a pause was). */
+    val wave = MutableStateFlow<List<Float>>(emptyList())
     val muted = MutableStateFlow(false)
     val error = MutableStateFlow<String?>(null)
 }
@@ -56,11 +61,15 @@ object RecState {
  * Records in a foreground service of type microphone, so a meeting keeps
  * recording with the screen off. 16 kHz mono from the microphone (the box
  * resamples to 16 kHz anyway), AAC in 30 s chunk files, each sent to the box
- * as soon as it is complete.
+ * as soon as it is complete. A pause releases the microphone and records
+ * nothing; the recording goes on as one stream when it resumes.
  */
 class RecorderService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     @Volatile private var running = false
+    @Volatile private var pauseWanted = false
+    private val lock = ReentrantLock()
+    private val changed = lock.newCondition()
     private var wakeLock: PowerManager.WakeLock? = null
     private lateinit var store: Store
 
@@ -73,17 +82,29 @@ class RecorderService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_START -> if (running) RecState.active.value?.let { show(notification(it.startedMs, false)) } else begin(intent)
-            ACTION_STOP -> if (running) running = false else stopSelf()
+            ACTION_START -> if (running) update() else begin(intent)
+            ACTION_PAUSE -> if (running) want(paused = true) else stopSelf()
+            ACTION_RESUME -> if (running) want(paused = false) else stopSelf()
+            ACTION_STOP -> if (running) { running = false; want(paused = false) } else stopSelf()
             else -> if (!running) stopSelf()
         }
         return START_NOT_STICKY
     }
 
+    /** The capture thread does the pausing itself (it owns the microphone): tell it and wake it up. */
+    private fun want(paused: Boolean) {
+        pauseWanted = paused
+        lock.withLock { changed.signalAll() }
+    }
+
     @SuppressLint("MissingPermission")  // the screen asks for RECORD_AUDIO before it starts the service
     private fun begin(intent: Intent) {
         val startedMs = System.currentTimeMillis()
-        show(notification(startedMs, false))
+        pauseWanted = false
+        RecState.paused.value = false
+        RecState.recordedMs.value = 0
+        RecState.wave.value = emptyList()
+        show(notification(0))
         val source: PcmSource = try {
             val wav = if (BuildConfig.DEBUG) intent.getStringExtra(EXTRA_TEST_WAV) else null
             if (wav != null) WavSource(File(wav), intent.getFloatExtra(EXTRA_TEST_SPEED, 1f)) else MicSource(this)
@@ -105,23 +126,42 @@ class RecorderService : Service() {
     private fun capture(id: String, source: PcmSource, startedMs: Long) {
         var writer: AacWriter? = null
         var failure: String? = null
+        val wave = Waveform()
+        fun tooLong() = System.currentTimeMillis() - startedMs > MAX_RECORDING_MS
         try {
             writer = AacWriter(store, id) { scope.launch { runCatching { Uploader.sync(this@RecorderService, id) } } }
             source.start()
             val buf = ShortArray(1024)
             var muted = false
             while (running) {
+                if (pauseWanted) {
+                    // The microphone is off until the recording resumes; the encoder simply gets no samples,
+                    // so the stream and its 30 s chunks go on where they stopped.
+                    source.pause()
+                    wave.pause()
+                    RecState.paused.value = true
+                    update()
+                    lock.withLock { while (pauseWanted && running && !tooLong()) changed.await(60, TimeUnit.SECONDS) }
+                    if (!running || tooLong()) break
+                    source.resume()
+                    wave.resume()
+                    RecState.wave.value = wave.bars()
+                    RecState.paused.value = false
+                    update()
+                    continue
+                }
                 val n = source.read(buf)
                 if (n < 0) break                                    // a test file has ended
                 if (n == 0) continue
-                RecState.level.value = level(buf, n)
                 writer.feed(buf, n)
+                RecState.recordedMs.value = writer.durationMs
+                if (wave.feed(buf, n)) RecState.wave.value = wave.bars()
                 if (source.muted != muted) {
                     muted = source.muted
                     RecState.muted.value = muted
-                    show(notification(startedMs, muted))
+                    update()
                 }
-                if (System.currentTimeMillis() - startedMs > MAX_RECORDING_MS) break
+                if (tooLong()) break
             }
         } catch (e: Exception) {
             failure = e.message ?: e.javaClass.simpleName
@@ -142,7 +182,9 @@ class RecorderService : Service() {
             }
             RecState.error.value = failure
             RecState.active.value = null
-            RecState.level.value = 0f
+            RecState.paused.value = false
+            RecState.recordedMs.value = 0
+            RecState.wave.value = emptyList()
             RecState.muted.value = false
             UploadWorker.enqueue(this, id, now = true)
             Handler(Looper.getMainLooper()).post { finish() }
@@ -167,26 +209,38 @@ class RecorderService : Service() {
         ServiceCompat.startForeground(this, NOTIFICATION_ID, n, type)
     }
 
-    private fun notification(startedMs: Long, muted: Boolean): Notification {
+    /** A new notification for the running service (paused, resumed, mic taken): no second startForeground. */
+    private fun update() =
+        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(RecState.recordedMs.value))
+
+    private fun notification(recordedMs: Long): Notification {
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val stop = PendingIntent.getService(this, 1, Intent(this, RecorderService::class.java).setAction(ACTION_STOP),
-            PendingIntent.FLAG_IMMUTABLE)
-        return NotificationCompat.Builder(this, App.CHANNEL)
+        fun action(a: String, code: Int) = PendingIntent.getService(this, code,
+            Intent(this, RecorderService::class.java).setAction(a), PendingIntent.FLAG_IMMUTABLE)
+        val b = NotificationCompat.Builder(this, App.CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_rec)
             .setContentTitle(getString(R.string.app_name))
-            .setContentText(getString(if (muted) R.string.notif_muted else R.string.channel_recording))
-            .setWhen(startedMs).setUsesChronometer(true).setShowWhen(true)
             .setOngoing(true).setOnlyAlertOnce(true)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setContentIntent(open)
-            .addAction(0, getString(R.string.notif_stop), stop)
-            .build()
+        if (RecState.paused.value) {
+            b.setContentText(getString(R.string.notif_paused, clock(recordedMs))).setShowWhen(false)
+                .addAction(0, getString(R.string.notif_resume), action(ACTION_RESUME, 2))
+        } else {
+            // The chronometer shows recorded time, like the screen: it starts where the recording stands.
+            b.setContentText(getString(if (RecState.muted.value) R.string.notif_muted else R.string.channel_recording))
+                .setWhen(System.currentTimeMillis() - recordedMs).setUsesChronometer(true).setShowWhen(true)
+                .addAction(0, getString(R.string.notif_pause), action(ACTION_PAUSE, 3))
+        }
+        return b.addAction(0, getString(R.string.notif_stop), action(ACTION_STOP, 1)).build()
     }
 
     companion object {
         const val ACTION_START = "com.brainbot.indierecorder.START"
         const val ACTION_STOP = "com.brainbot.indierecorder.STOP"
+        const val ACTION_PAUSE = "com.brainbot.indierecorder.PAUSE"
+        const val ACTION_RESUME = "com.brainbot.indierecorder.RESUME"
         const val EXTRA_TITLE = "title"
         const val EXTRA_STORAGE = "storage"
         const val EXTRA_TEST_WAV = "test_wav"
@@ -199,17 +253,12 @@ class RecorderService : Service() {
                 .setAction(ACTION_START).putExtra(EXTRA_TITLE, title).putExtra(EXTRA_STORAGE, storage).apply(extras))
         }
 
-        fun stop(ctx: Context) {
-            ctx.startService(Intent(ctx, RecorderService::class.java).setAction(ACTION_STOP))
-        }
+        fun stop(ctx: Context) = send(ctx, ACTION_STOP)
+        fun pause(ctx: Context) = send(ctx, ACTION_PAUSE)
+        fun resume(ctx: Context) = send(ctx, ACTION_RESUME)
 
-        /** 0..1 for the level bar: -60 dBFS and below is empty. */
-        fun level(buf: ShortArray, n: Int): Float {
-            var sum = 0.0
-            for (i in 0 until n) sum += buf[i].toDouble() * buf[i]
-            val rms = sqrt(sum / n) / 32768.0
-            val db = if (rms > 0) 20 * log10(rms) else -100.0
-            return ((db + 60) / 60).coerceIn(0.0, 1.0).toFloat()
+        private fun send(ctx: Context, action: String) {
+            ctx.startService(Intent(ctx, RecorderService::class.java).setAction(action))
         }
     }
 }
@@ -219,6 +268,9 @@ interface PcmSource {
     fun start()
     /** Samples read into buf; -1 at the end of a test file. */
     fun read(buf: ShortArray): Int
+    /** Stops taking audio until resume(); the microphone is released meanwhile. */
+    fun pause()
+    fun resume()
     fun stop()
 }
 
@@ -255,6 +307,10 @@ class MicSource(ctx: Context) : PcmSource {
         return n
     }
 
+    override fun pause() = rec.stop()
+
+    override fun resume() = rec.startRecording()
+
     override fun stop() {
         callback?.let { am.unregisterAudioRecordingCallback(it) }
         try { rec.stop() } finally { rec.release() }
@@ -267,6 +323,7 @@ class WavSource(file: File, private val speed: Float) : PcmSource {
     override val muted = false
     private var t0 = 0L
     private var samples = 0L
+    private var pausedAt = 0L
 
     override fun start() {
         val head = ByteArray(12)
@@ -295,6 +352,15 @@ class WavSource(file: File, private val speed: Float) : PcmSource {
         val wait = t0 + (samples * 1000 / Adts.SAMPLE_RATE / speed).toLong() - SystemClock.elapsedRealtime()
         if (wait > 0) Thread.sleep(wait)
         return got / 2
+    }
+
+    override fun pause() {
+        pausedAt = SystemClock.elapsedRealtime()
+    }
+
+    /** The file goes on where it stopped, at the same pace. */
+    override fun resume() {
+        t0 += SystemClock.elapsedRealtime() - pausedAt
     }
 
     override fun stop() = input.close()

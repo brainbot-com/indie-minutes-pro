@@ -1,49 +1,86 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="brand">Indie recorder</string>
     <string name="channel_recording">Aufnahme</string>
-    <string name="notif_recording">Aufnahme %1$s</string>
     <string name="notif_muted">Mikrofon von einer anderen App belegt (ein Anruf?)</string>
+    <string name="notif_paused">Pausiert bei %1$s</string>
+    <string name="notif_pause">Pause</string>
+    <string name="notif_resume">Weiter</string>
     <string name="notif_stop">Stopp</string>
-    <string name="pair_title">Mit dem Recorder verbinden</string>
-    <string name="pair_text">Auf der Seite Geräte des Recorders (ein Admin öffnet sie) ein Token für dieses Telefon anlegen und den Android-Code mit der Kamera scannen. Oder den Link hier einfügen.</string>
+    <string name="settings">Einstellungen</string>
+    <string name="back">Zurück</string>
+
+    <string name="not_connected">Nicht verbunden</string>
+    <string name="pair_kicker">Einrichten</string>
+    <string name="pair_title">Mit Ihrem Recorder verbinden</string>
+    <string name="pair_step1">Öffnen Sie in brainbot:agent command die App Meetings, dann Einstellungen, dann Telefon verbinden.</string>
+    <string name="pair_step2">Scannen Sie den Code mit der Kamera dieses Telefons. Die App öffnet sich und verbindet sich mit Ihrem Konto.</string>
+    <string name="pair_step3">Keine Kamera zur Hand? Fügen Sie den Link unten ein.</string>
     <string name="pair_link">Kopplungslink</string>
     <string name="pair_button">Verbinden</string>
     <string name="pair_bad">Das ist kein Kopplungslink des Recorders.</string>
+    <string name="pair_note">Der Code bringt das Zertifikat der Box mit, in den Einstellungen des Telefons ist nichts zu installieren. Aufnahmen gehen an diese Box und sonst nirgendwohin.</string>
+
+    <string name="box_label">Box</string>
     <string name="box_ready">Bereit</string>
+    <string name="box_offline">Nicht erreichbar</string>
+    <string name="box_rejected_short">Abgelehnt</string>
     <string name="box_unreachable">Box nicht erreichbar (VPN?). Aufnahmen warten auf dem Telefon.</string>
-    <string name="box_rejected">Die Box nimmt dieses Telefon nicht mehr an. Bitte neu verbinden.</string>
-    <string name="title_hint">Titel (optional)</string>
-    <string name="drive">In Google Drive speichern</string>
-    <string name="drive_on">Zusammenfassung, Aufgaben und Transkript gehen nach Drive.</string>
-    <string name="drive_off">Bleibt auf der Box.</string>
+    <string name="box_rejected">Die Box nimmt dieses Telefon nicht mehr an. Bitte verbinden Sie es neu.</string>
+
+    <string name="new_recording">Neue Aufnahme</string>
+    <string name="title_label">Titel</string>
+    <string name="title_hint">Optional</string>
+    <string name="storage_label">Ablage</string>
+    <string name="storage_box">Auf der Box</string>
+    <string name="for_label">Für</string>
+    <string name="kicker_recording">Aufnahme läuft</string>
+    <string name="kicker_paused">Pausiert</string>
+    <string name="mic_label">Mikrofon</string>
+    <string name="mic_on">An</string>
+    <string name="mic_paused">Aus, solange pausiert</string>
+    <string name="mic_taken">Von einem Anruf belegt</string>
+    <string name="parts">%1$d von %2$d Teilen</string>
     <string name="record">Aufnehmen</string>
+    <string name="pause">Pause</string>
+    <string name="resume">Weiter</string>
     <string name="stop">Stopp</string>
+    <string name="paused_note">Pausiert. Das Mikrofon ist aus; bis Sie fortsetzen, wird nichts aufgenommen.</string>
+    <string name="input_level">Eingangspegel</string>
+    <string name="mic_denied">Die App braucht das Mikrofon, um aufzunehmen.</string>
+
     <string name="recordings">Aufnahmen</string>
     <string name="none_yet">Noch nichts aufgenommen.</string>
     <string name="untitled">Aufnahme</string>
-    <string name="st_recording">nimmt auf</string>
-    <string name="st_waiting">wartet auf die Box</string>
-    <string name="st_uploading">lädt hoch, %1$d von %2$d</string>
-    <string name="st_processing">wird verarbeitet</string>
-    <string name="st_done">fertig</string>
-    <string name="st_failed">fehlgeschlagen</string>
-    <string name="mic_denied">Die App braucht das Mikrofon, um aufzunehmen.</string>
-    <string name="back">Zurück</string>
-    <string name="store_drive">In Google Drive speichern</string>
-    <string name="decisions">Entscheidungen</string>
-    <string name="actions">Aufgaben</string>
-    <string name="questions">Offene Fragen</string>
-    <string name="open_box">Auf der Box öffnen</string>
+    <string name="st_recording">Aufnahme</string>
+    <string name="st_paused">Pausiert</string>
+    <string name="st_waiting">Wartet</string>
+    <string name="st_uploading">Lädt hoch</string>
+    <string name="st_processing">In Arbeit</string>
+    <string name="st_done">Fertig</string>
+    <string name="st_failed">Fehler</string>
+    <string name="st_rejected">Abgelehnt</string>
+    <string name="interrupted">Unterbrochen; das Aufgenommene bleibt erhalten.</string>
+
+    <string name="length_label">Länge</string>
+    <string name="speakers_label">Sprecher</string>
+    <string name="drive_short">Drive</string>
+    <string name="store_drive">In Google Drive ablegen</string>
+    <string name="note_local">Bleibt auf der Box.</string>
+    <string name="note_waiting">Wartet auf das Hochladen nach Drive.</string>
+    <string name="note_done">In Drive abgelegt.</string>
+    <string name="open_folder">Ordner öffnen</string>
+    <string name="open_box">Transkript auf der Box öffnen</string>
     <string name="not_ready">Die Zusammenfassung erscheint hier, sobald die Box fertig ist.</string>
-    <string name="settings">Einstellungen</string>
-    <string name="paired_with">Verbunden mit %1$s</string>
+
+    <string name="settings_kicker">Dieses Telefon</string>
+    <string name="recording_for">Aufnahme für</string>
+    <string name="phone_label">Telefon</string>
+    <string name="unknown_yet">Noch unbekannt</string>
+    <string name="battery_section">Bildschirm aus</string>
     <string name="battery">Bei ausgeschaltetem Bildschirm weiter aufnehmen</string>
     <string name="battery_text">Nimmt die App von der Akku-Optimierung aus, damit das Telefon sie in langen Besprechungen nicht beendet.</string>
+    <string name="battery_ok">Das Telefon nimmt auch bei ausgeschaltetem Bildschirm weiter auf.</string>
     <string name="disconnect">Dieses Telefon trennen</string>
-    <string name="interrupted">Die Aufnahme wurde unterbrochen; das Aufgenommene bleibt erhalten.</string>
-    <string name="retry">Jetzt erneut versuchen</string>
-    <plurals name="speakers">
-        <item quantity="one">%d Sprecher</item>
-        <item quantity="other">%d Sprecher</item>
-    </plurals>
+    <string name="version">indie recorder %1$s</string>
 </resources>

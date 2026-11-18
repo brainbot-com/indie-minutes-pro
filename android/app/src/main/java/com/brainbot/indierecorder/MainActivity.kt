@@ -10,14 +10,18 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,52 +29,64 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -79,6 +95,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -92,7 +109,10 @@ class MainActivity : ComponentActivity() {
     private val autoPair = mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge()
+        // The paper runs behind both system bars; no grey scrim behind the navigation buttons in dark mode.
+        val clear = SystemBarStyle.auto(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+        enableEdgeToEdge(statusBarStyle = clear, navigationBarStyle = clear)
+        if (Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
         super.onCreate(savedInstanceState)
         take(intent)
         setContent { Theme { Root(link, autoPair.value) } }
@@ -112,7 +132,7 @@ class MainActivity : ComponentActivity() {
         if (BuildConfig.DEBUG && intent != null) testHooks(intent)
     }
 
-    /** Debug builds only, for the end-to-end test over adb: record a WAV file or the microphone, or stop. */
+    /** Debug builds only, for the end-to-end test over adb: record a WAV file or the microphone, pause, resume, stop. */
     private fun testHooks(intent: Intent) {
         val title = intent.getStringExtra("test_title") ?: ""
         intent.getStringExtra("test_wav")?.let { wav ->
@@ -122,58 +142,300 @@ class MainActivity : ComponentActivity() {
             }
         }
         if (intent.getBooleanExtra("test_mic", false)) RecorderService.start(this, title, "local")
+        if (intent.getBooleanExtra("test_pause", false)) RecorderService.pause(this)
+        if (intent.getBooleanExtra("test_resume", false)) RecorderService.resume(this)
         if (intent.getBooleanExtra("test_stop", false)) RecorderService.stop(this)
     }
 }
 
-// ---- look: the same calm greys as the web view, ink for controls, red only for recording
+// ---- look: Swiss (direction 5 of the design canvas), the same as the PWA, the web view and the
+// Meetings app: Inter, ink on paper, one red for recording and the main action, 3dp rules over
+// sections, 1dp rules between rows, square corners.
 
-private val Light = lightColorScheme(
-    background = Color(0xFFF4F4F2), surface = Color(0xFFFFFFFF), onBackground = Color(0xFF1A1A1A),
-    onSurface = Color(0xFF1A1A1A), primary = Color(0xFF1A1A1A), onPrimary = Color(0xFFFFFFFF),
-    outline = Color(0xFFE2E2DF), onSurfaceVariant = Color(0xFF6F6F6A), error = Color(0xFFB3261E),
+class Palette(
+    val paper: Color, val ink: Color, val muted: Color, val ghost: Color, val faint: Color,
+    val dim: Color, val red: Color, val redDark: Color, val onRed: Color,
 )
-private val Dark = darkColorScheme(
-    background = Color(0xFF161615), surface = Color(0xFF1F1F1D), onBackground = Color(0xFFECEBE6),
-    onSurface = Color(0xFFECEBE6), primary = Color(0xFFECEBE6), onPrimary = Color(0xFF161615),
-    outline = Color(0xFF34332F), onSurfaceVariant = Color(0xFFA3A29B), error = Color(0xFFF2847C),
+
+private val LightPalette = Palette(
+    paper = Color(0xFFFFFFFF), ink = Color(0xFF111111), muted = Color(0xFF555555), ghost = Color(0xFFD9D9D9),
+    faint = Color(0xFFF2F2F2), dim = Color(0xFF767676), red = Color(0xFFE1251B), redDark = Color(0xFFB81D14),
+    onRed = Color(0xFFFFFFFF),
 )
-private val RecRed = Color(0xFFC8372D)
-private val Ok = Color(0xFF2F7D4F)
+private val DarkPalette = Palette(
+    paper = Color(0xFF111111), ink = Color(0xFFF2F2F2), muted = Color(0xFFA3A3A3), ghost = Color(0xFF3A3A3A),
+    faint = Color(0xFF1D1D1D), dim = Color(0xFF767676), red = Color(0xFFE1251B), redDark = Color(0xFFB81D14),
+    onRed = Color(0xFFFFFFFF),
+)
+private val LocalPalette = staticCompositionLocalOf { LightPalette }
+
+private val Inter = FontFamily(
+    Font(R.font.inter_regular, FontWeight.W400), Font(R.font.inter_medium, FontWeight.W500),
+    Font(R.font.inter_bold, FontWeight.W700), Font(R.font.inter_black, FontWeight.W900),
+)
 
 @Composable
-fun Theme(content: @Composable () -> Unit) =
-    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) Dark else Light, content = content)
-
-@Composable
-private fun muted() = MaterialTheme.colorScheme.onSurfaceVariant
-
-@Composable
-private fun Page(content: @Composable ColumnScope.() -> Unit) {
-    Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
-        Column(
-            Modifier.fillMaxSize().systemBarsPadding().imePadding().verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp), content = content,
+fun Theme(content: @Composable () -> Unit) {
+    val dark = isSystemInDarkTheme()
+    val p = if (dark) DarkPalette else LightPalette
+    // Material only for what the framework draws itself: text selection and the cursor handle.
+    val scheme = if (dark) darkColorScheme(primary = p.ink, background = p.paper, surface = p.paper)
+                 else lightColorScheme(primary = p.ink, background = p.paper, surface = p.paper)
+    MaterialTheme(colorScheme = scheme) {
+        CompositionLocalProvider(
+            LocalPalette provides p,
+            LocalTextStyle provides TextStyle(fontFamily = Inter, fontSize = 16.sp, lineHeight = 23.sp, color = p.ink),
+            content = content,
         )
     }
 }
 
-/** Off: a light track with a white knob, as in the web view (Material's default reads as disabled here). */
 @Composable
-private fun switchColors() = MaterialTheme.colorScheme.let {
-    SwitchDefaults.colors(
-        checkedTrackColor = it.primary, checkedThumbColor = it.surface, checkedBorderColor = it.primary,
-        uncheckedTrackColor = it.outline, uncheckedThumbColor = it.surface, uncheckedBorderColor = it.outline,
+private fun pal() = LocalPalette.current
+
+/** Figures of equal width, so a running timer does not wobble. */
+@Composable
+private fun tnum() = LocalTextStyle.current.merge(TextStyle(fontFeatureSettings = "tnum"))
+
+/** Small capitals over a screen's title or the timer. */
+@Composable
+private fun Kicker(text: String, color: Color = pal().muted) =
+    Text(text.uppercase(), fontSize = 12.sp, fontWeight = FontWeight.W700, letterSpacing = 0.5.sp, color = color)
+
+/** A cell's or a field's label. */
+@Composable
+private fun Label(text: String, color: Color = pal().muted) =
+    Text(text.uppercase(), fontSize = 11.sp, fontWeight = FontWeight.W700, letterSpacing = 0.55.sp, color = color)
+
+@Composable
+private fun H1(text: String, size: TextUnit = 42.sp) =
+    Text(text, fontSize = size, fontWeight = FontWeight.W900, letterSpacing = (size.value * -0.035f).sp,
+        lineHeight = size * 1.05f)
+
+@Composable
+private fun Value(text: String, color: Color = pal().ink) =
+    Text(text, fontSize = 17.sp, fontWeight = FontWeight.W500, color = color)
+
+@Composable
+private fun Rule(thick: Boolean = false) =
+    Box(Modifier.fillMaxWidth().height(if (thick) 3.dp else 1.dp).background(pal().ink))
+
+@Composable
+private fun Page(content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        Modifier.fillMaxSize().background(pal().paper).systemBarsPadding().imePadding()
+            .verticalScroll(rememberScrollState()).padding(start = 24.dp, end = 24.dp, bottom = 22.dp),
+        verticalArrangement = Arrangement.spacedBy(22.dp), content = content,
     )
 }
 
+/** The top of every screen: the brand or Back on the left, Settings or the box's state on the right. */
 @Composable
-private fun H1(text: String) = Text(text, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+private fun Bar(left: String, right: String?, onLeft: (() -> Unit)? = null, onRight: (() -> Unit)? = null,
+                rightColor: Color = pal().ink) {
+    Column {
+        Row(Modifier.fillMaxWidth().height(40.dp)) {
+            BarItem(left, onLeft, pal().ink, Modifier.weight(1f))
+            right?.let {
+                Spacer(Modifier.width(12.dp))
+                BarItem(it, onRight, rightColor)
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Rule(thick = true)
+    }
+}
 
 @Composable
-private fun Label(text: String) =
-    Text(text.uppercase(), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = muted(), letterSpacing = 0.5.sp)
+private fun BarItem(text: String, onClick: (() -> Unit)?, color: Color, modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxHeight().let { if (onClick != null) it.clickable(onClick = onClick) else it },
+        contentAlignment = Alignment.BottomStart) {
+        Text(text.uppercase(), fontSize = 12.sp, fontWeight = FontWeight.W700, letterSpacing = 0.5.sp, color = color,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/** A section: small capitals over a 3dp rule; its rows follow with 1dp rules. */
+@Composable
+private fun Section(title: String) = Column {
+    Text(title.uppercase(), fontSize = 11.sp, fontWeight = FontWeight.W700, letterSpacing = 0.55.sp)
+    Spacer(Modifier.height(8.dp))
+    Rule(thick = true)
+}
+
+@Composable
+private fun NumberedRow(n: Int, text: String, side: String? = null) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("%02d".format(n), Modifier.width(34.dp).alignByBaseline(), fontSize = 15.sp, fontWeight = FontWeight.W700)
+        Text(text, Modifier.weight(1f).alignByBaseline(), fontSize = 15.sp, lineHeight = 21.sp)
+        side?.let { Text(it, Modifier.alignByBaseline(), fontSize = 13.sp, color = pal().muted) }
+    }
+    Rule()
+}
+
+class CellSpec(val label: String, val content: @Composable () -> Unit)
+
+/** Label over value, in a grid under a 1dp rule. */
+@Composable
+private fun Cells(columns: Int, cells: List<CellSpec>) {
+    Column {
+        Rule()
+        Spacer(Modifier.height(12.dp))
+        cells.chunked(columns).forEachIndexed { i, row ->
+            if (i > 0) Spacer(Modifier.height(14.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                row.forEach { c ->
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Label(c.label)
+                        c.content()
+                    }
+                }
+                repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
+/** A square switch: the knob moves right and the track fills with ink when it is on. */
+@Composable
+private fun SwitchBox(on: Boolean) {
+    val p = pal()
+    Box(Modifier.size(44.dp, 24.dp).background(if (on) p.ink else Color.Transparent).border(2.dp, p.ink).padding(3.dp),
+        contentAlignment = if (on) Alignment.CenterEnd else Alignment.CenterStart) {
+        Box(Modifier.size(18.dp).background(if (on) p.paper else p.ink))
+    }
+}
+
+@Composable
+private fun Toggle(on: Boolean, onChange: (Boolean) -> Unit, text: String?, description: String) {
+    Row(Modifier.heightIn(min = 32.dp).toggleable(on, role = Role.Switch, onValueChange = onChange)
+        .semantics { contentDescription = description },
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        SwitchBox(on)
+        text?.let { Value(it) }
+    }
+}
+
+/** A big flat button: a sign at the top, the word at the bottom (Record, Pause, Resume, Stop). */
+@Composable
+private fun Block(label: String, color: Color, pressedColor: Color, textColor: Color, height: Dp, fontSize: TextUnit,
+                  modifier: Modifier = Modifier, onClick: () -> Unit, sign: @Composable () -> Unit) {
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    Column(modifier.height(height).background(if (pressed) pressedColor else color)
+        .clickable(source, indication = null, role = Role.Button, onClick = onClick).padding(18.dp),
+        verticalArrangement = Arrangement.SpaceBetween) {
+        sign()
+        Text(label, color = textColor, fontSize = fontSize, fontWeight = FontWeight.W900,
+            letterSpacing = (fontSize.value * -0.025f).sp, lineHeight = fontSize, maxLines = 1, softWrap = false)
+    }
+}
+
+/** The one red action of a screen that is not a block: the word left, a white square right. */
+@Composable
+private fun WideButton(label: String, enabled: Boolean, onClick: () -> Unit) {
+    val p = pal()
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    Row(Modifier.fillMaxWidth().height(72.dp).background(if (!enabled) p.ghost else if (pressed) p.redDark else p.red)
+        .clickable(source, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
+        .padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f), color = p.onRed, fontSize = 26.sp, fontWeight = FontWeight.W900, letterSpacing = (-0.5).sp)
+        Box(Modifier.size(18.dp).background(p.onRed))
+    }
+}
+
+@Composable
+private fun OutlineButton(label: String, onClick: () -> Unit) {
+    val p = pal()
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    Box(Modifier.heightIn(min = 44.dp).background(if (pressed) p.ink else Color.Transparent).border(2.dp, p.ink)
+        .clickable(source, indication = null, role = Role.Button, onClick = onClick)
+        .padding(horizontal = 14.dp, vertical = 10.dp), contentAlignment = Alignment.CenterStart) {
+        Text(label, color = if (pressed) p.paper else p.ink, fontSize = 15.sp, fontWeight = FontWeight.W700)
+    }
+}
+
+@Composable
+private fun LinkText(label: String, onClick: () -> Unit) =
+    Text(label, Modifier.clickable(onClick = onClick).padding(vertical = 6.dp), fontSize = 14.sp,
+        fontWeight = FontWeight.W700, textDecoration = TextDecoration.Underline)
+
+@Composable
+private fun PauseSign(color: Color) = Canvas(Modifier.size(26.dp)) {
+    val u = size.width / 26f
+    drawRect(color, Offset(3 * u, 2 * u), Size(7 * u, 22 * u))
+    drawRect(color, Offset(16 * u, 2 * u), Size(7 * u, 22 * u))
+}
+
+@Composable
+private fun PlaySign(color: Color) = Canvas(Modifier.size(26.dp)) {
+    val u = size.width / 26f
+    drawPath(Path().apply { moveTo(4 * u, 2 * u); lineTo(24 * u, 13 * u); lineTo(4 * u, 24 * u); close() }, color)
+}
+
+/** The recorded time, big; it moves to a smaller size past the hour so it still fits. */
+@Composable
+private fun Timer(ms: Long, color: Color) {
+    val size = if (ms >= 3_600_000) 76.sp else 104.sp
+    Text(timer(ms), color = color, fontSize = size, fontWeight = FontWeight.W900, lineHeight = size * 0.92f,
+        letterSpacing = (size.value * -0.05f).sp, style = tnum(), maxLines = 1, softWrap = false)
+}
+
+/**
+ * The live waveform, the same as the PWA's: one bar per 100 ms (Waveform),
+ * 3dp wide on a 5dp step, the newest at the right edge, mirrored around the
+ * middle, at least 2dp tall; dim while paused.
+ */
+@Composable
+private fun Wave(bars: List<Float>, paused: Boolean) {
+    val color = if (paused) pal().dim else pal().ink
+    val description = stringResource(R.string.input_level)
+    Canvas(Modifier.fillMaxWidth().height(88.dp).semantics { contentDescription = description }) {
+        val step = 5.dp.toPx()
+        val w = 3.dp.toPx()
+        val min = 2.dp.toPx()
+        val shown = bars.takeLast((size.width / step).toInt())
+        shown.forEachIndexed { i, v ->
+            if (v < 0f) return@forEachIndexed                      // the gap of a pause
+            val h = maxOf(min, v * size.height)
+            drawRect(color, Offset(size.width - (shown.size - i) * step + (step - w), (size.height - h) / 2), Size(w, h))
+        }
+    }
+}
+
+// ---- the box as the screens last saw it
+
+/** "ok", "unreachable" or "rejected"; null before the first answer. */
+private val boxState = MutableStateFlow<String?>(null)
+
+/** The box's name ("aibox1") from its health answer; null until it has said. */
+private val boxName = MutableStateFlow<String?>(null)
+
+@Composable
+private fun boxText(box: String?): Pair<String, Color> = when (box) {
+    "ok" -> stringResource(R.string.box_ready) to pal().ink
+    "rejected" -> stringResource(R.string.box_rejected_short) to pal().red
+    "unreachable" -> stringResource(R.string.box_offline) to pal().red
+    else -> "…" to pal().muted
+}
+
+/** "aibox1 · ready" for a top bar. */
+@Composable
+private fun boxLine(box: String?): Pair<String, Color> {
+    val name by boxName.collectAsState()
+    val (state, color) = boxText(box)
+    return ((name ?: stringResource(R.string.box_label)) + " · " + state) to color
+}
+
+private suspend fun learnName(ctx: Context, api: BoxApi) {
+    withContext(Dispatchers.IO) { runCatching { api.health() } }.getOrNull()?.optString("box")
+        ?.takeIf { it.isNotBlank() }?.let {
+            boxName.value = it
+            Pairing.saveBoxName(ctx, it)
+        }
+}
 
 // ---- screens
 
@@ -183,13 +445,20 @@ private sealed interface Screen {
     data object Settings : Screen
 }
 
+/** The open screen survives a rotation or a switch to dark mode (both recreate the activity). */
+private val ScreenSaver = Saver<Screen, String>(
+    save = { s -> when (s) { Screen.Home -> "home"; Screen.Settings -> "settings"; is Screen.Detail -> "detail:" + s.meetingId } },
+    restore = { v -> when { v == "settings" -> Screen.Settings; v.startsWith("detail:") -> Screen.Detail(v.removePrefix("detail:")); else -> Screen.Home } },
+)
+
 @Composable
 fun Root(link: MutableState<String?>, autoPair: Boolean) {
     val ctx = LocalContext.current
     var cfg by remember { mutableStateOf(Pairing.load(ctx)) }
-    var screen by remember { mutableStateOf<Screen>(Screen.Home) }
+    var screen by rememberSaveable(stateSaver = ScreenSaver) { mutableStateOf<Screen>(Screen.Home) }
     val pending = link.value
     val current = cfg
+    if (boxName.value == null) boxName.value = Pairing.boxName(ctx)
     if (pending != null || current == null) {
         PairScreen(pending, autoPair,
             onPaired = { cfg = it; link.value = null; screen = Screen.Home },
@@ -204,7 +473,7 @@ fun Root(link: MutableState<String?>, autoPair: Boolean) {
         Screen.Settings -> {
             BackHandler { screen = Screen.Home }
             SettingsScreen(current, onBack = { screen = Screen.Home },
-                onDisconnect = { Pairing.clear(ctx); cfg = null; screen = Screen.Home })
+                onDisconnect = { Pairing.clear(ctx); boxState.value = null; boxName.value = null; cfg = null; screen = Screen.Home })
         }
         Screen.Home -> HomeScreen(current, onOpen = { screen = Screen.Detail(it) }, onSettings = { screen = Screen.Settings })
     }
@@ -227,13 +496,18 @@ private fun PairScreen(initial: String?, auto: Boolean, onPaired: (BoxConfig) ->
         error = null
         scope.launch {
             // Only a box that knows the token (and shows the CA from the link) is saved.
-            val result = withContext(Dispatchers.IO) { runCatching { BoxApi(cfg).settings() } }
-            busy = false
+            val api = BoxApi(cfg)
+            val result = withContext(Dispatchers.IO) { runCatching { api.settings() } }
             result.onSuccess { s ->
                 Pairing.save(ctx, cfg)
                 rememberDefault(ctx, s)
+                boxState.value = "ok"
+                withContext(Dispatchers.IO) { runCatching { api.me() } }.getOrNull()?.let { Pairing.saveMe(ctx, it) }
+                learnName(ctx, api)
+                busy = false
                 onPaired(cfg)
             }.onFailure {
+                busy = false
                 error = if (it is BoxApi.HttpError && it.code == 401) rejected else unreachable
             }
         }
@@ -241,15 +515,30 @@ private fun PairScreen(initial: String?, auto: Boolean, onPaired: (BoxConfig) ->
     LaunchedEffect(initial) { if (auto && initial != null) connect() }
 
     Page {
-        Spacer(Modifier.height(24.dp))
-        H1(stringResource(R.string.pair_title))
-        Text(stringResource(R.string.pair_text), color = muted())
-        BoxConfig.parse(text)?.let { Text(it.url + if (it.name.isNotBlank()) " · " + it.name else "") }
-        OutlinedTextField(text, { text = it }, label = { Text(stringResource(R.string.pair_link)) },
-            maxLines = 3, modifier = Modifier.fillMaxWidth())
-        Button(onClick = { connect() }, enabled = !busy && text.isNotBlank()) { Text(stringResource(R.string.pair_button)) }
-        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        onCancel?.let { TextButton(onClick = it) { Text(stringResource(R.string.back)) } }
+        Bar(stringResource(if (onCancel != null) R.string.back else R.string.brand), stringResource(R.string.not_connected),
+            onLeft = onCancel)
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Kicker(stringResource(R.string.pair_kicker), pal().red)
+            H1(stringResource(R.string.pair_title))
+        }
+        Column {
+            Rule(thick = true)
+            listOf(R.string.pair_step1, R.string.pair_step2, R.string.pair_step3).forEachIndexed { i, step ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 14.dp)) {
+                    Text("%02d".format(i + 1), Modifier.width(40.dp), fontWeight = FontWeight.W700)
+                    Text(stringResource(step), Modifier.weight(1f), lineHeight = 23.sp)
+                }
+                Rule()
+            }
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Label(stringResource(R.string.pair_link))
+            BoxedField(text, { text = it }, stringResource(R.string.pair_hint))
+            BoxConfig.parse(text)?.let { Text(it.host + if (it.name.isNotBlank()) " · " + it.name else "", fontSize = 13.sp, color = pal().muted) }
+        }
+        WideButton(stringResource(R.string.pair_button), enabled = !busy && text.isNotBlank()) { connect() }
+        error?.let { Text(it, color = pal().red, fontSize = 14.sp, fontWeight = FontWeight.W700) }
+        Text(stringResource(R.string.pair_note), fontSize = 13.sp, lineHeight = 19.sp, color = pal().muted)
     }
 }
 
@@ -262,37 +551,50 @@ private fun rememberDefault(ctx: Context, settings: JSONObject) {
 @Composable
 private fun HomeScreen(cfg: BoxConfig, onOpen: (String) -> Unit, onSettings: () -> Unit) {
     val ctx = LocalContext.current
+    val p = pal()
     val store = remember { Store(ctx) }
     val api = remember(cfg) { BoxApi(cfg) }
     val prefs = remember { ctx.getSharedPreferences("ui", Context.MODE_PRIVATE) }
     val active by RecState.active.collectAsState()
-    val level by RecState.level.collectAsState()
+    val paused by RecState.paused.collectAsState()
+    val recordedMs by RecState.recordedMs.collectAsState()
+    val wave by RecState.wave.collectAsState()
     val micMuted by RecState.muted.collectAsState()
     val recError by RecState.error.collectAsState()
+    val box by boxState.collectAsState()
     var title by rememberSaveable { mutableStateOf("") }
     var drive by remember { mutableStateOf(prefs.getString("storage", "local") == "drive") }
     var touched by remember { mutableStateOf(false) }
-    var box by remember { mutableStateOf<String?>(null) }
+    var me by remember { mutableStateOf(Pairing.me(ctx)) }
     var items by remember { mutableStateOf(store.list()) }
+    var parts by remember { mutableIntStateOf(0) }
     val states = remember { mutableStateMapOf<String, String>() }
     var denied by remember { mutableStateOf(false) }
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
-    // While the screen is visible: the phone's list every 2 s, the box every 15 s.
+    // While the screen is visible: the phone's list every 2 s, the box every 15 s, and whom the phone
+    // records for each time the app comes to the front (a name set in the Meetings app shows up then).
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(cfg) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             var tick = 0
             while (true) {
                 items = withContext(Dispatchers.IO) { store.list() }
-                if (tick % 7 == 0 || box != "ok") {
-                    box = withContext(Dispatchers.IO) { runCatching { api.settings() } }.fold(
+                parts = RecState.active.value?.let { a -> withContext(Dispatchers.IO) { store.completeChunks(a.clientId).size } } ?: 0
+                if (tick % 7 == 0 || boxState.value != "ok") {
+                    boxState.value = withContext(Dispatchers.IO) { runCatching { api.settings() } }.fold(
                         onSuccess = { s ->
                             rememberDefault(ctx, s)
                             if (!touched) drive = prefs.getString("storage", "local") == "drive"
                             "ok"
                         },
                         onFailure = { if (it is BoxApi.HttpError && it.code == 401) "rejected" else "unreachable" })
+                }
+                if (boxState.value == "ok" && (tick == 0 || (me == null && tick % 15 == 0))) {
+                    withContext(Dispatchers.IO) { runCatching { api.me() } }.getOrNull()?.let {
+                        Pairing.saveMe(ctx, it)
+                        me = Pairing.me(ctx)
+                    }
+                    learnName(ctx, api)
                 }
                 if (tick % 3 == 0) {
                     for (r in items) {
@@ -305,12 +607,6 @@ private fun HomeScreen(cfg: BoxConfig, onOpen: (String) -> Unit, onSettings: () 
                 tick++
                 delay(2000)
             }
-        }
-    }
-    LaunchedEffect(active) {
-        while (active != null) {
-            now = System.currentTimeMillis()
-            delay(500)
         }
     }
 
@@ -331,106 +627,148 @@ private fun HomeScreen(cfg: BoxConfig, onOpen: (String) -> Unit, onSettings: () 
         else ask.launch(needed)
     }
 
-    Page {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(9.dp).clip(CircleShape).background(RecRed))
-            Spacer(Modifier.width(8.dp))
-            Text(stringResource(R.string.app_name), fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.weight(1f))
-            TextButton(onClick = onSettings) { Text(stringResource(R.string.settings), color = muted()) }
-        }
-        when (box) {
-            "ok" -> Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(7.dp).clip(CircleShape).background(Ok))
-                Spacer(Modifier.width(6.dp))
-                Text(stringResource(R.string.box_ready) + " · " + cfg.host, fontSize = 13.sp, color = muted())
-            }
-            "unreachable" -> Text(stringResource(R.string.box_unreachable), fontSize = 13.sp, color = muted())
-            "rejected" -> Text(stringResource(R.string.box_rejected), fontSize = 13.sp, color = MaterialTheme.colorScheme.error)
-        }
+    val titleLabel = stringResource(R.string.title_label)
+    val boxLabel = stringResource(R.string.box_label)
+    val storageLabel = stringResource(R.string.storage_label)
+    val driveName = stringResource(R.string.drive_name)
+    val storeDrive = stringResource(R.string.store_drive)
+    val name by boxName.collectAsState()
+    val (boxWord, boxColor) = boxText(box)
+    val boxValue = name?.let { "$it, " + boxWord.lowercase() } ?: boxWord
+    // Whom the recordings go to: the person when the box knows a name, else this phone's name.
+    val whom = me?.let { m -> m.person?.let { stringResource(R.string.for_label) to it } ?: (stringResource(R.string.phone_label) to m.device) }
 
+    Page {
+        Bar(stringResource(R.string.brand), stringResource(R.string.settings), onRight = onSettings)
         val a = active
         if (a == null) {
-            OutlinedTextField(title, { title = it }, label = { Text(stringResource(R.string.title_hint)) },
-                singleLine = true, modifier = Modifier.fillMaxWidth())
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Switch(drive, { drive = it; touched = true }, colors = switchColors())
-                Spacer(Modifier.width(12.dp))
-                Column {
-                    Text(stringResource(R.string.drive))
-                    Text(stringResource(if (drive) R.string.drive_on else R.string.drive_off), fontSize = 13.sp, color = muted())
-                }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Kicker(stringResource(R.string.new_recording))
+                Timer(0, p.ghost)
             }
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Label(titleLabel)
+                LineField(title, { title = it }, stringResource(R.string.title_hint))
+            }
+            Cells(2, buildList {
+                add(CellSpec(boxLabel) { Value(boxValue, boxColor) })
+                add(CellSpec(storageLabel) { Toggle(drive, { drive = it; touched = true }, driveName, storeDrive) })
+                whom?.let { (label, name) -> add(CellSpec(label) { Value(name) }) }
+            })
             val recordLabel = stringResource(R.string.record)
-            Column(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(Modifier.size(88.dp).clip(CircleShape).background(RecRed).clickable { record() }
-                    .semantics { contentDescription = recordLabel })
-                Spacer(Modifier.height(8.dp))
-                Text(recordLabel, color = muted())
+            Block(recordLabel, p.red, p.redDark, p.onRed, 186.dp, 40.sp, Modifier.fillMaxWidth(), onClick = { record() }) {
+                Box(Modifier.size(30.dp).clip(CircleShape).background(p.onRed))
             }
         } else {
-            val stopLabel = stringResource(R.string.stop)
-            Column(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(clock(now - a.startedMs), fontSize = 44.sp, fontWeight = FontWeight.Light)
-                Spacer(Modifier.height(12.dp))
-                LinearProgressIndicator(progress = { level }, modifier = Modifier.fillMaxWidth().height(6.dp),
-                    color = RecRed, trackColor = MaterialTheme.colorScheme.outline, gapSize = 0.dp, drawStopIndicator = {})
-                if (micMuted) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(stringResource(R.string.notif_muted), color = MaterialTheme.colorScheme.error)
-                }
-                Spacer(Modifier.height(20.dp))
-                Box(Modifier.size(88.dp).clip(CircleShape).border(2.dp, MaterialTheme.colorScheme.outline, CircleShape)
-                    .clickable { RecorderService.stop(ctx) }.semantics { contentDescription = stopLabel },
-                    contentAlignment = Alignment.Center) {
-                    Box(Modifier.size(30.dp).clip(RoundedCornerShape(4.dp)).background(RecRed))
-                }
-                Spacer(Modifier.height(8.dp))
-                Text(stopLabel, color = muted())
+            val r = items.firstOrNull { it.clientId == a.clientId }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (paused) Kicker(stringResource(R.string.kicker_paused), p.ink)
+                else Kicker(stringResource(R.string.kicker_recording), p.red)
+                Timer(recordedMs, if (paused) p.dim else p.ink)
             }
+            Wave(wave, paused)
+            val untitled = stringResource(R.string.untitled)
+            val storageValue = if (r?.storage == "drive") driveName else stringResource(R.string.storage_box)
+            val mic = when {
+                paused -> stringResource(R.string.mic_paused) to p.ink
+                micMuted -> stringResource(R.string.mic_taken) to p.red
+                else -> stringResource(R.string.mic_on) to p.ink
+            }
+            val partsText = if (parts > 0) stringResource(R.string.parts, minOf(r?.uploaded ?: 0, parts), parts) else null
+            Cells(2, listOf(
+                CellSpec(titleLabel) { Value(r?.title?.ifBlank { null } ?: untitled) },
+                CellSpec(boxLabel) { if (partsText != null) Value(partsText) else Value(boxValue, boxColor) },
+                CellSpec(storageLabel) { Value(storageValue) },
+                CellSpec(stringResource(R.string.mic_label)) { Value(mic.first, mic.second) },
+            ))
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                if (paused) {
+                    Block(stringResource(R.string.resume), p.ink, p.muted, p.paper, 163.dp, 30.sp, Modifier.weight(1f),
+                        onClick = { RecorderService.resume(ctx) }) { PlaySign(p.paper) }
+                } else {
+                    Block(stringResource(R.string.pause), p.ink, p.muted, p.paper, 163.dp, 30.sp, Modifier.weight(1f),
+                        onClick = { RecorderService.pause(ctx) }) { PauseSign(p.paper) }
+                }
+                Block(stringResource(R.string.stop), p.red, p.redDark, p.onRed, 163.dp, 30.sp, Modifier.weight(1f),
+                    onClick = { RecorderService.stop(ctx) }) { Box(Modifier.size(26.dp).background(p.onRed)) }
+            }
+            if (paused) Text(stringResource(R.string.paused_note), fontSize = 14.sp, lineHeight = 20.sp)
         }
-        recError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        if (denied) Text(stringResource(R.string.mic_denied), color = MaterialTheme.colorScheme.error)
+        recError?.let { Text(it, color = p.red, fontSize = 14.sp, fontWeight = FontWeight.W700) }
+        if (denied) Text(stringResource(R.string.mic_denied), color = p.red, fontSize = 14.sp, fontWeight = FontWeight.W700)
 
-        Spacer(Modifier.height(4.dp))
-        Label(stringResource(R.string.recordings))
-        if (items.isEmpty()) Text(stringResource(R.string.none_yet), color = muted())
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(2.dp)).background(MaterialTheme.colorScheme.surface)) {
+        Column {
+            Section(stringResource(R.string.recordings))
+            if (items.isEmpty()) Text(stringResource(R.string.none_yet), Modifier.padding(top = 12.dp), color = p.muted)
             items.forEachIndexed { i, r ->
-                if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outline)
-                RecordingRow(r, r.meetingId?.let { states[it] }, onClick = {
+                val live = r.clientId == a?.clientId
+                RecordingRow(i + 1, r, r.meetingId?.let { states[it] }, live && paused, if (live) recordedMs else null) {
                     r.meetingId?.let(onOpen) ?: UploadWorker.enqueue(ctx, r.clientId, now = true)
-                })
+                }
             }
         }
     }
 }
 
+/** A text field drawn as a line: the text over a 1dp rule, the hint in grey. */
 @Composable
-private fun RecordingRow(r: LocalRecording, meetingState: String?, onClick: () -> Unit) {
-    val status = when {
-        r.state == LocalRecording.RECORDING -> stringResource(R.string.st_recording)
-        r.state == LocalRecording.STOPPED && r.error == "rejected" -> stringResource(R.string.box_rejected)
-        r.state == LocalRecording.STOPPED && r.uploaded < r.chunks && r.error == "unreachable" ->
-            stringResource(R.string.st_waiting) + " · ${r.uploaded}/${r.chunks}"
-        r.state == LocalRecording.STOPPED && r.uploaded < r.chunks ->
-            stringResource(R.string.st_uploading, r.uploaded, r.chunks)
-        r.state == LocalRecording.STOPPED -> stringResource(R.string.st_waiting)
-        meetingState == "done" -> stringResource(R.string.st_done)
-        meetingState == "failed" -> stringResource(R.string.st_failed)
-        else -> stringResource(R.string.st_processing)
+private fun LineField(value: String, onChange: (String) -> Unit, hint: String) {
+    val p = pal()
+    BasicTextField(value, onChange, Modifier.fillMaxWidth(), singleLine = true, cursorBrush = SolidColor(p.ink),
+        textStyle = LocalTextStyle.current.copy(fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.W500, color = p.ink),
+        decorationBox = { inner ->
+            Column {
+                Box(Modifier.padding(top = 6.dp, bottom = 10.dp)) {
+                    if (value.isEmpty()) Text(hint, fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.W500, color = p.muted)
+                    inner()
+                }
+                Rule()
+            }
+        })
+}
+
+/** A text field in a 2dp box, for the pairing link. */
+@Composable
+private fun BoxedField(value: String, onChange: (String) -> Unit, hint: String) {
+    val p = pal()
+    BasicTextField(value, onChange, Modifier.fillMaxWidth().border(2.dp, p.ink).padding(horizontal = 12.dp, vertical = 14.dp),
+        maxLines = 3, cursorBrush = SolidColor(p.ink), textStyle = LocalTextStyle.current.copy(color = p.ink),
+        decorationBox = { inner ->
+            Box {
+                if (value.isEmpty()) Text(hint, color = p.muted)
+                inner()
+            }
+        })
+}
+
+@Composable
+private fun RecordingRow(n: Int, r: LocalRecording, meetingState: String?, paused: Boolean, liveMs: Long?, onClick: () -> Unit) {
+    val p = pal()
+    val (status, alert) = when {
+        r.state == LocalRecording.RECORDING && paused -> stringResource(R.string.st_paused) to false
+        r.state == LocalRecording.RECORDING -> stringResource(R.string.st_recording) to true
+        r.state == LocalRecording.STOPPED && r.error == "rejected" -> stringResource(R.string.st_rejected) to true
+        r.state == LocalRecording.STOPPED && r.uploaded < r.chunks && r.error != "unreachable" ->
+            stringResource(R.string.st_uploading) to true
+        r.state == LocalRecording.STOPPED -> stringResource(R.string.st_waiting) to false
+        meetingState == "done" -> stringResource(R.string.st_done) to false
+        meetingState == "failed" -> stringResource(R.string.st_failed) to true
+        else -> stringResource(R.string.st_processing) to false
     }
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(r.title.ifBlank { stringResource(R.string.untitled) }, maxLines = 1)
-            val length = if (r.durationMs > 0) " · " + clock(r.durationMs) else ""
-            Text(when_(r.startedAt) + length + (if (r.storage == "drive") " · Drive" else ""), fontSize = 13.sp, color = muted())
-            if (r.interrupted) Text(stringResource(R.string.interrupted), fontSize = 12.sp, color = muted())
+    val length = liveMs ?: r.durationMs
+    Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+        Row(Modifier.fillMaxWidth().padding(vertical = 11.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("%02d".format(n), Modifier.width(34.dp).alignByBaseline(), fontSize = 15.sp, fontWeight = FontWeight.W700)
+            Column(Modifier.weight(1f).alignByBaseline()) {
+                Text(r.title.ifBlank { stringResource(R.string.untitled) }, fontSize = 15.sp, fontWeight = FontWeight.W500,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (r.interrupted) Text(stringResource(R.string.interrupted), fontSize = 12.sp, lineHeight = 16.sp, color = p.muted)
+            }
+            if (length > 0) Text(clock(length), Modifier.alignByBaseline(), fontSize = 15.sp, style = tnum())
+            Text(status, Modifier.widthIn(min = 86.dp).alignByBaseline(), fontSize = 15.sp, textAlign = TextAlign.End,
+                color = if (alert) p.red else p.ink, fontWeight = if (alert) FontWeight.W700 else FontWeight.W400, maxLines = 1)
         }
-        Spacer(Modifier.width(12.dp))
-        Text(status, fontSize = 12.sp,
-            color = if (meetingState == "failed") MaterialTheme.colorScheme.error else muted())
+        Rule()
     }
 }
 
@@ -439,6 +777,7 @@ private fun DetailScreen(cfg: BoxConfig, mid: String, onBack: () -> Unit) {
     val ctx = LocalContext.current
     val api = remember(cfg) { BoxApi(cfg) }
     val scope = rememberCoroutineScope()
+    val box by boxState.collectAsState()
     var m by remember { mutableStateOf<JSONObject?>(null) }
     var unreachable by remember { mutableStateOf(false) }
     var drive by remember { mutableStateOf(false) }
@@ -457,83 +796,65 @@ private fun DetailScreen(cfg: BoxConfig, mid: String, onBack: () -> Unit) {
         }
     }
 
+    val (boxValue, boxColor) = boxLine(box)
     Page {
-        TextButton(onClick = onBack) { Text("‹ " + stringResource(R.string.back), color = muted()) }
+        Bar(stringResource(R.string.back), boxValue, onLeft = onBack, rightColor = boxColor)
         val mm = m
         if (mm == null) {
-            if (unreachable) Text(stringResource(R.string.box_unreachable), color = muted())
+            if (unreachable) Text(stringResource(R.string.box_unreachable), color = pal().muted)
             return@Page
         }
-        H1(mm.optString("title").ifBlank { mid })
-        val speakers = mm.optInt("speakers")
-        val who = if (speakers > 0) " · " + ctx.resources.getQuantityString(R.plurals.speakers, speakers, speakers) else ""
-        Text(when_(mm.optString("started_at")) + " · " + clock((mm.optDouble("duration_s", 0.0) * 1000).toLong()) + who,
-            fontSize = 14.sp, color = muted())
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Switch(drive, { v ->
-                drive = v
-                scope.launch(Dispatchers.IO) { runCatching { api.setStorage(mid, if (v) "drive" else "local") } }
-            }, colors = switchColors())
-            Spacer(Modifier.width(12.dp))
-            Text(stringResource(R.string.store_drive))
-            mm.optString("drive_url").takeIf { it.startsWith("https://") }?.let { url ->
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = { open(ctx, url) }) { Text("Drive", color = muted()) }
-            }
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Kicker(dateTime(mm.optString("started_at")))
+            H1(mm.optString("title").ifBlank { mid }, 36.sp)
         }
-        if (mm.optString("state") != "done") Text(stringResource(R.string.not_ready), color = muted())
+        val speakers = mm.optInt("speakers")
+        val storeDrive = stringResource(R.string.store_drive)
+        Cells(3, listOf(
+            CellSpec(stringResource(R.string.length_label)) {
+                Text(clock((mm.optDouble("duration_s", 0.0) * 1000).toLong()), fontSize = 17.sp, fontWeight = FontWeight.W500, style = tnum())
+            },
+            CellSpec(stringResource(R.string.speakers_label)) { Value(if (speakers > 0) "$speakers" else "…") },
+            CellSpec(stringResource(R.string.drive_short)) {
+                Toggle(drive, { v ->
+                    drive = v
+                    scope.launch(Dispatchers.IO) { runCatching { api.setStorage(mid, if (v) "drive" else "local") } }
+                }, null, storeDrive)
+            },
+        ))
+        val folder = mm.optString("drive_url").takeIf { it.startsWith("https://") }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(stringResource(when {
+                !drive -> R.string.note_local
+                folder != null -> R.string.note_done
+                else -> R.string.note_waiting
+            }), fontSize = 14.sp)
+            if (drive && folder != null) LinkText(stringResource(R.string.open_folder)) { open(ctx, folder) }
+        }
+        if (mm.optString("state") != "done") Text(stringResource(R.string.not_ready), color = pal().muted)
         else Summary(mm.optString("summary_md"))
         mm.optString("url").takeIf { it.startsWith("https://") }?.let { url ->
-            TextButton(onClick = { open(ctx, url) }) { Text(stringResource(R.string.open_box), color = muted()) }
+            LinkText(stringResource(R.string.open_box)) { open(ctx, url) }
         }
     }
 }
 
-/**
- * The box's summary.md, drawn like the web view: the title, byline and link
- * lines are left out (the screen shows them), the TL;DR is the lead, tables
- * of action items become "text" with "owner · due" under it.
- */
 @Composable
 private fun Summary(md: String) {
-    val lines = md.lines()
-    var i = 0
-    fun skipBlank() { while (i < lines.size && lines[i].isBlank()) i++ }
-    skipBlank(); if (i < lines.size && lines[i].startsWith("# ")) i++
-    skipBlank(); if (i < lines.size && lines[i].startsWith("_") && lines[i].endsWith("_")) i++
-    skipBlank(); if (i < lines.size && lines[i].startsWith("http")) i++
-    var headings = 0
-    var lead = false
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        while (i < lines.size) {
-            val line = lines[i].trimEnd()
-            val next = lines.getOrNull(i + 1)?.trim() ?: ""
-            when {
-                line.startsWith("## ") -> {
-                    headings++
-                    if (headings == 1) lead = true else {
-                        Spacer(Modifier.height(8.dp))
-                        Label(line.removePrefix("## "))
-                    }
+    Column {
+        for (part in summaryParts(md)) {
+            when (part) {
+                is SummaryPart.Lead -> {
+                    Text(part.text, fontSize = 18.sp, fontWeight = FontWeight.W500, lineHeight = 26.sp)
+                    Spacer(Modifier.height(22.dp))
                 }
-                line.startsWith("|") && next.matches(Regex("^\\|[-| :]+\\|$")) -> i++      // header row and its rule
-                line.startsWith("|") -> {
-                    val cells = line.trim('|').split(" | ").map { it.trim().replace("\\|", "|") }
-                    val text = cells.getOrNull(1) ?: line
-                    val who = listOfNotNull(cells.getOrNull(2), cells.getOrNull(3)).filter { it.isNotBlank() }.joinToString(" · ")
-                    Column {
-                        Text("•  " + plain(text))
-                        if (who.isNotBlank()) Text("    $who", fontSize = 13.sp, color = muted())
-                    }
+                is SummaryPart.Heading -> {
+                    Spacer(Modifier.height(12.dp))
+                    Section(part.text)
                 }
-                line.startsWith("- ") || line.startsWith("* ") -> Text("•  " + plain(line.substring(2)))
-                line.isBlank() -> {}
-                else -> {
-                    Text(plain(line), fontSize = if (lead) 17.sp else 15.sp)
-                    lead = false
-                }
+                is SummaryPart.Item -> NumberedRow(part.n, part.text, part.side)
+                is SummaryPart.Para -> Text(part.text, Modifier.padding(vertical = 6.dp), fontSize = 15.sp, lineHeight = 22.sp)
             }
-            i++
         }
     }
 }
@@ -541,6 +862,8 @@ private fun Summary(md: String) {
 @Composable
 private fun SettingsScreen(cfg: BoxConfig, onBack: () -> Unit, onDisconnect: () -> Unit) {
     val ctx = LocalContext.current
+    val box by boxState.collectAsState()
+    val me = remember { Pairing.me(ctx) }
     val pm = remember { ctx.getSystemService(PowerManager::class.java) }
     var ignoring by remember { mutableStateOf(pm.isIgnoringBatteryOptimizations(ctx.packageName)) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -549,21 +872,33 @@ private fun SettingsScreen(cfg: BoxConfig, onBack: () -> Unit, onDisconnect: () 
             ignoring = pm.isIgnoringBatteryOptimizations(ctx.packageName)
         }
     }
+    val (boxValue, boxColor) = boxLine(box)
     Page {
-        TextButton(onClick = onBack) { Text("‹ " + stringResource(R.string.back), color = muted()) }
-        H1(stringResource(R.string.settings))
-        Text(stringResource(R.string.paired_with, cfg.url) + if (cfg.name.isNotBlank()) " (${cfg.name})" else "")
-        if (!ignoring) {
-            Spacer(Modifier.height(8.dp))
-            Text(stringResource(R.string.battery), fontWeight = FontWeight.SemiBold)
-            Text(stringResource(R.string.battery_text), color = muted())
-            Button(onClick = {
-                ctx.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + ctx.packageName)))
-            }) { Text(stringResource(R.string.battery)) }
+        Bar(stringResource(R.string.back), boxValue, onLeft = onBack, rightColor = boxColor)
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Kicker(stringResource(R.string.settings_kicker))
+            H1(stringResource(R.string.settings))
         }
-        Spacer(Modifier.height(8.dp))
-        OutlinedButton(onClick = onDisconnect) { Text(stringResource(R.string.disconnect)) }
-        Text("indie recorder " + BuildConfig.VERSION_NAME, fontSize = 12.sp, color = muted())
+        val phone = me?.device?.takeIf { it.isNotBlank() } ?: cfg.name.ifBlank { null }
+        Cells(2, buildList {
+            me?.person?.let { person -> add(CellSpec(stringResource(R.string.recording_for)) { Value(person) }) }
+            phone?.let { add(CellSpec(stringResource(R.string.phone_label)) { Value(it) }) }
+            add(CellSpec(stringResource(R.string.box_label)) { Value(listOfNotNull(boxName.value, cfg.host).joinToString(" · ")) })
+        })
+        Column {
+            Section(stringResource(R.string.battery_section))
+            Spacer(Modifier.height(12.dp))
+            if (ignoring) Text(stringResource(R.string.battery_ok), fontSize = 15.sp, lineHeight = 22.sp)
+            else {
+                Text(stringResource(R.string.battery_text), fontSize = 15.sp, lineHeight = 22.sp)
+                Spacer(Modifier.height(12.dp))
+                OutlineButton(stringResource(R.string.battery)) {
+                    ctx.startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + ctx.packageName)))
+                }
+            }
+        }
+        OutlineButton(stringResource(R.string.disconnect), onDisconnect)
+        Text(stringResource(R.string.version, BuildConfig.VERSION_NAME), fontSize = 12.sp, color = pal().muted)
     }
 }
 
@@ -572,8 +907,8 @@ private fun SettingsScreen(cfg: BoxConfig, onBack: () -> Unit, onDisconnect: () 
 private fun open(ctx: Context, url: String) =
     runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
 
-private fun plain(text: String) = text.replace("**", "").replace("`", "")
-
-private fun when_(iso: String): String = runCatching {
-    DateTimeFormatter.ofLocalizedDateTime(FormatStyle.SHORT).format(Instant.parse(iso).atZone(ZoneId.systemDefault()))
+/** "18 Nov 2026 · 09:00" in the phone's language. */
+private fun dateTime(iso: String): String = runCatching {
+    val t = Instant.parse(iso).atZone(ZoneId.systemDefault())
+    DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).format(t) + " · " + DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).format(t)
 }.getOrDefault(iso)
