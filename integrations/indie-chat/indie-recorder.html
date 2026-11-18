@@ -624,12 +624,15 @@ async function openMeeting(id, keepOpen) {
     $('dWhen').textContent = `${d.toLocaleDateString(LANG, { day: 'numeric', month: 'short', year: 'numeric' })} · ${time(d)}`;
     $('dTitle').textContent = m.title || m.id;
     $('dLen').textContent = length(m.duration_s);
-    $('dSpkN').textContent = m.speakers ? String(m.speakers) : t('notYet');
+    // speakers: the cards from get_meeting (an older recorder sent only how many)
+    const cards = Array.isArray(m.speakers) ? m.speakers : null;
+    const nSpk = cards ? cards.length : m.speakers;
+    $('dSpkN').textContent = nSpk ? String(nSpk) : t('notYet');
     setOn($('dDrive'), m.storage === 'drive');
     $('dLink').hidden = !m.drive_url; if (m.drive_url) $('dLink').href = m.drive_url;
     $('dNote').textContent = m.storage !== 'drive' ? t('noteLocal') : (m.drive_url ? t('noteDone') : t('noteWaiting'));
     $('dSum').innerHTML = renderSummary(m.summary_md);
-    renderSpeakers(m.speakers || Object.entries(m.speaker_names || {}).map(([label, name]) =>
+    renderSpeakers(cards || Object.entries(m.speaker_names || {}).map(([label, name]) =>
       ({ label, name, suggestions: [], lines: [], share: 0, turns: 0, first: 0 })));
     $('dBox').href = m.url;
     if (!keepOpen) { $('dTrBox').open = false; $('dTr').textContent = ''; }

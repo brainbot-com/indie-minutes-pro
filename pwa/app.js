@@ -22,12 +22,13 @@ const STR = {
     box: 'Box', storage: 'Storage', drive: 'Google Drive', local: 'On the box', mic: 'Microphone', micOn: 'On', micOff: 'Off while paused',
     forWhom: 'Recording for', forShort: 'For', phone: 'Phone', record: 'Record', pause: 'Pause', resume: 'Resume', stop: 'Stop',
     pausedNote: 'Paused. The microphone is off; nothing is recorded until you resume.',
-    recordings: 'Recordings', settings: 'Settings', thisPhone: 'This phone', thisPhoneIs: 'This phone',
+    recordings: 'Recordings', onPhone: 'On this phone', noRecs: 'Nothing recorded yet.',
+    nUploading: n => `${n} uploading`, nWorking: n => `${n} processing`, settings: 'Settings', thisPhone: 'This phone', thisPhoneIs: 'This phone',
     voice: 'Voice processing (echo and noise suppression)', voiceNote: 'Off is better for a phone lying on the table.',
     connection: 'Connection', webView: 'Meetings on the box', webViewCommand: 'Meetings in brainbot:agent command', unpair: 'Disconnect this phone',
     unpairAsk: 'Disconnect this phone from the box? Recordings that are not sent yet stay on the phone.',
     ready: 'ready', offline: 'not reachable', parts: (a, b) => `${a} of ${b} parts`,
-    uploading: 'Uploading', onBox: 'On the box', summary: 'Summary', failed: 'Failed', interrupted: 'interrupted',
+    uploading: 'Uploading', working: 'Processing', onBox: 'On the box', summary: 'Summary', failed: 'Failed', interrupted: 'interrupted',
     netOffline: 'Offline', netBox: 'Box not reachable', net: (what, s) => `${what}. The parts stay on the phone. Next try in ${s} s.`,
     noWake: 'This browser cannot keep the screen on. Keep it on yourself while recording.',
     wakeFail: m => `Could not keep the screen on (${m}). Keep it on yourself while recording.`,
@@ -48,12 +49,13 @@ const STR = {
     box: 'Box', storage: 'Ablage', drive: 'Google Drive', local: 'Auf der Box', mic: 'Mikrofon', micOn: 'An', micOff: 'Aus, solange pausiert',
     forWhom: 'Aufnahme für', forShort: 'Für', phone: 'Telefon', record: 'Aufnehmen', pause: 'Pause', resume: 'Weiter', stop: 'Stopp',
     pausedNote: 'Pausiert. Das Mikrofon ist aus; bis Sie fortsetzen, wird nichts aufgenommen.',
-    recordings: 'Aufnahmen', settings: 'Einstellungen', thisPhone: 'Dieses Telefon', thisPhoneIs: 'Dieses Telefon',
+    recordings: 'Aufnahmen', onPhone: 'Auf diesem Telefon', noRecs: 'Noch nichts aufgenommen.',
+    nUploading: n => `${n} lädt hoch`, nWorking: n => `${n} in Arbeit`, settings: 'Einstellungen', thisPhone: 'Dieses Telefon', thisPhoneIs: 'Dieses Telefon',
     voice: 'Sprachverarbeitung (Echo- und Rauschunterdrückung)', voiceNote: 'Aus ist besser, wenn das Telefon auf dem Tisch liegt.',
     connection: 'Verbindung', webView: 'Meetings auf der Box', webViewCommand: 'Meetings in brainbot:agent command', unpair: 'Dieses Telefon trennen',
     unpairAsk: 'Dieses Telefon von der Box trennen? Noch nicht gesendete Aufnahmen bleiben auf dem Telefon.',
     ready: 'bereit', offline: 'nicht erreichbar', parts: (a, b) => `${a} von ${b} Teilen`,
-    uploading: 'Lädt hoch', onBox: 'Auf der Box', summary: 'Zusammenfassung', failed: 'Fehler', interrupted: 'unterbrochen',
+    uploading: 'Lädt hoch', working: 'In Arbeit', onBox: 'Auf der Box', summary: 'Zusammenfassung', failed: 'Fehler', interrupted: 'unterbrochen',
     netOffline: 'Offline', netBox: 'Box nicht erreichbar', net: (what, s) => `${what}. Die Teile bleiben auf dem Telefon. Nächster Versuch in ${s} s.`,
     noWake: 'Dieser Browser kann den Bildschirm nicht anlassen. Lassen Sie ihn beim Aufnehmen selbst an.',
     wakeFail: m => `Der Bildschirm lässt sich nicht anlassen (${m}). Lassen Sie ihn beim Aufnehmen selbst an.`,
@@ -437,9 +439,10 @@ function warn(msg) { $('warn').hidden = false; $('warn').textContent = msg; }
 
 function show(name, error) {
   view = name;
-  for (const v of ['pair', 'ready', 'settings']) $(v).hidden = v !== name;
-  $('back').hidden = name !== 'settings';
-  $('barLeft').firstElementChild.hidden = name === 'settings';
+  for (const v of ['pair', 'ready', 'recordings', 'settings']) $(v).hidden = v !== name;
+  const sub = name === 'settings' || name === 'recordings';
+  $('back').hidden = !sub;
+  $('barLeft').firstElementChild.hidden = sub;
   // like the Android app: Settings in the bar on the recorder, the box's state everywhere else
   $('gear').hidden = name !== 'ready';
   $('status').hidden = name === 'ready';
@@ -519,7 +522,13 @@ async function render() {
     const mine = await chunksOf(active);   // a part every 30 s; until the first one the box line stays as it was
     if (mine.length) $('boxNow').textContent = t('parts')(mine.filter(c => c.uploaded).length, mine.length);
   }
-  $('listBox').hidden = !recs.length;
+  // on the recorder: one button with how many and what is under way; the list is its own screen
+  const busy = recs.filter(r => r.state === 'recording' || r.state === 'stopped').length;
+  const working = recs.filter(r => r.state === 'finalized' && !['done', 'failed'].includes(r.meeting_state)).length;
+  $('recsBtn').hidden = !recs.length;
+  $('recsCount').textContent = String(recs.length);
+  $('recsBusy').textContent = busy ? t('nUploading')(busy) : working ? t('nWorking')(working) : '';
+  $('noRecs').hidden = recs.length > 0;
   const list = $('recs');
   list.textContent = '';
   recs.forEach((r, i) => {
@@ -532,6 +541,7 @@ async function render() {
     if (r.state === 'recording' || r.state === 'stopped') { state = t('uploading'); busy = true; }
     else if (r.meeting_state === 'done') state = t('summary');
     else if (r.meeting_state === 'failed') { state = t('failed'); busy = true; }
+    else if (r.state === 'finalized') state = t('working');
     const title = (r.title || t('untitled')) + (r.interrupted ? ` (${t('interrupted')})` : '');
     const cells = [['num', pad(i + 1)], ['t', title], ['tnum', r.duration_ms ? length(r.duration_ms) : ''], ['st' + (busy ? ' busy' : ''), state]];
     for (const [cls, text] of cells) {
@@ -601,6 +611,7 @@ function wire() {
   });
   $('gear').addEventListener('click', () => show('settings'));
   $('back').addEventListener('click', () => show('ready'));
+  $('recsBtn').addEventListener('click', () => { show('recordings'); render(); });
   $('unpair').addEventListener('click', () => {
     if (!confirm(t('unpairAsk'))) return;
     if (mr) stop();

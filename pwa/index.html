@@ -59,11 +59,17 @@
     </div>
     <p class="note" id="pausedNote" data-t="pausedNote" hidden></p>
     <p class="error" id="warn" hidden></p>
-    <div id="listBox" hidden>
-      <h2 class="section" data-t="recordings"></h2>
-      <p class="note error" id="net" hidden></p>
-      <div class="rows" id="recs"></div>
+    <button class="btn listbtn" id="recsBtn" type="button" hidden>
+      <span><span data-t="recordings"></span><span class="tnum count" id="recsCount"></span></span><span class="busy" id="recsBusy"></span>
+    </button>
     </div>
+  </section>
+
+  <section class="view" id="recordings" hidden>
+    <div class="head"><span class="kicker" data-t="onPhone"></span><h1 class="h1" data-t="recordings"></h1></div>
+    <p class="note error" id="net" hidden></p>
+    <div class="rows" id="recs"></div>
+    <p class="note muted" id="noRecs" data-t="noRecs" hidden></p>
   </section>
 
   <section class="view" id="settings" hidden>

@@ -210,7 +210,8 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
                     "engine": s.engine, "llm": s.llm_model, "engines": engines_health() if engines_health else {},
                     "meetings": len(rows), "by_state": states,
                     "in_drive": sum(1 for m in rows if m.get("drive_url")),
-                    "pending_drive": sum(1 for p in box if p["kind"].startswith("drive_")),
+                    # meetings, not tasks: each meeting has two (store the files, log it)
+                    "pending_drive": len({p["meeting_id"] for p in box if p["kind"].startswith("drive_")}),
                     "settings": store.settings(who.user_id), "followup": followup.executor,
                     "targets": sorted(s.followup_targets)}
         if name == "get_settings":
