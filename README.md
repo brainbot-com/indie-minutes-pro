@@ -217,7 +217,9 @@ and add to its instructions:
 | Variants | `A-iq4` (AD-IQ4_NL decoder, 19.7 GB), `A-q8` (Q8_0, 35 GB) | `B` |
 
 `ENGINE` in `.env` sets the default (`A-iq4`, see BENCHMARK.md); any meeting
-can be transcribed again with another engine from its page. `A-iq4-diar`
+can be transcribed again with another engine from its page. Engine B stays as
+the fallback for when GPU memory is short (3.4 GiB instead of 22), but it is
+no longer benchmarked: it was clearly behind engine A on every set. `A-iq4-diar`
 (engine A without `--diarize`, speakers from Nemotron 3 Diarization) is kept
 for comparison only: it did worse in the benchmark. Both engines run as small job services
 (`engines/jobserver.py`) that run one job at a time, share one GPU lock (so
@@ -254,13 +256,16 @@ through the phone simulator into the running recorder, end to end.
 - Server certificate: 397 days; renew with `deploy/make-ca.sh secrets/tls`
   (keeps the CA) and `docker compose restart caddy`. The CA lasts 10 years.
 - Tokens: `docker compose exec recorder python -m recorder.cli token add|list|revoke`.
+- Delete meetings (folder, index, follow-ups): `docker compose exec recorder
+  python -m recorder.cli delete <meeting id> ...`; refused while a job runs
+  for it.
 - Backup: `data/` (meetings and index) and `secrets/`.
 
 ## Known issues
 
 - The PWA cannot promise recording with the screen off or the app in the
   background; Chrome may stop the microphone. It keeps the screen on with a
-  wake lock and warns. This is the main reason for a native app.
+  wake lock and warns. The Android app records in the background.
 - Engine A with `--diarize` writes lowercase text without punctuation (that is
   NeMo-Speech.cpp's speaker prompt). The punctuated speaker-tag prompt gives
   no per-word speakers in the CLI's JSON (tested), so `--diarize` stays.
@@ -304,31 +309,57 @@ through the phone simulator into the running recorder, end to end.
   takes AMI audio from the CC BY 4.0 mirror `diarizers-community/ami` on
   Hugging Face and the references from AMI's annotation package and BUT.
 
-## Android app (spec for v2)
+## Android app
 
-- Foreground service of type `microphone` with a persistent notification, so
-  recording continues with the screen off; permissions `RECORD_AUDIO`,
-  `FOREGROUND_SERVICE_MICROPHONE`, `POST_NOTIFICATIONS`; ask to be exempted
-  from battery optimization.
-- Capture 16 kHz mono (AudioRecord) and encode Opus in 30 s segment files in
-  app storage; handle audio focus and phone calls (pause, mark the gap).
-- Offline queue: WorkManager uploads segments with the same resumable API as
-  the PWA (`POST /api/v1/recordings`, `PUT .../chunks/<n>` with
-  `X-Chunk-SHA256`, `POST .../finalize`; the server reports which chunks it
-  has), constraint "network connected", exponential backoff; delete a segment
-  only after the box confirmed it; survives reboots.
-- VPN: check that the box is reachable before and during upload (WireGuard
-  app, or the WireGuard library in the app); show "waiting for VPN".
-- Trust: bundle the box's CA in `network_security_config` for that host
-  instead of relying on user CAs; pairing by the same QR code (token in the
-  Android Keystore).
-- UI: record and stop, timer, level, upload and processing state, link to the
-  summary; encrypted local storage; no audio leaves the phone except to the box.
+`android/`: a native app (Kotlin, Jetpack Compose, Android 8 and later) for
+what the PWA cannot do: record with the screen off.
+
+- Records in a foreground service of type microphone (a notification with a
+  timer and Stop, a partial wake lock): 16 kHz mono from the speech
+  recognition microphone source, AAC LC at 48 kbit/s in 30 s chunk files
+  (ADTS frames, so the box joins them as `audio/aac`; about 22 MB an hour).
+- Each chunk goes to the box as soon as it is complete, with the PWA's
+  resumable API. After Stop, WorkManager keeps trying (whenever there is a
+  network, every few minutes, across app restarts and reboots) until the box
+  has the whole recording; only then are the chunks deleted. When the app is
+  killed mid-recording, its whole chunks are kept (a half-written one is cut
+  back to its last whole frame) and sent at the next start.
+- Says when a call takes the microphone.
+- Pairing: the Devices page shows a second QR code for the app
+  (`indierecorder://pair?...`) that carries the address, the phone's token and
+  the box's CA certificate. The app trusts that CA for the box and nothing
+  else, so the phone needs no CA in its settings. The token is encrypted with
+  an Android Keystore key; recordings and token are excluded from cloud backup.
+- Per recording a title and "Save to Google Drive" (the box's default); the
+  list shows upload and processing state; a meeting shows its summary and the
+  Drive switch. English and German, light and dark.
+
+Install: on the phone (VPN on) open `http://10.1.9.7:8480/indie-recorder.apk`,
+allow installs from the browser, install. Then create a phone token on the
+Devices page and scan the Android code with the camera.
+
+Build and test, on aibox1 from `~/indie-recorder`:
+
+- `android/build.sh`: the build image (`android/Dockerfile`: JDK 17, Android
+  SDK, Gradle, an emulator image), unit tests, a debug build and a release
+  build signed with `secrets/android-release.jks` (made on the first run; keep
+  it: Android installs an update only with the same key), copied to
+  `secrets/tls/public/indie-recorder.apk`.
+- `android/e2e/emulator-test.sh`: an Android 14 emulator (KVM) with the debug
+  build pairs through the deep link, records a 75 s speech file in place of
+  the microphone (a debug-only hook), and the box transcribes it; then the
+  same with the network cut during the recording, and with the app killed
+  after 40 s. Screenshots in `data/test/android/`.
+
+Not in the app yet: a VPN of its own (it shows "Box not reachable (VPN?)" and
+waits), choosing the microphone (an external one is used when Android routes
+to it), editing speaker names (the web view and the Meetings app have it).
 
 ## Layout
 
 `recorder/` service, worker, engines (clients), follow-up agent, MCP, web
-templates · `pwa/` phone app · `sim/` phone simulator · `engines/` engine
+templates · `pwa/` phone web app · `android/` Android app · `integrations/`
+brainbot:brain · `sim/` phone simulator · `engines/` engine
 containers · `bench/` benchmark · `deploy/` Caddy, CA, systemd, deploy and
 model scripts.
 

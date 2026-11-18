@@ -241,6 +241,48 @@ engine A's words, so it measures how far the engines agree, not who is right:
 - A-iq4 on the 5-minute excerpt ran during the GPU incident, so its timing
   and its GTT peak (which counts every process on the box) are left out.
 
+### Luis's phone recordings (2026-11-18)
+
+Two real meetings recorded with the phone web app over the VPN (WebM/Opus,
+30 s chunks uploaded during the meeting): a 17-minute security briefing and a
+107-minute product workshop, both in English, several people around one
+phone. Only numbers and our own reading of the summaries left the box.
+
+In production (the recorder's own run with A-iq4):
+
+- 17 minutes: transcribed in 128 s, summary in 74 s.
+- 107 minutes: two windows (59 minutes, 60 s overlap, speakers linked across
+  them), transcribed in 467 s (RTF 0.073), summary in about 2.5 minutes; the
+  summary was ready 10 minutes 46 seconds after Stop (the upload had already
+  happened during the meeting).
+
+Both variants of engine A on the same audio (no human reference, so
+"differs" is how far an engine's words are from A-iq4's, not who is right).
+Engine B was not run on them: it is no longer benchmarked (see the
+recommendation).
+
+| Recording | Engine | Speakers found | With 2 %+ of the words | RTF | Peak GTT delta GiB | Differs from A-iq4 |
+|---|---|---:|---:|---:|---:|---:|
+| workshop, 106.7 min | A-iq4 | 7 | 3 | 0.077 | 23.3 | base |
+| workshop, 106.7 min | A-q8 | 7 | 3 | 0.091 | 37.0 | 5.0 % |
+| briefing, 16.7 min | A-iq4 | 7 | 6 | 0.084 | 20.8 | base |
+| briefing, 16.7 min | A-q8 | 7 | 6 | 0.099 | 34.5 | 8.1 % |
+
+- Speakers: engine A finds 7 labels in both recordings. In the workshop only
+  3 of them carry 2 % of the words or more (16,000 of 17,500 words); the
+  other four have 23 to 228 words each, the same voices split in crosstalk or
+  at the window seam, or short interjections. In the briefing 6 of the 7
+  carry 2 % or more, which fits a round of several people.
+- A-q8 against A-iq4: 5 % and 8 % of the words differ and the speakers are
+  the same, for 14 GiB more GPU memory and 15 to 18 % more time, as on AMI.
+- Summaries, read against the transcripts: every decision (6 and 5), action
+  item (2 and 4) and open question (2 and 4) traces back to what was said.
+  The briefing's action items have no owner or due date, correctly: nobody
+  took them by name. The workshop's four owners are the speakers who took
+  the tasks. No due dates were invented (none were said).
+- Text: lowercase without punctuation and with fillers (engine A with
+  `--diarize`), readable but rough.
+
 ### End to end through the phone path
 
 `bench/ami_e2e.sh` streamed the ten AMI distant-mic meetings through the
@@ -275,7 +317,10 @@ Make **engine A with the AD-IQ4_NL decoder (`A-iq4`)** the default:
 
 Keep engine B as the fallback when GPU memory is short (3.4 GiB) or when
 punctuated text matters more than completeness; engine A with `--diarize`
-writes lowercase text without punctuation. Do not use Q8_0: it costs 14 GiB
+writes lowercase text without punctuation. Engine B is no longer benchmarked
+(decided 2026-11-18): it was clearly behind engine A on every set, so
+`bench/run.sh` leaves it out (`ENGINES=A-iq4,A-q8,B` brings it back); its
+numbers above stay as they were measured. Do not use Q8_0: it costs 14 GiB
 more for no measurable gain. Do not run engine A without `--diarize` to pair
 it with a separate diarizer: in NeMo-Speech.cpp 0.3.0 that loses words and
 moves word timestamps on far-field audio.

@@ -12,7 +12,7 @@ such as "uh", "um", "hmm"), Whisper's basic normalizer for German.
     python -m bench.score"""
 import json
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 ROOT = Path("/data/bench")
@@ -119,6 +119,11 @@ def main():
                 row.update(score_item(ref_dir, t))
             else:
                 row["speakers_found"] = len(t["speakers"])
+                # Labels with a handful of words are usually one person split in
+                # two (crosstalk, a window seam), not another participant.
+                counts = Counter(w.get("spk") for w in t.get("words", []))
+                total = sum(counts.values())
+                row["speakers_2pct"] = sum(1 for n in counts.values() if total and n >= 0.02 * total)
                 base = ROOT / "runs" / "A-iq4" / set_name / item / "transcript.json"
                 if engine != "A-iq4" and base.exists():
                     row["agreement_wer_vs_A_iq4"] = agreement(t, json.loads(base.read_text()))
@@ -163,11 +168,13 @@ def report(results):
                      f"{per_hour} | {gtt:.1f} |")
     if own:
         lines += ["", "Own recordings without a human reference (agreement, not accuracy):", "",
-                  "| Recording | Engine | Minutes | Speakers found | RTF | Peak GTT delta GiB | WER against A-iq4's words |",
-                  "|---|---|---:|---:|---:|---:|---:|"]
+                  "| Recording | Engine | Minutes | Speakers found | With 2%+ of the words | RTF | Peak GTT delta GiB "
+                  "| WER against A-iq4's words |",
+                  "|---|---|---:|---:|---:|---:|---:|---:|"]
         for r in sorted(own, key=lambda r: (r["item"], r["engine"])):
             ag = r.get("agreement_wer_vs_A_iq4")
             lines.append(f"| {r['item']} | {r['engine']} | {r['duration_s'] / 60:.1f} | {r['speakers_found']} | "
+                         f"{r.get('speakers_2pct', 'n/a')} | "
                          f"{r['timings'].get('rtf', 0):.3f} | {r['resources'].get('gtt_peak_delta_gib', 0):.1f} | "
                          f"{f'{100 * ag:.1f}%' if ag is not None else 'base'} |")
     return "\n".join(lines) + "\n"

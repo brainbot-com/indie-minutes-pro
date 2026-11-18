@@ -12,8 +12,9 @@ B() { docker compose --profile bench run --rm -T bench python -m "$@" < /dev/nul
 B bench.data ami
 B bench.data mls-de
 B bench.run --probe-only 300
-B bench.run --cpu-proof
-B bench.run --engines "${ENGINES:-A-iq4,A-q8,B}" --sets "${SETS:-ami-sdm,ami-ihm-mix,mls-de}"
+B bench.run --cpu-proof --engines "${ENGINES:-A-iq4}"
+# Engine B is left out by default since 2026-11-18 (ENGINES=A-iq4,A-q8,B brings it back).
+B bench.run --engines "${ENGINES:-A-iq4,A-q8}" --sets "${SETS:-ami-sdm,ami-ihm-mix,mls-de}"
 B bench.score
 B bench.spotcheck
 echo "done: data/bench/results.md, data/bench/spotcheck.md, data/bench/runs/"

@@ -1,8 +1,11 @@
 """Runs the engines over the test sets; finished items are skipped, so it can
 be stopped and started again.
 
-    python -m bench.run --engines A-iq4,A-q8,B --sets ami-sdm,ami-ihm-mix,mls-de
+    python -m bench.run --engines A-iq4,A-q8 --sets ami-sdm,ami-ihm-mix,mls-de
     python -m bench.run --cpu-proof        # one clip on GPU and on CPU, per engine
+
+Engine B is not benchmarked by default since 2026-11-18 (clearly behind
+engine A on every set); --engines B (or A-iq4,B for the CPU proof) still runs it.
     python -m bench.run --probe-only 300   # LLM latency on an otherwise idle box
 
 Results: data/bench/runs/<engine>/<set>/<item>/transcript.json plus engine logs.
@@ -99,7 +102,7 @@ def run_engines(s, engines, sets, probe):
                   f"rtf {t['timings'].get('rtf')}", flush=True)
 
 
-def cpu_proof(s, probe, seconds=120):
+def cpu_proof(s, probe, engines, seconds=120):
     """Same clip on the GPU and on the CPU: if the GPU path silently fell back
     to the CPU, both would take as long and GTT would not move."""
     src = ROOT / "datasets" / "ami-sdm" / "ES2004a" / "audio.wav"
@@ -108,7 +111,7 @@ def cpu_proof(s, probe, seconds=120):
         slice_wav(src, clip, 0, seconds)
     eng = Engines(s)
     results = {}
-    for name in ("A-iq4", "B"):
+    for name in engines:
         for device in ("gpu", "cpu"):
             out = ROOT / "runs" / "cpu-proof" / f"{name}-{device}"
             if (out / "transcript.json").exists():
@@ -132,7 +135,7 @@ def cpu_proof(s, probe, seconds=120):
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--engines", default="A-iq4,A-q8,B")
+    ap.add_argument("--engines", default="A-iq4,A-q8")
     ap.add_argument("--sets", default="ami-sdm,ami-ihm-mix,mls-de")
     ap.add_argument("--cpu-proof", action="store_true")
     ap.add_argument("--probe-only", type=int, default=0, help="seconds of idle LLM probing")
@@ -148,7 +151,7 @@ def main(argv=None):
         if a.probe_only:
             time.sleep(a.probe_only)
         elif a.cpu_proof:
-            cpu_proof(s, probe)
+            cpu_proof(s, probe, [e for e in a.engines.split(",") if e != "A-q8"])
         else:
             run_engines(s, a.engines.split(","), a.sets.split(","), probe)
     finally:
