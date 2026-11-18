@@ -46,8 +46,11 @@ phone (Android app or PWA, VPN)                 aibox1 (10.1.9.7)
   no VPN interface of its own; VPN clients reach its LAN address unNATed,
   which is why the allowlist works.
 - brainbot:agent command reaches the recorder through a route on ai-knowledge that
-  passes only the MCP endpoint (token) and signed file links (two hours); see
+  passes only what the Meetings app, meeting agents and phones need (tokens,
+  connect codes, signed file links); see
   [integrations/indie-chat](integrations/indie-chat/README.md).
+- Encrypted wherever it waits: on the phone, on the way and on the box (see
+  "Encryption").
 - Agents that read transcripts must use aibox1's LLM (the meeting agent uses
   engine "aibox1 Ollama" with `qwen3.8:27b-ctx65536`), never StudioLLM or
   another host. An agent's run history keeps what its tools returned, so the
@@ -58,6 +61,34 @@ phone (Android app or PWA, VPN)                 aibox1 (10.1.9.7)
   meeting), never transcript text.
 - No voice enrollment: speakers stay "Speaker 1..N" until a person names them
   (voiceprints are biometric data under GDPR).
+
+## Encryption
+
+- On the phone: each recording gets its own key pair, and every 30 s chunk is
+  encrypted (AES-256-GCM) with a key agreed with the box's sealing key (ECDH
+  P-256, HKDF-SHA256) before it is stored or sent. The box publishes the key
+  in `/api/v1/health`; the web app keeps it for offline starts. What waits in
+  the phone's storage or passes brain-tls is ciphertext only aibox1 opens.
+- On the way: TLS on every hop (the Android app pins the box's CA, brain-tls
+  trusts only the recorder's CA).
+- On the box: every file under `data/meetings`, `data/uploads` and
+  `data/outbox` is AES-256-GCM in 1 MiB segments, each bound to its file, its
+  place and whether it is the last (`recorder/vault.py`); the index is
+  SQLCipher. ffmpeg and the engines get plain audio only in `/scratch`, a
+  tmpfs (RAM) shared with the engine containers, for the length of a job.
+- Keys: `deploy/make-keys.sh` makes `secrets/data.key` and `secrets/seal.pem`
+  once. Keep a copy of both off the box: without `data.key` the meetings
+  cannot be read. The recorder refuses to start without the key, or with
+  another key than the data was written with. `recorder.cli encrypt` encrypts
+  meetings from before (each file checked, in place); the index converts
+  itself on the first start.
+- Limits: root on the running box holds the key. The web app served through
+  ai-knowledge is only as trustworthy as ai-knowledge, which delivers its
+  code; the Android app talks to aibox1 directly and pins it. Drive copies are
+  plain in Drive (the person chose Drive). The Meetings app and the meeting
+  agent read summaries and transcripts in brainbot:agent command, which keeps
+  its own data encrypted. Phones that do not seal yet (Android up to 0.3.0)
+  are still accepted, over TLS.
 
 ## Setup from scratch
 
@@ -313,7 +344,8 @@ through the phone simulator into the running recorder, end to end.
 - Delete meetings (folder, index, follow-ups): `docker compose exec recorder
   python -m recorder.cli delete <meeting id> ...`; refused while a job runs
   for it.
-- Backup: `data/` (meetings and index) and `secrets/`.
+- Backup: `data/` (meetings and index, encrypted) and, separately, `secrets/`
+  (the keys).
 
 ## Known issues
 

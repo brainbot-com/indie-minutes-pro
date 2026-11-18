@@ -7,12 +7,15 @@ import threading
 import time
 import traceback
 
-from . import audio
+from . import audio, vault
 from .summarize import summarize
-from .util import now_iso
+from .util import now_iso, read_text, write_text
 
 
 class MeetingLog:
+    """The job's log with the meeting, encrypted like its other files: each
+    line rewrites it (a job writes a few dozen)."""
+
     def __init__(self, path):
         self.path = path
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -20,8 +23,8 @@ class MeetingLog:
     def __call__(self, msg):
         line = f"{now_iso()} {msg}"
         print(line, flush=True)
-        with open(self.path, "a") as f:
-            f.write(line + "\n")
+        old = read_text(self.path) if self.path.exists() else ""
+        write_text(self.path, old + line + "\n")
 
 
 class Worker:
@@ -112,8 +115,15 @@ class Worker:
             raise RuntimeError("no audio for this meeting")
         self.store.set_state(mid, "converting")
         t0 = time.monotonic()
-        audio.to_wav16k(src, wav)
-        duration = audio.wav_duration(wav)
+        v = vault.VAULT
+        # ffmpeg reads and writes plain files: in the scratch space (RAM), never on disk
+        with v.scratch(mid) as tmp:
+            plain = tmp / src.name
+            v.export(src, plain)
+            out = tmp / "audio.wav"
+            audio.to_wav16k(plain, out)
+            duration = audio.wav_duration(out)
+            v.take(out, wav)
         self.store.set_state(mid, "converting", duration_s=duration)
         log(f"converted {src.name} -> audio.wav ({duration:.1f} s audio, {time.monotonic() - t0:.1f} s)")
 
@@ -122,11 +132,21 @@ class Worker:
             return False
         engine = self.engines.get(engine_name)
         self.store.set_state(mid, "transcribing", engine=engine.name)
-        workdir = self.store.folder(mid) / "engine" / engine_name
-        workdir.mkdir(parents=True, exist_ok=True)
         meta = self.store.meta(mid)
         t0 = time.monotonic()
-        transcript = engine.transcribe(self.store.audio(mid), workdir, language=meta.get("language"), log=log)
+        v = vault.VAULT
+        # the engines read the audio and write their output in the scratch space they share
+        # with the recorder (RAM); their files then join the meeting, encrypted
+        with v.scratch(mid) as tmp:
+            wav = tmp / "audio.wav"
+            v.export(self.store.audio(mid), wav)
+            ref = self.store.audio(mid).with_name("audio.wav.ref.json")     # the fake engine's script, in demos
+            if ref.exists():
+                v.export(ref, tmp / ref.name)
+            workdir = tmp / "engine" / engine_name
+            workdir.mkdir(parents=True)
+            transcript = engine.transcribe(wav, workdir, language=meta.get("language"), log=log)
+            v.take_tree(workdir, self.store.folder(mid) / "engine" / engine_name)
         transcript["meeting_id"] = mid
         transcript.setdefault("timings", {})["job_wall_s"] = round(time.monotonic() - t0, 2)
         self.store.save_transcript(mid, transcript)

@@ -123,7 +123,8 @@ async function main() {
     $('open').href = web;
     $('openLabel').textContent = T.openWeb;
     $('open').hidden = false;
-    $('foot').textContent = T.webNote + ' ' + T.foot;
+    // on the box's own address the browser needs its certificate; behind brain-tls it does not
+    if (new URL(info.webapp, location.href).origin !== location.origin) $('foot').textContent = T.webNote + ' ' + T.foot;
   }
 }
 main();

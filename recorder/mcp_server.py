@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse, Response
 
 from . import __version__
 from .people import resolve
+from .util import read_text
 
 VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 
@@ -305,6 +306,6 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
 
 def _read(path):
     try:
-        return path.read_text()
+        return read_text(path)
     except FileNotFoundError:
         return ""

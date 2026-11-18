@@ -16,6 +16,7 @@ services:
     volumes:
       - ./data:/data
       - ./secrets:/secrets:ro
+      - scratch:/scratch
     ports:
       - "127.0.0.1:18000:8000"
     extra_hosts:
@@ -64,6 +65,7 @@ services:
     volumes:
       - ./data:/data
       - ./models:/models:ro
+      - scratch:/scratch
     networks: [rec]
 
   # Engine B: Qwen3-ASR + ForcedAligner on PyTorch ROCm (TheRock, gfx1151).
@@ -89,6 +91,7 @@ services:
     volumes:
       - ./data:/data
       - ./models:/models:ro
+      - scratch:/scratch
     networks: [rec]
 
   # Benchmark tools (meeteval, pyannote.metrics); only with --profile bench.
@@ -111,3 +114,10 @@ services:
 
 networks:
   rec: {}
+
+volumes:
+  # Plain audio exists only here, in RAM, while a job converts or transcribes it
+  # (meeting files on disk are encrypted, recorder/vault.py).
+  scratch:
+    driver: local
+    driver_opts: {type: tmpfs, device: tmpfs, o: "size=8g,uid=1000,gid=1000,mode=0700"}

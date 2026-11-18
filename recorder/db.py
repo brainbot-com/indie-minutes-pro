@@ -1,7 +1,15 @@
 """SQLite index next to the meeting folders. One short-lived connection per call,
-so the web app, the worker thread and the CLIs can share the file safely (WAL)."""
+so the web app, the worker thread and the CLIs can share the file safely (WAL).
+With a key (encryption at rest) it is SQLCipher: the whole file is encrypted."""
+import os
 import sqlite3
 from contextlib import contextmanager
+from pathlib import Path
+
+try:
+    from sqlcipher3 import dbapi2 as sqlcipher
+except ImportError:            # a machine without the wheel can still use an index without a key
+    sqlcipher = None
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tokens (
@@ -133,19 +141,28 @@ MIGRATIONS = [
     "ALTER TABLE tokens ADD COLUMN user_id TEXT",
     "ALTER TABLE tokens ADD COLUMN trusts_identity INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE meetings ADD COLUMN owner_id TEXT",
+    "ALTER TABLE recordings ADD COLUMN seal_kid TEXT",
+    "ALTER TABLE recordings ADD COLUMN seal_epk TEXT",
 ]
 
 
 class DB:
-    def __init__(self, path):
+    def __init__(self, path, key=None):
         self.path = str(path)
+        self.key = key
+        self.lib = sqlite3
+        if key:
+            if sqlcipher is None:
+                raise RuntimeError("an encrypted index needs the sqlcipher3 module")
+            self.lib = sqlcipher
+            self._encrypt_plain_index()
         with self.connect() as con:
             con.execute("PRAGMA journal_mode=WAL")
             con.executescript(SCHEMA)
             for sql in MIGRATIONS:
                 try:
                     con.execute(sql)
-                except sqlite3.OperationalError:
+                except self.lib.OperationalError:
                     pass
 
     def setting(self, key, default=None):
@@ -165,10 +182,41 @@ class DB:
         self.run("INSERT INTO user_settings (user_id, key, value) VALUES (?, ?, ?)"
                  " ON CONFLICT (user_id, key) DO UPDATE SET value = excluded.value", user_id, key, str(value))
 
+    def _encrypt_plain_index(self):
+        """An index from before encryption at rest becomes SQLCipher, once; the
+        copy is checked table by table before it replaces the plain file."""
+        path = Path(self.path)
+        if not path.exists():
+            return
+        with open(path, "rb") as f:
+            if f.read(16) != b"SQLite format 3\x00":
+                return
+        tmp = path.with_name(path.name + ".encrypting")
+        tmp.unlink(missing_ok=True)
+        con = sqlcipher.connect(self.path, isolation_level=None)
+        try:
+            con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            con.execute(f"ATTACH DATABASE '{tmp}' AS enc KEY \"x'{self.key.hex()}'\"")
+            con.execute("SELECT sqlcipher_export('enc')")
+            tables = [r[0] for r in con.execute("SELECT name FROM main.sqlite_master WHERE type = 'table'")]
+            for t in tables:
+                a = con.execute(f'SELECT COUNT(*) FROM main."{t}"').fetchone()[0]
+                b = con.execute(f'SELECT COUNT(*) FROM enc."{t}"').fetchone()[0]
+                if a != b:
+                    raise RuntimeError(f"encrypting the index: table {t} has {a} rows, the copy {b}")
+            con.execute("DETACH DATABASE enc")
+        finally:
+            con.close()
+        os.replace(tmp, path)
+        for side in ("-wal", "-shm"):
+            Path(self.path + side).unlink(missing_ok=True)
+
     @contextmanager
     def connect(self):
-        con = sqlite3.connect(self.path, timeout=30, isolation_level=None)
-        con.row_factory = sqlite3.Row
+        con = self.lib.connect(self.path, timeout=30, isolation_level=None)
+        if self.key:
+            con.execute(f"PRAGMA key = \"x'{self.key.hex()}'\"")
+        con.row_factory = self.lib.Row
         con.execute("PRAGMA busy_timeout=30000")
         try:
             yield con
@@ -198,3 +246,11 @@ class DB:
     def run(self, sql, *args):
         with self.connect() as con:
             return con.execute(sql, args).rowcount
+
+
+def open_index(settings):
+    """The index for the service and the CLIs: loads the keys first (vault.py), so
+    with encryption at rest it opens as SQLCipher (and an old plain one is converted)."""
+    from . import vault
+    v = vault.configure(settings)
+    return DB(settings.db_path, key=v.subkey("index.sqlite") if v.on else None)

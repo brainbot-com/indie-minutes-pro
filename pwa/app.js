@@ -24,7 +24,7 @@ const STR = {
     pausedNote: 'Paused. The microphone is off; nothing is recorded until you resume.',
     recordings: 'Recordings', settings: 'Settings', thisPhone: 'This phone', thisPhoneIs: 'This phone',
     voice: 'Voice processing (echo and noise suppression)', voiceNote: 'Off is better for a phone lying on the table.',
-    connection: 'Connection', webView: 'Meetings on the box', unpair: 'Disconnect this phone',
+    connection: 'Connection', webView: 'Meetings on the box', webViewCommand: 'Meetings in brainbot:agent command', unpair: 'Disconnect this phone',
     unpairAsk: 'Disconnect this phone from the box? Recordings that are not sent yet stay on the phone.',
     ready: 'ready', offline: 'not reachable', parts: (a, b) => `${a} of ${b} parts`,
     uploading: 'Uploading', onBox: 'On the box', summary: 'Summary', failed: 'Failed', interrupted: 'interrupted',
@@ -50,7 +50,7 @@ const STR = {
     pausedNote: 'Pausiert. Das Mikrofon ist aus; bis Sie fortsetzen, wird nichts aufgenommen.',
     recordings: 'Aufnahmen', settings: 'Einstellungen', thisPhone: 'Dieses Telefon', thisPhoneIs: 'Dieses Telefon',
     voice: 'Sprachverarbeitung (Echo- und Rauschunterdrückung)', voiceNote: 'Aus ist besser, wenn das Telefon auf dem Tisch liegt.',
-    connection: 'Verbindung', webView: 'Meetings auf der Box', unpair: 'Dieses Telefon trennen',
+    connection: 'Verbindung', webView: 'Meetings auf der Box', webViewCommand: 'Meetings in brainbot:agent command', unpair: 'Dieses Telefon trennen',
     unpairAsk: 'Dieses Telefon von der Box trennen? Noch nicht gesendete Aufnahmen bleiben auf dem Telefon.',
     ready: 'bereit', offline: 'nicht erreichbar', parts: (a, b) => `${a} von ${b} Teilen`,
     uploading: 'Lädt hoch', onBox: 'Auf der Box', summary: 'Zusammenfassung', failed: 'Fehler', interrupted: 'unterbrochen',
@@ -101,13 +101,48 @@ async function chunksOf(cid) {
 const token = () => localStorage.getItem('ir_token') || '';
 class AuthError extends Error {}
 
+// The app lives at /app/ on the box, or at /indie-recorder/app/ behind brain-tls: every
+// request goes to the folder above it, so the same files work in both places.
+const ROOT = new URL('..', document.baseURI).pathname;
+const at = path => ROOT + path.replace(/^\//, '');
+const onBox = ROOT === '/';
+
 async function api(path, opts = {}) {
-  const r = await fetch(path, { ...opts, headers: { Authorization: 'Bearer ' + token(), ...(opts.headers || {}) } });
+  const r = await fetch(at(path), { ...opts, headers: { Authorization: 'Bearer ' + token(), ...(opts.headers || {}) } });
   if (r.status === 401) throw new AuthError('token not accepted');
   return r;
 }
 const json = body => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const hex = buf => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+
+// ---- sealing: each chunk is encrypted before it is stored or sent ----
+// A key pair per recording; ECDH with the box's sealing key, HKDF-SHA256, AES-256-GCM
+// (recorder/vault.py). Only the box opens the chunks: what waits in IndexedDB or
+// passes a proxy is ciphertext. The recording key never leaves this page's memory.
+
+const utf8 = text => new TextEncoder().encode(text);
+const b64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const unb64u = text => Uint8Array.from(atob(text.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+
+async function sealFor(seal, clientId) {
+  const subtle = crypto.subtle;
+  const box = await subtle.importKey('raw', unb64u(seal.key), { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+  const mine = await subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
+  const shared = await subtle.deriveBits({ name: 'ECDH', public: box }, mine.privateKey, 256);
+  const hkdf = await subtle.importKey('raw', shared, 'HKDF', false, ['deriveKey']);
+  const key = await subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: utf8('indie-recorder/seal/v1'), info: utf8(clientId) },
+    hkdf, { name: 'AES-GCM', length: 256 }, false, ['encrypt']);
+  return { key, kid: seal.kid, epk: b64u(await subtle.exportKey('raw', mine.publicKey)) };
+}
+
+async function sealChunk(key, clientId, idx, plain) {
+  const iv = new Uint8Array(12);
+  new DataView(iv.buffer).setBigUint64(4, BigInt(idx));
+  return crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: utf8(`indie-recorder/chunk/v1:${clientId}:${idx}`) },
+    key, plain);
+}
+let sealing = null;                  // { key, kid, epk } of the recording in progress
+const storedSeal = () => { try { return JSON.parse(localStorage.getItem('ir_seal')); } catch (e) { return null; } };
 
 // ---- recording ----
 // The microphone goes through Web Audio into the recorder, so a pause can
@@ -146,10 +181,15 @@ async function start() {
   const mime = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4']
     .find(m => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || '';
   mr = new MediaRecorder(dest.stream, mime ? { mimeType: mime, audioBitsPerSecond: 48000 } : {});
+  const clientId = crypto.randomUUID();
+  if (box.seal === undefined) await checkBox();
+  const seal = box.seal || storedSeal();                // offline: the key from the last visit (it is public)
+  sealing = seal ? await sealFor(seal, clientId) : null;
   const rec = {
-    client_id: crypto.randomUUID(), mime: mr.mimeType || mime || 'audio/webm',
+    client_id: clientId, mime: mr.mimeType || mime || 'audio/webm',
     title: $('title').value.trim() || null, started_at: new Date().toISOString(),
     storage: on($('drive')) ? 'drive' : 'local',
+    seal: sealing ? { kid: sealing.kid, epk: sealing.epk } : null,
     state: 'recording', next_idx: 0, recording_id: null, total_chunks: null,
   };
   await put('recs', rec);
@@ -195,8 +235,10 @@ async function resume() {
 function onChunk(cid, blob) {
   if (!blob || !blob.size) return;
   const idx = nextIdx++;
+  const seal = sealing;
   // A promise chain keeps the writes in order, so the stop handler runs after the last chunk is stored.
   chain = chain.then(async () => {
+    if (seal) blob = new Blob([await sealChunk(seal.key, cid, idx, await blob.arrayBuffer())]);
     await put('chunks', { client_id: cid, idx, blob, uploaded: false });
     const r = await get('recs', cid);
     r.next_idx = idx + 1;
@@ -320,7 +362,8 @@ async function uploadAll() {
 
 async function uploadRec(r) {
   if (!r.recording_id) {
-    const res = await api('/api/v1/recordings', json({ client_id: r.client_id, mime: r.mime, title: r.title, started_at: r.started_at, storage: r.storage }));
+    const res = await api('/api/v1/recordings', json({ client_id: r.client_id, mime: r.mime, title: r.title, started_at: r.started_at, storage: r.storage,
+      ...(r.seal ? { seal: r.seal } : {}) }));
     if (!res.ok) throw new Error('create ' + res.status);
     r.recording_id = (await res.json()).recording_id;
     await put('recs', r);
@@ -414,9 +457,10 @@ function showBox() {
 
 async function checkBox() {
   try {
-    const r = await fetch('/api/v1/health', { cache: 'no-store' });
+    const r = await fetch(at('/api/v1/health'), { cache: 'no-store' });
     const j = await r.json();
-    box = { name: j.box || box.name, up: !!(r.ok && j.worker) };
+    box = { name: j.box || box.name, up: !!(r.ok && j.worker), seal: j.seal || null };
+    if (j.seal) try { localStorage.setItem('ir_seal', JSON.stringify(j.seal)); } catch (e) { /* private mode */ }
   } catch (e) {
     box.up = false;
   }
@@ -479,9 +523,11 @@ async function render() {
   const list = $('recs');
   list.textContent = '';
   recs.forEach((r, i) => {
-    const row = document.createElement(r.meeting_url ? 'a' : 'div');
+    // the box's own page only where this phone reaches it (the app runs on the box itself)
+    const link = r.meeting_url && onBox ? r.meeting_url : null;
+    const row = document.createElement(link ? 'a' : 'div');
     row.className = 'row rec';
-    if (r.meeting_url) row.href = r.meeting_url;
+    if (link) row.href = link;
     let state = t('onBox'), busy = false;
     if (r.state === 'recording' || r.state === 'stopped') { state = t('uploading'); busy = true; }
     else if (r.meeting_state === 'done') state = t('summary');
@@ -519,7 +565,7 @@ const deviceName = () => {
 
 // Spends a connect code: the box answers with this phone's own token.
 async function redeem(code) {
-  const r = await fetch('/api/v1/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+  const r = await fetch(at('/api/v1/pair'), { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ code, device: deviceName() }) }).catch(() => null);
   if (!r) { show('pair', t('pairNoBox')); return false; }
   if (r.status === 404) { show('pair', t('pairUsed')); return false; }
@@ -531,11 +577,11 @@ async function redeem(code) {
 const connect = text => (codeFrom(text) ? redeem(codeFrom(text)) : pair(tokenFrom(text)));
 
 async function pair(tok) {
-  const r = await fetch('/api/v1/me', { headers: { Authorization: 'Bearer ' + tok } }).catch(() => null);
+  const r = await fetch(at('/api/v1/me'), { headers: { Authorization: 'Bearer ' + tok } }).catch(() => null);
   if (!r || !r.ok) { show('pair', r ? t('pairBad') : t('pairNoBox')); return false; }
   localStorage.setItem('ir_token', tok);
   // Also sign in the web view on this phone, so the summary links open directly.
-  await fetch('/login', { method: 'POST', body: new URLSearchParams({ token: tok, next: '/' }), redirect: 'manual', credentials: 'same-origin' }).catch(() => {});
+  if (onBox) await fetch('/login', { method: 'POST', body: new URLSearchParams({ token: tok, next: '/' }), redirect: 'manual', credentials: 'same-origin' }).catch(() => {});
   return true;
 }
 
@@ -570,6 +616,8 @@ async function boot() {
   document.documentElement.lang = LANG;
   document.querySelectorAll('[data-t]').forEach(el => { el.textContent = t(el.dataset.t); });
   document.querySelectorAll('[data-tp]').forEach(el => { el.placeholder = t(el.dataset.tp); });
+  // "/" is the box's own pages here, or brainbot:agent command (with the Meetings app) behind brain-tls
+  $('webView').textContent = onBox ? t('webView') : t('webViewCommand');
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   $('pairForm').onsubmit = async e => {
     e.preventDefault();

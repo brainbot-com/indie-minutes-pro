@@ -57,6 +57,13 @@ class Settings:
         # proxy with a certificate phones trust (brain-tls), no phone needs the box's CA for it.
         self.connect_url = get("CONNECT_URL", self.public_url + "/connect")
         self.webapp_url = get("WEBAPP_URL", self.public_url + "/app/")
+        # Encryption at rest (recorder/vault.py) with the keys deploy/make-keys.sh makes once;
+        # phones seal their chunks for SEAL_KEY_FILE. ENCRYPT_AT_REST=0 keeps files plain.
+        self.encrypt_at_rest = get("ENCRYPT_AT_REST", "1") == "1"
+        self.data_key_file = Path(get("DATA_KEY_FILE", "/secrets/data.key"))
+        self.seal_key_file = Path(get("SEAL_KEY_FILE", "/secrets/seal.pem"))
+        # Plain audio for ffmpeg and the engines during a job: a tmpfs the engines share.
+        self.scratch_dir = Path(get("SCRATCH_DIR", "/scratch"))
         self.secure_cookies = get("SECURE_COOKIES", "1") == "1"
         self.worker = get("WORKER", "1") == "1"
 

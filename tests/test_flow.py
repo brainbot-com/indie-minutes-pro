@@ -5,6 +5,7 @@ speaker renames, follow-up idempotency, window merging and MCP.
 import base64
 import hashlib
 import json
+import os
 import re
 import subprocess
 from urllib.parse import unquote
@@ -16,6 +17,8 @@ from recorder import followup as fu
 from recorder import worker as wk
 from recorder.api import create_app, create_token
 from recorder.config import Settings
+from recorder.util import read_bytes, read_text
+from recorder import vault
 from recorder.engines.base import merge_windows
 
 SUMMARY = {"title": "Release planning", "tldr": "Speaker 2 sends the deck.", "decisions": ["Ship the beta next week"],
@@ -29,12 +32,22 @@ def executor():
     return "direct"
 
 
+def make_keys(tmp_path):
+    """What deploy/make-keys.sh makes on the box."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    (tmp_path / "data.key").write_text(vault.b64u(os.urandom(32)))
+    (tmp_path / "seal.pem").write_bytes(ec.generate_private_key(ec.SECP256R1()).private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+    return {"data_key_file": tmp_path / "data.key", "seal_key_file": tmp_path / "seal.pem", "scratch_dir": tmp_path / "scratch"}
+
+
 @pytest.fixture
 def app(tmp_path, monkeypatch, executor):
     s = Settings(data_dir=tmp_path / "data", worker="0", engine="fake", secure_cookies="0",
                  public_url="https://box.test", github_token_file=tmp_path / "no-token", followup_on_done="0",
                  followup_executor=executor, drive_api_url="", followup_targets="drive,github",
-                 storage_default="drive", files_base_url="https://box.test/api/v1/files")
+                 storage_default="drive", files_base_url="https://box.test/api/v1/files", **make_keys(tmp_path))
     monkeypatch.setattr(wk, "summarize", lambda transcript, settings, log=print: dict(SUMMARY))
     return create_app(s)
 
@@ -79,7 +92,8 @@ def test_upload_resume_and_finalize(app, client, tmp_path):
     assert client.put(f"/api/v1/recordings/{rid}/chunks/0", content=parts[0], headers={**h, "X-Chunk-SHA256": sha}).status_code == 200
     assert client.put(f"/api/v1/recordings/{rid}/chunks/0", content=parts[0], headers=h).json()["duplicate"]
     mid = client.post(f"/api/v1/recordings/{rid}/finalize", json={"total_chunks": len(parts)}, headers=h).json()["meeting_id"]
-    assert app.state.store.original(mid).read_bytes() == data
+    original = app.state.store.original(mid)
+    assert original.read_bytes().startswith(vault.MAGIC) and read_bytes(original) == data
     assert client.post(f"/api/v1/recordings/{rid}/finalize", json={"total_chunks": len(parts)}, headers=h).json()["meeting_id"] == mid
     other = {"Authorization": f"Bearer {create_token(app.state.db, 'other', 'device')}"}
     assert client.get(f"/api/v1/recordings/{rid}", headers=other).status_code == 404
@@ -95,11 +109,11 @@ def test_pipeline_and_speaker_renames(app, client, tmp_path):
     for name in ("audio.wav", "transcript.json", "transcript.md", "summary.md", "actions.json", "speakers.json"):
         assert (f / name).exists(), name
     assert client.put(f"/api/v1/meetings/{mid}/speakers", json={"names": {"Speaker 2": "Luis"}}, headers=h).status_code == 200
-    summary_md = (f / "summary.md").read_text()
+    summary_md = read_text(f / "summary.md")
     assert "Luis sends the deck" in summary_md and "Speaker 2" not in summary_md
-    item = json.loads((f / "actions.json").read_text())["items"][0]
+    item = json.loads(read_text(f / "actions.json"))["items"][0]
     assert item["owner"] == "Luis" and item["owner_speaker"] == "Speaker 2"
-    assert "**Luis**" in (f / "transcript.md").read_text()
+    assert "**Luis**" in read_text(f / "transcript.md")
     page = client.get(f"/m/{mid}", headers=h)
     assert page.status_code == 200 and "Luis" in page.text
     home = client.get("/", headers=h)
@@ -180,7 +194,7 @@ def test_mcp_update_summary(app, client, tmp_path):
         "meeting_id": mid, "markdown": "## TL;DR\n\nBetter summary.", "note": "test"}}}
     res = client.post("/mcp", json=call, headers=h).json()["result"]
     assert not res["isError"] and json.loads(res["content"][0]["text"])["version"] == 2
-    assert "version 2 (agent (agent))" in (app.state.store.folder(mid) / "summary.md").read_text()
+    assert "version 2 (agent (agent))" in read_text(app.state.store.folder(mid) / "summary.md")
     phone = {"Authorization": f"Bearer {create_token(app.state.db, 'phone2', 'device')}"}
     assert client.post("/mcp", json={}, headers=phone).status_code == 401
     pending = {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "pending_work", "arguments": {}}}
@@ -417,3 +431,66 @@ def test_me_names_the_person_a_phone_records_for(app, client):
     assert client.post("/api/v1/indiechat", json={"op": "set_name", "args": {"name": " Ben "}}, headers=hdr).json()["result"] == {"name": "Ben"}
     assert client.get("/api/v1/me", headers=phone).json()["person"] == "Ben"
     assert client.post("/api/v1/indiechat", json={"op": "whoami"}, headers=hdr).json()["result"]["name"] == "Ben"
+
+
+def test_meetings_are_encrypted_at_rest(app, client, tmp_path):
+    mid, h = make_meeting(app, client, tmp_path)
+    s = app.state.settings
+    files = [f for f in (s.meetings_dir / mid).rglob("*") if f.is_file()]
+    assert files and all(f.read_bytes().startswith(vault.MAGIC) for f in files), [f.name for f in files]
+    assert not any(b"deck" in f.read_bytes() for f in files)                 # no summary text in the clear
+    assert not s.db_path.read_bytes().startswith(b"SQLite format 3")          # the index is SQLCipher
+    assert not list(s.scratch_dir.iterdir())                                 # no plain audio left behind
+    wav = read_bytes(app.state.store.audio(mid))
+    r = client.get(f"/m/{mid}/audio", headers={**h, "Range": "bytes=100-199"})
+    assert r.status_code == 206 and r.content == wav[100:200] and r.headers["content-range"] == f"bytes 100-199/{len(wav)}"
+    assert client.get(f"/m/{mid}/audio", headers=h).content == wav
+    assert "deck" in client.get(f"/m/{mid}/files/summary.md", headers=h).text
+
+
+def test_phones_seal_their_chunks(app, client, tmp_path):
+    h = {"Authorization": f"Bearer {create_token(app.state.db, 'phone', 'device')}"}
+    seal = client.get("/api/v1/health").json()["seal"]
+    assert seal["alg"] == vault.SEAL_ALG
+    data = tone(tmp_path / "s.wav", 3)
+    parts = [data[i:i + 30000] for i in range(0, len(data), 30000)]
+    cid = "sealed-0001"
+    epk, key = vault.phone_side(seal["key"], cid)
+    bad = {"client_id": "sealed-0002", "mime": "audio/wav", "seal": {"kid": "nope", "epk": epk}}
+    assert client.post("/api/v1/recordings", json=bad, headers=h).status_code == 409
+    body = {"client_id": cid, "mime": "audio/wav", "seal": {"kid": seal["kid"], "epk": epk}}
+    rid = client.post("/api/v1/recordings", json=body, headers=h).json()["recording_id"]
+    for i, part in enumerate(parts):
+        sealed = vault.seal_chunk(key, cid, i, part)
+        assert part[:200] not in sealed
+        assert client.put(f"/api/v1/recordings/{rid}/chunks/{i}", content=sealed, headers=h).status_code == 200
+    mid = client.post(f"/api/v1/recordings/{rid}/finalize", json={"total_chunks": len(parts)}, headers=h).json()["meeting_id"]
+    assert read_bytes(app.state.store.original(mid)) == data
+    # a chunk changed on the way does not open, and the recording waits for a good one
+    cid2 = "sealed-0003"
+    epk2, key2 = vault.phone_side(seal["key"], cid2)
+    rid2 = client.post("/api/v1/recordings", json={"client_id": cid2, "mime": "audio/wav",
+                                                   "seal": {"kid": seal["kid"], "epk": epk2}}, headers=h).json()["recording_id"]
+    forged = bytearray(vault.seal_chunk(key2, cid2, 0, parts[0]))
+    forged[5] ^= 1
+    client.put(f"/api/v1/recordings/{rid2}/chunks/0", content=bytes(forged), headers=h)
+    r = client.post(f"/api/v1/recordings/{rid2}/finalize", json={"total_chunks": 1}, headers=h)
+    assert r.status_code == 422 and "does not open" in r.json()["detail"]
+    assert client.get(f"/api/v1/recordings/{rid2}", headers=h).json()["state"] == "uploading"
+
+
+def test_a_plain_index_is_encrypted_once(tmp_path):
+    import sqlite3
+    from recorder.db import open_index
+    data = tmp_path / "data"
+    data.mkdir()
+    con = sqlite3.connect(data / "index.sqlite")
+    con.execute("CREATE TABLE users (id TEXT PRIMARY KEY, ext_id TEXT UNIQUE, email TEXT, name TEXT, created_at TEXT NOT NULL, last_seen_at TEXT)")
+    con.execute("INSERT INTO users (id, ext_id, email, name, created_at) VALUES ('usr_1', 'ext', 'a@b.c', 'Ana', 'now')")
+    con.commit()
+    con.close()
+    s = Settings(data_dir=data, **make_keys(tmp_path))
+    db = open_index(s)
+    assert not (data / "index.sqlite").read_bytes().startswith(b"SQLite format 3")
+    assert db.one("SELECT name FROM users WHERE id = 'usr_1'")["name"] == "Ana"
+    assert open_index(s).one("SELECT COUNT(*) AS n FROM users")["n"] == 1     # a second open leaves it as it is

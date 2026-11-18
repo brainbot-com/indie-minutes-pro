@@ -30,7 +30,7 @@ from contextlib import contextmanager
 import httpx
 
 from .llm import chat_json
-from .util import new_id, now_iso, read_json, write_json
+from .util import new_id, now_iso, read_bytes, read_json, write_json
 
 DECIDE_SCHEMA = {
     "type": "object",
@@ -151,7 +151,7 @@ class Drive:
         import base64
         body = []
         for name, path in files:
-            data = path.read_bytes()
+            data = read_bytes(path)
             try:
                 body.append({"name": name, "text": data.decode()})
             except UnicodeDecodeError:
@@ -457,7 +457,7 @@ class Followup:
 
 def main(argv=None):
     from .config import Settings
-    from .db import DB
+    from .db import open_index
     from .store import Store
 
     ap = argparse.ArgumentParser(prog="python -m recorder.followup", description=__doc__.split("\n\n")[0])
@@ -479,7 +479,7 @@ def main(argv=None):
         a.note = opts.get("note", a.note)
     s = Settings()
     s.ensure_dirs()
-    db = DB(s.db_path)
+    db = open_index(s)
     f = Followup(s, db, Store(s, db))
     if a.command == "run":
         out = f.run(auto=True if a.auto else None, meeting_ids=a.meeting)

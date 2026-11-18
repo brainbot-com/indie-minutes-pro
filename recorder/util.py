@@ -2,11 +2,11 @@
 import datetime as dt
 import hashlib
 import json
-import os
 import re
 import secrets
-import tempfile
 from pathlib import Path
+
+from . import vault
 
 
 def utcnow():
@@ -61,14 +61,17 @@ def item_key(text):
 
 
 def write_bytes(path, data):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-")
-    # mkstemp makes 0600 files; the box user and the Drive agent must read them.
-    os.fchmod(fd, 0o644)
-    with os.fdopen(fd, "wb") as f:
+    """Whole or not at all; encrypted when it is a meeting's file (vault.py)."""
+    with vault.VAULT.writer(path) as f:
         f.write(data)
-    os.replace(tmp, path)
+
+
+def read_bytes(path):
+    return vault.VAULT.read(path)
+
+
+def read_text(path):
+    return read_bytes(path).decode()
 
 
 def write_text(path, text):
@@ -81,7 +84,7 @@ def write_json(path, obj):
 
 def read_json(path, default=None):
     try:
-        return json.loads(Path(path).read_text())
+        return json.loads(read_text(path))
     except (FileNotFoundError, json.JSONDecodeError):
         return default
 

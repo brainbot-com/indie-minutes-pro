@@ -13,23 +13,24 @@ from urllib.parse import quote
 
 import segno
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response,
+                               StreamingResponse)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from markdown_it import MarkdownIt
 from pydantic import BaseModel, Field
 
-from . import __version__, audio
+from . import __version__, audio, vault
 from .config import Settings
 from .connect import CODE_MINUTES, Codes, Guesses, shown
-from .db import DB
+from .db import open_index
 from .engines import NAMES as ENGINE_NAMES, Engines
 from .followup import Followup
 from .people import label, resolve
 from .render import display_name, local_time, render_summary_md, words_to_segments
 from .store import Store
 from .util import (fmt_clock, fmt_duration, fmt_ts, hash_token, new_id, new_meeting_id, new_token, now_iso,
-                   parse_iso, sha256_hex, write_bytes)
+                   parse_iso, read_bytes, read_text, sha256_hex, write_bytes)
 from .worker import Worker
 
 HERE = Path(__file__).parent
@@ -42,6 +43,11 @@ FILES = {"transcript.json", "transcript.md", "summary.md", "summary.json", "acti
          "speakers.json", "meta.json"}
 
 
+class SealIn(BaseModel):
+    kid: str = Field(max_length=40)
+    epk: str = Field(max_length=200)        # the phone's public half for this recording (P-256, b64url)
+
+
 class NewRecording(BaseModel):
     client_id: str = Field(min_length=8, max_length=80)
     mime: str = Field(max_length=100)
@@ -49,6 +55,7 @@ class NewRecording(BaseModel):
     language: str | None = Field(default=None, max_length=8)
     started_at: str | None = Field(default=None, max_length=40)
     storage: str | None = Field(default=None, pattern="^(local|drive)$")
+    seal: SealIn | None = None              # chunks encrypted on the phone for the box's sealing key
 
 
 class SettingsIn(BaseModel):
@@ -105,7 +112,7 @@ class AckIn(BaseModel):
 def create_app(settings=None):
     s = settings or Settings()
     s.ensure_dirs()
-    db = DB(s.db_path)
+    db = open_index(s)                       # also loads the keys (vault.configure)
     store = Store(s, db)
     engines = Engines(s)
     followup = Followup(s, db, store)
@@ -210,12 +217,15 @@ def create_app(settings=None):
 
     @app.post("/api/v1/recordings")
     def create_recording(body: NewRecording, tok=Depends(need(*READERS))):
+        if body.seal and (not vault.SEALER or body.seal.kid != vault.SEALER.kid):
+            raise HTTPException(409, "the box's sealing key is another one: fetch it again from /api/v1/health")
         row = db.one("SELECT * FROM recordings WHERE token_id = ? AND client_id = ?", tok["id"], body.client_id)
         if not row:
             db.run("INSERT OR IGNORE INTO recordings (id, token_id, client_id, mime, title, language, started_at,"
-                   " created_at, storage) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                   " created_at, storage, seal_kid, seal_epk) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                    new_id("rec"), tok["id"], body.client_id, body.mime, body.title, body.language,
-                   body.started_at or now_iso(), now_iso(), body.storage)
+                   body.started_at or now_iso(), now_iso(), body.storage,
+                   body.seal.kid if body.seal else None, body.seal.epk if body.seal else None)
             row = db.one("SELECT * FROM recordings WHERE token_id = ? AND client_id = ?", tok["id"], body.client_id)
         (s.uploads_dir / row["id"]).mkdir(parents=True, exist_ok=True)
         return recording_status(row)
@@ -261,6 +271,7 @@ def create_app(settings=None):
             return JSONResponse({"error": "missing chunks", "missing": missing[:500]}, status_code=409)
         if db.run("UPDATE recordings SET state = 'finalizing' WHERE id = ? AND state = 'uploading'", rid) != 1:
             raise HTTPException(409, "finalize already in progress")
+        mid = None
         try:
             started = parse_iso(row["started_at"])
             mid = new_meeting_id(started)
@@ -268,13 +279,18 @@ def create_app(settings=None):
                          source=f"device:{tok['name']}", recording_id=rid, language=row["language"],
                          storage=row["storage"], owner_id=tok.get("user_id"))
             dst = store.folder(mid) / f"original.{audio.ext_for_mime(row['mime'])}"
-            tmp = dst.with_name(".tmp-" + dst.name)
-            with open(tmp, "wb") as out:
+            # sealed on the phone: opened here with the box's sealing key; stored encrypted at rest
+            key = vault.SEALER.chunk_key(row["seal_epk"], row["client_id"]) if row["seal_epk"] else None
+            with vault.VAULT.writer(dst) as out:
                 for i in range(body.total_chunks):
-                    out.write((s.uploads_dir / rid / f"{i:06d}.part").read_bytes())
-            tmp.replace(dst)
-        except Exception:
+                    data = read_bytes(s.uploads_dir / rid / f"{i:06d}.part")
+                    out.write(vault.open_chunk(key, row["client_id"], i, data) if key else data)
+        except Exception as e:
             db.run("UPDATE recordings SET state = 'uploading' WHERE id = ?", rid)
+            if mid and store.meta(mid):
+                store.delete(mid)               # no half-made meeting; the phone sends again and finalizes later
+            if isinstance(e, vault.VaultError):
+                raise HTTPException(422, str(e)) from e
             raise
         db.run("UPDATE recordings SET state = 'finalized', total_chunks = ?, meeting_id = ? WHERE id = ?",
                body.total_chunks, mid, rid)
@@ -383,7 +399,7 @@ def create_app(settings=None):
         files = dict(store.drive_files(mid))
         if name not in files:
             raise HTTPException(404)
-        return FileResponse(files[name], filename=name)
+        return plain_file(files[name], filename=name)
 
     @app.get("/api/v1/jobs")
     def jobs(tok=Depends(need("device", "agent", "admin"))):
@@ -392,7 +408,9 @@ def create_app(settings=None):
     @app.get("/api/v1/health")
     def health():
         alive = bool(worker.thread and worker.thread.is_alive())
-        return {"ok": True, "version": __version__, "worker": alive, "engine": s.engine, "llm": s.llm_model, "box": s.box_name}
+        return {"ok": True, "version": __version__, "worker": alive, "engine": s.engine, "llm": s.llm_model, "box": s.box_name,
+                # phones encrypt their chunks for this key before they store or send them
+                "seal": vault.SEALER.describe() if vault.SEALER else None}
 
     # -- follow-up proposals and the Drive outbox ------------------------------
 
@@ -495,13 +513,37 @@ def create_app(settings=None):
         worker.enqueue(mid, kind=kind, engine=engine or None)
         return RedirectResponse(f"/m/{mid}", status_code=303)
 
+    def plain_file(path, request=None, media_type=None, filename=None):
+        """A meeting's file, decrypted on the way out, with byte ranges for the audio player."""
+        v = vault.VAULT
+        size = v.size(path)
+        start, end, status = 0, size, 200
+        headers = {"Accept-Ranges": "bytes"}
+        rng = request.headers.get("range", "") if request else ""
+        if rng.startswith("bytes="):
+            a, _, b = rng[6:].split(",")[0].strip().partition("-")
+            try:
+                start, end = (int(a), int(b) + 1 if b else size) if a else (max(0, size - int(b)), size)
+            except ValueError:
+                start, end = 0, size
+            end = min(end, size)
+            if start >= end:
+                return Response(status_code=416, headers={"Content-Range": f"bytes */{size}"})
+            status = 206
+            headers["Content-Range"] = f"bytes {start}-{end - 1}/{size}"
+        headers["Content-Length"] = str(end - start)
+        if filename:
+            headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+        media_type = media_type or mimetypes.guess_type(str(filename or path))[0] or "application/octet-stream"
+        return StreamingResponse(v.stream(path, start, end), status_code=status, media_type=media_type, headers=headers)
+
     @app.get("/m/{mid}/audio")
-    def meeting_audio(mid: str, who=Depends(person(*READERS, html=True))):
+    def meeting_audio(mid: str, request: Request, who=Depends(person(*READERS, html=True))):
         meeting_or_404(mid, who)
         f = store.audio(mid) if store.audio(mid).exists() else store.original(mid)
         if not f:
             raise HTTPException(404)
-        return FileResponse(f)
+        return plain_file(f, request)
 
     @app.get("/m/{mid}/files/{name}")
     def meeting_file(mid: str, name: str, who=Depends(person(*READERS, html=True))):
@@ -509,7 +551,7 @@ def create_app(settings=None):
         f = store.folder(mid) / name
         if name not in FILES or not f.exists():
             raise HTTPException(404)
-        return FileResponse(f, media_type="text/markdown; charset=utf-8" if name.endswith(".md") else None)
+        return plain_file(f, media_type="text/markdown; charset=utf-8" if name.endswith(".md") else None)
 
     @app.get("/review", response_class=HTMLResponse)
     def review(request: Request, who=Depends(person(*READERS, html=True))):
@@ -723,7 +765,7 @@ def create_token(db, name, role, user_id=None, trusts_identity=False):
 
 def _read(path):
     try:
-        return Path(path).read_text()
+        return read_text(path)
     except FileNotFoundError:
         return ""
 

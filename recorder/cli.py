@@ -19,7 +19,7 @@ from pathlib import Path
 from . import audio
 from .api import create_token
 from .config import Settings
-from .db import DB
+from .db import open_index
 from .engines import NAMES, Engines
 from .people import add_person
 from .store import Store
@@ -45,6 +45,7 @@ def main(argv=None):
     u.add_argument("--name")
     u.add_argument("--token", action="append", default=[],
                    help="claim: give this token, and the meetings its phone recorded, to the person")
+    sub.add_parser("encrypt", help="encrypt the files of meetings from before encryption at rest (checked, in place)")
     c = sub.add_parser("connect", help="a connect code for a person's next phone (once, within 15 minutes)")
     c.add_argument("--user", help="the person (user id); without one, a phone of nobody in particular")
     sub.add_parser("meetings")
@@ -64,7 +65,7 @@ def main(argv=None):
 
     s = Settings()
     s.ensure_dirs()
-    db = DB(s.db_path)
+    db = open_index(s)
     out = None
     if a.cmd == "token":
         if a.action == "add":
@@ -99,6 +100,20 @@ def main(argv=None):
                 out["meetings"] += db.run(
                     "UPDATE meetings SET owner_id = ? WHERE recording_id IN"
                     " (SELECT id FROM recordings WHERE token_id = ?)", a.id, tid)
+    elif a.cmd == "encrypt":
+        from . import vault
+        v = vault.VAULT
+        if not v.on:
+            raise SystemExit("encryption at rest is off (ENCRYPT_AT_REST, DATA_KEY_FILE)")
+        out = {"encrypted": 0, "already": 0, "failed": []}
+        for root in (s.meetings_dir, s.uploads_dir):
+            for f in sorted(root.rglob("*")) if root.exists() else []:
+                if not f.is_file() or f.name.endswith(".sealing"):
+                    continue
+                try:
+                    out["encrypted" if v.seal_in_place(f) else "already"] += 1
+                except Exception as e:
+                    out["failed"].append(f"{f}: {e}")
     elif a.cmd == "connect":
         from .connect import Codes, shown
         if a.user and not db.one("SELECT 1 FROM users WHERE id = ?", a.user):
