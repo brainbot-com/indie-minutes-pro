@@ -11,7 +11,7 @@
   targets: {{ targets|join(', ') }} · approved follow-ups are carried out by {{ carrier }}.
   {% if executor == 'direct' %}<a href="/mock/">Open the mock GitHub and Drive</a>{% endif %}
 </p>
-{% set groups = {'proposed': 'Waiting for review', 'approved': 'Approved, not done yet', 'executed': 'Done', 'rejected': 'Rejected'} %}
+{% set groups = {'proposed': 'Waiting for review', 'approved': 'Approved, not done yet', 'executed': 'Done', 'rejected': 'Rejected', 'superseded': 'Replaced by a newer summary'} %}
 {% for state, heading in groups.items() %}
   {% set rows = items|selectattr('state', 'equalto', state)|list %}
   {% if rows %}

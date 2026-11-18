@@ -202,6 +202,28 @@ def test_mcp_update_summary(app, client, tmp_path):
 
 
 @pytest.mark.parametrize("executor", ["agent"])
+def test_a_better_summary_replaces_what_waits_for_drive(app, client, tmp_path, monkeypatch):
+    """An agent improves a summary before the Drive items of the first one were
+    carried out: those are set aside, so Drive gets the current files once."""
+    monkeypatch.setattr(fu, "chat_json", lambda *a, **k: ({"decisions": []}, {}))
+    mid, _ = make_meeting(app, client, tmp_path)
+    f = app.state.followup
+    f.propose()
+    first = {p["kind"]: p for p in f.outbox() if p["meeting_id"] == mid}
+    assert sorted(first) == ["drive_log", "drive_store"]
+    agent = {"Authorization": f"Bearer {create_token(app.state.db, 'cc-agent', 'agent')}"}
+    better = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "update_summary", "arguments": {
+        "meeting_id": mid, "markdown": "## TL;DR\n\nBetter.", "note": "test"}}}
+    assert not client.post("/mcp", json=better, headers=agent).json()["result"]["isError"]
+    f.propose()
+    box = [p for p in f.outbox() if p["meeting_id"] == mid]
+    assert sorted((p["kind"], p["payload"]["summary_version"]) for p in box) == [("drive_log", 2), ("drive_store", 2)]
+    assert {p["state"] for p in f.list(meeting_id=mid) if p["id"] in {x["id"] for x in first.values()}} == {"superseded"}
+    # an agent that had already started on an older one may still report it done
+    assert f.ack(first["drive_store"]["id"], "https://drive.test/folder")["state"] == "executed"
+
+
+@pytest.mark.parametrize("executor", ["agent"])
 def test_agent_mode_uses_outbox_and_synced_issues(app, client, tmp_path, monkeypatch):
     mid, _ = make_meeting(app, client, tmp_path)
     f = app.state.followup

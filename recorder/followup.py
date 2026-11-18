@@ -342,7 +342,19 @@ class Followup:
                                 "Every meeting stored in Drive gets an entry in the running meeting log.", approved=True)
                 if pid:
                     created.append(pid)
+            self._supersede(mid, version)
         return created
+
+    def _supersede(self, mid, version):
+        """A newer summary replaces what an older one still waits to put in Drive:
+        the newer upload carries the current files and its log entry the current
+        text. Without this every improved summary doubled the outbox (store and
+        log for the recorder's version and for the agent's)."""
+        for p in self.list(state="approved", meeting_id=mid):
+            if p["kind"] in ("drive_store", "drive_log") and p["payload"].get("summary_version", 1) < version:
+                self.db.run("UPDATE proposals SET state = 'superseded', decided_at = ?, result = ? WHERE id = ? AND state = 'approved'",
+                            now_iso(), json.dumps({**(p["result"] or {}), "superseded_by": version}), p["id"])
+                (self.s.outbox_dir / f"{p['id']}.json").unlink(missing_ok=True)
 
     def _log_entry(self, meta, summary, actions, link):
         date = (meta.get("started_at") or meta.get("created_at") or "")[:10]
@@ -418,7 +430,7 @@ class Followup:
             return {"id": pid, "error": "no such proposal"}
         if p["state"] == "executed":
             return {"id": pid, "state": "executed", "note": "already acknowledged"}
-        if p["state"] != "approved":
+        if p["state"] not in ("approved", "superseded"):    # superseded: one an agent had started on still counts
             return {"id": pid, "error": f"proposal is {p['state']}, not approved"}
         res = self._executed(pid, p["kind"], url, note=note, who=who)
         (self.s.outbox_dir / f"{pid}.json").unlink(missing_ok=True)
