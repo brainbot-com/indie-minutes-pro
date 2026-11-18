@@ -11,8 +11,6 @@
 https://{$BIND_IP}:{$HTTPS_PORT} {
 	bind {$BIND_IP}
 	tls /certs/server.crt /certs/server.key
-	@outside not remote_ip {$ALLOW_CIDRS}
-	respond @outside "indie-recorder is only reachable over the VPN" 403
 	request_body {
 		max_size 80MB
 	}
@@ -22,11 +20,13 @@ https://{$BIND_IP}:{$HTTPS_PORT} {
 		Referrer-Policy no-referrer
 		Permissions-Policy "microphone=(self)"
 	}
-	# Mock GitHub and Drive pages (demo data only).
-	handle /mock* {
-		reverse_proxy 127.0.0.1:18099
-	}
-	handle {
+	# `route` runs its directives in the order written. With `handle` blocks
+	# Caddy sorts `respond` after them and the VPN check never runs.
+	@outside not remote_ip {$ALLOW_CIDRS}
+	route {
+		respond @outside "indie-recorder is only reachable over the VPN" 403
+		# Mock GitHub and Drive pages (demo data only).
+		reverse_proxy /mock* 127.0.0.1:18099
 		reverse_proxy 127.0.0.1:18000
 	}
 }
@@ -35,7 +35,9 @@ https://{$BIND_IP}:{$HTTPS_PORT} {
 http://{$BIND_IP}:{$CA_PORT} {
 	bind {$BIND_IP}
 	@outside not remote_ip {$ALLOW_CIDRS}
-	respond @outside "VPN only" 403
-	root * /certs/public
-	file_server browse
+	route {
+		respond @outside "VPN only" 403
+		root * /certs/public
+		file_server browse
+	}
 }
