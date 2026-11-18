@@ -551,7 +551,7 @@ def test_hints_for_naming_speakers(app, client, tmp_path, monkeypatch):
     import io
     import wave
     said = {**SUMMARY, "speakers": [{"label": "Speaker 2", "name": "Luis", "evidence": "[00:00:12] Speaker 1: Luis, can you send it?"},
-                                    {"label": "Speaker 1", "name": "", "evidence": ""}]}
+                                    {"label": "Speaker 1", "name": "Anthony", "evidence": "[00:00:47] Speaker 1: okay Anthony, back to the document"}]}
     monkeypatch.setattr(wk, "summarize", lambda transcript, settings, log=print: dict(said))
     service = create_token(app.state.db, "brainbot:agent command", "agent", trusts_identity=True)
 
@@ -579,3 +579,12 @@ def test_hints_for_naming_speakers(app, client, tmp_path, monkeypatch):
     start = profile(app.state.store.transcript(mid))["Speaker 1"]["clip"]["s"]
     plain.setpos(int(start * 16000))
     assert w.readframes(w.getnframes()) == plain.readframes(w.getnframes())
+
+
+def test_a_speaker_is_not_whom_they_address():
+    from recorder.speakers import plausible
+    assert not plausible("Speaker 1", "Anthony", "[00:00:47] Speaker 1: okay Anthony, back to the document")
+    assert plausible("Speaker 1", "Ben", "[00:00:01] Speaker 1: Hi, I'm Ben from sales")
+    assert plausible("Speaker 1", "Anna", "[00:00:02] Speaker 1: Hallo, ich bin Anna")
+    assert plausible("Speaker 2", "Luis", "[00:00:12] Speaker 1: Luis, can you send it?")
+    assert plausible("Speaker 2", "Luis", "calendar: invited")

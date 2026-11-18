@@ -62,8 +62,9 @@ class Settings:
         self.encrypt_at_rest = get("ENCRYPT_AT_REST", "1") == "1"
         self.data_key_file = Path(get("DATA_KEY_FILE", "/secrets/data.key"))
         self.seal_key_file = Path(get("SEAL_KEY_FILE", "/secrets/seal.pem"))
-        # Plain audio for ffmpeg and the engines during a job: a tmpfs the engines share.
-        self.scratch_dir = Path(get("SCRATCH_DIR", "/scratch"))
+        # Plain audio for ffmpeg and the engines during a job: a tmpfs the engines share
+        # (compose mounts it here; the engines take only paths under /data).
+        self.scratch_dir = Path(get("SCRATCH_DIR", str(self.data_dir / "scratch")))
         self.secure_cookies = get("SECURE_COOKIES", "1") == "1"
         self.worker = get("WORKER", "1") == "1"
 

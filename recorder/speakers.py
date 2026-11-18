@@ -4,6 +4,7 @@ suggested from what was said (the recorder's summary) or from what a person's
 agent knows (memory, wiki, calendar). Nothing is renamed without the person.
 No voiceprints: a clip is cut from the meeting's own audio when someone asks
 for it, and nothing about a voice is kept or compared across meetings."""
+import re
 import struct
 
 from . import vault
@@ -41,6 +42,21 @@ def profile(transcript):
 def _line(text, n=140):
     text = " ".join(text.split())
     return text if len(text) <= n else text[:n].rsplit(" ", 1)[0] + " ..."
+
+
+# "I'm Anna", "ich bin Anna": the only way a speaker's own line names the speaker
+_SELF = re.compile(r"\b(i'?m|i am|my name is|this is|it'?s|call me|ich bin|ich hei(?:ss|ß)e|mein name ist|hier ist|hier spricht)\s+", re.I)
+
+
+def plausible(label, name, why):
+    """A name in a line a speaker says themselves belongs to someone they talk to,
+    unless they introduce themselves with it: "[00:00:47] Speaker 1: okay Anthony,
+    back to the document" does not make Speaker 1 Anthony."""
+    m = re.match(r"\s*\[[0-9:]+\]\s*([^:]+):\s*(.*)", why or "", re.S)
+    if not m or m.group(1).strip() != label:
+        return True
+    line, name = m.group(2).lower(), (name or "").lower().strip()
+    return bool(name) and any(line[x.end():].startswith(name) for x in _SELF.finditer(line))
 
 
 def hints(folder):

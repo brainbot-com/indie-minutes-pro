@@ -166,7 +166,10 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
         from .signing import sign
         prof = speakers.profile(store.transcript(mid) or {})
         names, sugg, audio = store.names(mid), speakers.hints(store.folder(mid)), store.audio(mid).exists()
-        cards = [{"label": label, "name": names.get(label, ""), "suggestions": sugg.get(label, []),
+        # the recorder's own suggestions once more through the plausibility check (older ones too)
+        cards = [{"label": label, "name": names.get(label, ""),
+                  "suggestions": [x for x in sugg.get(label, []) if x.get("by") != "recorder"
+                                  or speakers.plausible(label, x.get("name"), x.get("why"))],
                   **{k: p[k] for k in ("share", "words", "turns", "first", "lines")},
                   "clip_url": f"{s.files_base_url}/{sign(s, mid, 'clip:' + label)}" if audio and p["clip"] else None}
                  for label, p in prof.items()]

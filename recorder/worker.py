@@ -162,7 +162,8 @@ class Worker:
         version = self.store.add_summary(mid, summary, author="recorder")
         # names the transcript itself gives (introductions, people addressed by name): suggestions only
         named = {x.get("label"): {"name": x.get("name"), "why": x.get("evidence")}
-                 for x in summary.get("speakers") or [] if (x.get("name") or "").strip()}
+                 for x in summary.get("speakers") or [] if (x.get("name") or "").strip()
+                 and speakers.plausible(x.get("label"), x.get("name"), x.get("evidence"))}
         if named:
             speakers.suggest(self.store.folder(mid), set(self.store.names(mid)), named, by="recorder")
         log(f"summary v{version} ({self.s.llm_model}, {time.monotonic() - t0:.1f} s)")

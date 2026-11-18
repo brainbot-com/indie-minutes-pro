@@ -343,6 +343,17 @@ def phone_side(box_public, client_id):
     return b64u(raw), key
 
 
+def _in_ram(path):
+    """Whether path is on a tmpfs (Linux: the longest mount point above it)."""
+    try:
+        mounts = [ln.split()[1:3] for ln in open("/proc/self/mounts")]
+    except OSError:
+        return False
+    p = str(Path(path).resolve())
+    best = max((m for m in mounts if p == m[0] or p.startswith(m[0].rstrip("/") + "/")), key=lambda m: len(m[0]), default=None)
+    return bool(best) and best[1] == "tmpfs"
+
+
 # -- the vault the service uses -------------------------------------------------------
 
 VAULT = Vault()
@@ -374,6 +385,8 @@ def configure(settings):
     elif marker.exists():
         raise VaultError(f"the data in {settings.data_dir} is encrypted: set ENCRYPT_AT_REST=1 and DATA_KEY_FILE")
     settings.scratch_dir.mkdir(parents=True, exist_ok=True)
+    if vault.on and not _in_ram(settings.scratch_dir):
+        print(f"WARNING: {settings.scratch_dir} is not a tmpfs: plain audio of running jobs touches the disk", flush=True)
     VAULT = vault
     try:
         SEALER = Sealer(Path(settings.seal_key_file).read_bytes())
