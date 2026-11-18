@@ -8,8 +8,10 @@ better summaries with what it knows and stores meetings in Google Drive.
   person sees only their own meetings: list by day, a meeting's summary,
   decisions, action items and transcript, speaker names, "Google Drive" per
   meeting. Settings: the person's name (their phones show it), the storage
-  defaults, and Phones (connect one with a QR code for the Android app or a
-  web app link for any phone; remove one to lock it out). English and German,
+  defaults, and Phones. "Connect a phone" shows one QR code and the same
+  code to type, waits, and says "Connected: <phone>" when the phone has used
+  it; remove a phone to lock it out (see "Connecting a phone" in the main
+  README). English and German,
   light and dark as brainbot:agent command sets them; the same Swiss look as
   the phone apps. Its WebMCP tools (`list_meetings`, `open_meeting`,
   `set_storage`, `set_default_storage`, `rename_speakers`) let the app's agent
@@ -23,13 +25,17 @@ better summaries with what it knows and stores meetings in Google Drive.
 
 - Recording, transcription and the first summary happen on aibox1 only, with
   aibox1's own models.
-- brainbot:agent command reaches the recorder only through three paths on
+- brainbot:agent command reaches the recorder only through these paths on
   `https://ai-knowledge.mz.brainbot.com/indie-recorder/`: `api/v1/indiechat`
   (the "indie-recorder" connector: the deployment's service token, and
   brainbot:agent command names the signed-in person in `X-Indie-User`),
-  `mcp` (a person's own recorder token, for their meeting agent) and
-  `api/v1/files/...` (signed links that expire after two hours). Nothing else
-  of the recorder is reachable there.
+  `mcp` (a person's own recorder token, for their meeting agent),
+  `api/v1/files/...` (signed links that expire after two hours), and for
+  phones: `connect` (the page a connect code opens), `api/v1/pair` and
+  `api/v1/pair/{code}` (a code, once, within 15 minutes),
+  `indie-recorder.apk` and `static/...` (the page's stylesheet). Nothing else
+  of the recorder is reachable there; recordings go from the phone to aibox1
+  directly.
 - The recorder knows people by their brainbot:agent command id (it gets no
   name or email); a person's phones and meetings belong to that id. Only a
   person, not an agent, can connect or remove phones or set their name.
@@ -50,8 +56,9 @@ better summaries with what it knows and stores meetings in Google Drive.
 
 On aibox1 this is already set (`~/indie-recorder/.env`): `ALLOW_CIDRS`
 admits ai-knowledge (10.1.1.26), `FILES_BASE_URL` points at the route below,
-`FOLLOWUP_EXECUTOR=agent`, `FOLLOWUP_TARGETS=drive`, `STORAGE_DEFAULT=drive`.
-The connector's service token is made once on aibox1 with
+`FOLLOWUP_EXECUTOR=agent`, `FOLLOWUP_TARGETS=drive`, `STORAGE_DEFAULT=drive`,
+`CONNECT_URL` and `APK_URL` point at the brain-tls address. The connector's
+service token is made once on aibox1 with
 `python -m recorder.cli token add --name "brainbot:agent command" --role agent
 --trusts-identity` and kept in `secrets/indiechat_service_token`.
 
@@ -68,7 +75,7 @@ the script keeps the one already set. It fetches the recorder's CA
 certificate from aibox1 and refuses it unless its SHA-256 fingerprint is the
 recorder's (`E6:89:A7:83:...:07:F1:2D:9F`), then:
 
-1. routes the three paths above in `/opt/kb/brain-tls/Caddyfile` to aibox1,
+1. routes the paths above in `/opt/kb/brain-tls/Caddyfile` to aibox1,
    trusting only the recorder's CA (validated, then a graceful reload; on a
    validation error the file is put back),
 2. adds `ai-knowledge.mz.brainbot.com` to `INDIE_PRIVATE_HOSTS` and sets
@@ -97,11 +104,10 @@ The Meetings app is in everyone's sidebar. To record:
 
 1. **Your name.** Meetings, Settings, Your name: your phones show it, so you
    can see whose account they record into.
-2. **A phone.** Meetings, Settings, Connect a phone. Android: install the app
-   once (link in step 01, VPN only), then scan the code with the phone's
-   camera. Any other phone: under "Show the link", open the web app link on
-   the phone (it needs the box's CA, see the main README). Remove a phone
-   there to lock it out.
+2. **A phone.** Meetings, Connect a phone: scan the code with the phone's
+   camera (VPN on) and follow the page it opens ("Open the app", "Install the
+   app" or "Record in the browser"), or type the code in the app. Remove a
+   phone under Settings, Phones to lock it out.
 
 For Drive and the better summaries, a person also needs a meeting agent:
 

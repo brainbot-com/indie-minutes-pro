@@ -35,7 +35,7 @@ SRC=/opt/kb/indiechat-src
 CFG=/opt/kb/indiechat-config
 COMPOSE="docker compose -p indiechat -f $SRC/docker-compose.ai-knowledge.yml"
 CA_SHA256=${CA_SHA256:-E6:89:A7:83:FA:CE:DC:3C:1E:82:E7:A9:8F:45:6B:54:8A:56:F6:2D:ED:E2:E4:83:F5:43:F9:40:07:F1:2D:9F}
-PATHS="/indie-recorder/mcp /indie-recorder/api/v1/files/* /indie-recorder/api/v1/indiechat"
+PATHS="/indie-recorder/mcp /indie-recorder/api/v1/files/* /indie-recorder/api/v1/indiechat /indie-recorder/connect /indie-recorder/api/v1/pair /indie-recorder/api/v1/pair/* /indie-recorder/indie-recorder.apk /indie-recorder/static/*"
 
 [ "$(id -u)" = 0 ] || { echo "Run this as root." >&2; exit 1; }
 [ -f "$HERE/indie-recorder.html" ] || { echo "indie-recorder.html must be next to this script." >&2; exit 1; }
@@ -75,8 +75,10 @@ if "@indie_recorder" in s:
 else:
     route = """	# indie-recorder on aibox1: its MCP endpoint, signed file links and the
 	# endpoint behind the "indie-recorder" connector, for the Meetings app and
-	# meeting agents in brainbot:agent command. Each needs a recorder token or a
-	# signed link; nothing else of the recorder is passed through. Added by
+	# meeting agents in brainbot:agent command (each needs a recorder token or a
+	# signed link); the page a phone's connect code opens, the code's two
+	# endpoints, the Android app and the page's stylesheet. Nothing else of the
+	# recorder is passed through. Added by
 	# indie-recorder/integrations/indie-chat/install-ai-knowledge.sh.
 """ + matcher + """	handle @indie_recorder {
 		uri strip_prefix /indie-recorder
@@ -190,7 +192,7 @@ if python3 - $CFG/app-templates.json <<'PY'
 import json, sys
 p = sys.argv[1]
 t = json.load(open(p))
-want = {"file": "indie-recorder.html", "key": "indie-recorder", "name": "Meetings", "icon": "🎙️",
+want = {"file": "indie-recorder.html", "key": "indie-recorder", "name": "Meetings", "icon": "🔴",
         "description": "Your meetings from the indie recorder on aibox1: summaries, action items, speakers, Drive or local, your phones. Each person sees only their own.",
         "refresh": True, "seed": {"id": "indie-recorder", "state": {}}}
 have = next((e for e in t if e.get("key") == "indie-recorder"), None)

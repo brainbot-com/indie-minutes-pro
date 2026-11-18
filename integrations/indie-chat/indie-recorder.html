@@ -57,6 +57,10 @@ a { color: inherit; text-underline-offset: 3px; }
 .bar a, .bar button { background: none; border: 0; padding: 0; cursor: pointer; text-decoration: none; letter-spacing: inherit; text-transform: inherit; font-weight: inherit; }
 .bar a:hover, .bar button:hover { text-decoration: underline; }
 
+/* the mark: the red record dot before the name */
+.brand::before { content: ""; display: inline-block; width: .8em; height: .8em; border-radius: 50%; background: var(--red);
+  margin-right: .45em; vertical-align: -.08em; }
+
 /* type */
 .kicker { font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
 .kicker.live { color: var(--red); }
@@ -66,6 +70,7 @@ a { color: inherit; text-underline-offset: 3px; }
 .big { font-size: 104px; font-weight: 900; line-height: .9; letter-spacing: -.05em; font-variant-numeric: tabular-nums; }
 .ghost { color: var(--ghost); }
 .lead { margin: 0; font-size: 18px; font-weight: 500; line-height: 1.45; }
+.code { font-size: 40px; font-weight: 900; letter-spacing: .04em; line-height: 1; font-variant-numeric: tabular-nums; }
 .head { display: flex; flex-direction: column; gap: 6px; }
 
 /* a section: small caps label over a 3px rule, then rows with 1px rules */
@@ -149,30 +154,45 @@ details.fold > .inner { padding: 0 0 16px; }
 .note { margin: 0; font-size: 14px; line-height: 1.45; }
 .error { margin: 0; color: var(--red); font-size: 14px; font-weight: 700; }
 .qr { width: 232px; max-width: 100%; background: #ffffff; padding: 12px; border: 3px solid var(--ink); }
-.qr svg { width: 100%; height: auto; display: block; }
+.qr.big { width: 300px; }
+.qr svg { width: 100%; height: auto; aspect-ratio: 1; display: block; }   /* a code must stay square to scan */
 </style>
 <style>
 main { max-width: 780px; margin: 0 auto; padding: 24px 24px 48px; display: flex; flex-direction: column; gap: 26px; }
 .view { display: flex; flex-direction: column; gap: 26px; }
+/* the red block at the top: the phone app's Record block, as the Meetings app's face */
+.hero { background: var(--red); color: var(--on-red); padding: 18px; min-height: 172px; display: grid;
+  grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto 1fr; gap: 10px 16px; }
+.hero .dot { width: 30px; height: 30px; border-radius: 50%; background: var(--on-red); }
+.hero .count { font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; text-align: right; }
+.hero .words { grid-column: 1 / -1; align-self: end; display: flex; flex-direction: column; gap: 6px; }
+.hero .kick { font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.hero h1 { margin: 0; font-size: 56px; font-weight: 900; letter-spacing: -.04em; line-height: .95; }
 .list { display: flex; flex-direction: column; gap: 30px; }
 .mrow { grid-template-columns: 40px minmax(0, 1fr) 92px 76px 96px; gap: 14px; }
 .mrow .when, .mrow .len { text-align: right; }
 .mrow .title { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mrow .state { text-align: right; font-size: 14px; }
 .mrow .state.busy { color: var(--red); font-weight: 700; }
-.empty { display: flex; flex-direction: column; gap: 14px; }
+.steps { border-top: 3px solid var(--ink); }
+.steps .row { grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; }
+.steps .done { color: var(--red); font-weight: 700; font-size: 14px; }
 .setting { align-items: center; }
 .setting .line { width: 260px; max-width: 45vw; text-align: right; }
 .phone { grid-template-columns: 40px minmax(0, 1fr) auto auto; gap: 14px; }
-.steps { border-top: 3px solid var(--ink); }
-.steps .row { grid-template-columns: 40px minmax(0, 1fr); }
-.pairing { display: flex; flex-direction: column; gap: 20px; }
-.pairform { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: end; }
-.pairform .boxed, .pairform .btn { height: 52px; }
-.pairout { display: flex; flex-direction: column; gap: 14px; }
-.linkbox { margin: 0; font-size: 13px; word-break: break-all; color: var(--muted); }
-.links { display: flex; flex-direction: column; gap: 6px; }
-.links .label + .linkbox { margin-bottom: 8px; }
+/* connect: the code to scan, the code to type, and what the phone did */
+.connect { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 24px 28px; align-items: start; }
+.connect .qr { width: 248px; }
+.connect .typed { display: flex; flex-direction: column; gap: 8px; padding-top: 14px; }
+.connect .steps .row { grid-template-columns: 40px minmax(0, 1fr); }
+.wait { display: flex; align-items: center; gap: 10px; font-weight: 700; }
+.wait::before { content: ""; width: 12px; height: 12px; border-radius: 50%; background: var(--red); animation: blink 1.2s steps(2, start) infinite; }
+.wait.ok::before { animation: none; }
+@keyframes blink { to { visibility: hidden; } }
+@media (prefers-reduced-motion: reduce) { .wait::before { animation: none; } }
+.here { min-height: 120px; gap: 14px; padding: 18px; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start;
+  background: var(--red); color: var(--on-red); text-decoration: none; font-size: 30px; font-weight: 900; letter-spacing: -.02em; }
+.here::before { content: ""; flex: none; width: 24px; height: 24px; border-radius: 50%; background: var(--on-red); }
 .sum { display: flex; flex-direction: column; gap: 26px; }
 .sum p { margin: 0; }
 .sum .rows + p, .sum p + .rows { margin-top: 10px; }
@@ -183,19 +203,18 @@ pre.tr { margin: 0; white-space: pre-wrap; font: 14px/1.6 "Inter", "Helvetica Ne
 .more { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; }
 @media (max-width: 560px) {
   main { padding: 16px 16px 36px; gap: 22px; }
-  .h1 { font-size: 36px; } .h2 { font-size: 30px; }
+  .h1 { font-size: 36px; } .h2 { font-size: 30px; } .hero h1 { font-size: 44px; } .hero { min-height: 150px; }
   .mrow { grid-template-columns: 30px minmax(0, 1fr) 70px 70px; gap: 10px; }
-  .mrow .when, .bar .extra { display: none; }
-  body.top #barLeft { display: none; }
-  body.top .bar .end { flex: 1; justify-content: space-between; }
+  .mrow .when, .bar .extra, .brand .name { display: none; }
   .setting .line { width: 160px; }
+  .connect { grid-template-columns: minmax(0, 1fr); }
 }
 </style>
 </head>
 <body>
 <main>
   <header class="bar">
-    <span id="barLeft"><span id="brand" data-t="brand"></span><button id="back" data-t="back" hidden></button></span>
+    <span id="barLeft"><span class="brand" id="brand"><span class="name" data-t="brand"></span></span><button id="back" data-t="back" hidden></button></span>
     <span class="end"><span><span id="status"></span><span class="extra" id="statusExtra"></span></span><button id="gear" data-t="settings"></button></span>
   </header>
 
@@ -205,14 +224,40 @@ pre.tr { margin: 0; white-space: pre-wrap; font: 14px/1.6 "Inter", "Helvetica Ne
     <div class="head"><span class="kicker live" data-t="setupKick"></span><h1 class="h1" data-t="setupTitle"></h1></div>
     <p class="note" data-t="setupText"></p>
     <div class="rows steps">
-      <div class="row"><span class="num">01</span><span data-t="setup1"></span></div>
-      <div class="row"><span class="num">02</span><span data-t="setup2"></span></div>
+      <div class="row"><span class="num">01</span><span data-t="setup1"></span><span></span></div>
+      <div class="row"><span class="num">02</span><span data-t="setup2"></span><span></span></div>
     </div>
   </section>
 
   <section class="view" id="home" hidden>
-    <div class="head"><span class="kicker" data-t="private"></span><h1 class="h1" data-t="title"></h1></div>
+    <div class="hero">
+      <span class="dot" aria-hidden="true"></span>
+      <span class="count" id="count"></span>
+      <div class="words"><span class="kick" data-t="private"></span><h1 data-t="title"></h1></div>
+    </div>
     <div class="list" id="list"></div>
+  </section>
+
+  <section class="view" id="connect" hidden>
+    <div class="head"><span class="kicker live" data-t="connectKick"></span><h1 class="h1" data-t="connectTitle"></h1></div>
+    <a class="here" id="here" target="_blank" rel="noopener" hidden><span data-t="connectHere"></span></a>
+    <div class="connect" id="codeBox">
+      <div class="qr" id="qr"></div>
+      <div>
+        <div class="rows steps">
+          <div class="row"><span class="num">01</span><span data-t="step1"></span></div>
+          <div class="row"><span class="num">02</span><span data-t="step2"></span></div>
+          <div class="row"><span class="num">03</span><span data-t="step3"></span></div>
+        </div>
+        <div class="typed">
+          <span class="label" data-t="orType"></span>
+          <span class="code" id="code"></span>
+          <span class="note muted" id="valid"></span>
+        </div>
+      </div>
+    </div>
+    <p class="wait" id="wait"></p>
+    <div class="more"><button class="btn" id="newCode" data-t="newCode" hidden></button><button class="btn" id="connectDone" data-t="done"></button></div>
   </section>
 
   <section class="view" id="settings" hidden>
@@ -224,6 +269,12 @@ pre.tr { margin: 0; white-space: pre-wrap; font: 14px/1.6 "Inter", "Helvetica Ne
       </div>
       <p class="note muted" data-t="yourNameNote" style="margin-top: 10px"></p>
     </div>
+    <div id="phonesBox">
+      <h2 class="section" data-t="phones"></h2>
+      <div class="rows" id="phones"></div>
+      <p class="note muted" id="noPhones" data-t="noPhones" style="margin-top: 10px" hidden></p>
+      <p style="margin-top: 16px"><button class="btn go" id="pairBtn" data-t="connectPhone"></button></p>
+    </div>
     <div>
       <h2 class="section" data-t="storage"></h2>
       <div class="rows">
@@ -232,31 +283,6 @@ pre.tr { margin: 0; white-space: pre-wrap; font: 14px/1.6 "Inter", "Helvetica Ne
         <div class="row plain setting"><span id="lAudio" data-t="audio"></span><button class="switch" role="switch" aria-checked="false" id="audio" aria-labelledby="lAudio"></button></div>
       </div>
       <p class="note muted" data-t="storageNote" style="margin-top: 10px"></p>
-    </div>
-    <div>
-      <h2 class="section" data-t="phones"></h2>
-      <div class="rows" id="phones"></div>
-      <p class="note muted" id="noPhones" data-t="noPhones" style="margin-top: 10px" hidden></p>
-    </div>
-    <button class="btn go block" id="pairBtn" data-t="connectPhone"></button>
-    <div class="pairing" id="pair" hidden>
-      <div class="rows steps">
-        <div class="row"><span class="num">01</span><span><span data-t="pair1"></span> <a id="apk" target="_blank" rel="noopener" data-t="apkLink" hidden></a></span></div>
-        <div class="row"><span class="num">02</span><span data-t="pair2"></span></div>
-        <div class="row"><span class="num">03</span><span data-t="pair3"></span></div>
-      </div>
-      <div class="pairform">
-        <label class="cell"><span class="label" data-t="phoneName"></span><input class="boxed" id="pairName" maxlength="60"></label>
-        <button class="btn go" id="pairGo" data-t="makeCode"></button>
-      </div>
-      <div class="pairout" id="pairOut" hidden>
-        <div class="qr" id="pairQr"></div>
-        <details class="fold"><summary data-t="showLink"></summary><div class="inner links">
-          <span class="label" id="lAndroid" data-t="androidLink"></span><a class="linkbox" id="pairLink" target="_blank" rel="noopener"></a>
-          <span class="label" data-t="webLink"></span><a class="linkbox" id="pairWeb" target="_blank" rel="noopener"></a>
-        </div></details>
-        <div><button class="btn" id="pairDone" data-t="done"></button></div>
-      </div>
     </div>
   </section>
 
@@ -293,11 +319,13 @@ const LANG = document.documentElement.lang === 'de' ? 'de' : 'en';
 const STR = {
   en: {
     brand: 'Indie recorder', title: 'Meetings', back: 'Back', settings: 'Settings', private: 'Only you see your meetings',
+    countN: (n) => (n === 1 ? '1 meeting' : `${n} meetings`),
     defaultDrive: 'Store new recordings in Google Drive', folder: 'Drive folder', audio: 'Include the audio',
     storage: 'Storage', storageNote: 'Off: recordings, transcripts and summaries stay on aibox1. You can change it for each meeting.',
     settingsKick: 'Your recorder on aibox1', drive: 'Google Drive', openFolder: 'Open folder', length: 'Length', speakers: 'Speakers',
     speakerNames: 'Speaker names', saveNames: 'Save names', transcript: 'Transcript', more: 'More', newSummary: 'Write a new summary',
-    openBox: 'Open on aibox1 (VPN)', none: 'No meetings yet.', noneHint: 'Connect your phone under Settings and record one.',
+    openBox: 'Open on aibox1 (VPN)', noneHead: 'No meetings yet', none1: 'Connect your phone.', none2: 'Record a meeting with it. Its summary shows up here.',
+    connected: (n) => `Done: ${n}`,
     today: 'Today', yesterday: 'Yesterday', local: 'Local', processing: 'Processing', failed: 'Failed', notYet: 'Not yet',
     noteLocal: 'Stays on aibox1.', noteWaiting: 'Waiting for the Drive upload.', noteDone: 'Stored in Drive.',
     queued: 'A new summary is on its way.', saved: 'Saved.',
@@ -308,22 +336,24 @@ const STR = {
     setup2: 'Or add your own MCP server for the recorder in Settings.',
     status: (s) => 'aibox1 · ' + (s.worker ? (s.current_job ? 'Working' : 'Ready') : 'Offline'), forDrive: (n) => ` · ${n} for Drive`,
     you: 'You', yourName: 'Your name', yourNameNote: 'Your phones show it, so you can see whose account they record into.',
-    phones: 'Phones', noPhones: 'No phone connected yet.', connectPhone: 'Connect a phone', phoneName: 'Name of the phone',
-    makeCode: 'Show the code', done: 'Done',
-    pair1: 'On the phone, connect to the VPN and install the app once:',
-    pair2: "Scan the code with the phone's camera. The app opens and connects to your account.",
-    pair3: 'The code is personal: whoever scans it records into your account. Remove a phone here to lock it out.',
-    apkLink: 'Android app (VPN only)', showLink: 'Show the link', androidLink: 'Android app: opens the app if it is installed',
-    webLink: 'Web app, for any phone: open it on the phone', remove: 'Remove', lastUsed: (d) => `Last used ${d}`,
-    unused: 'Not used yet', myPhone: 'My phone',
+    phones: 'Phones', noPhones: 'No phone connected yet.', connectPhone: 'Connect a phone', remove: 'Remove',
+    lastUsed: (d) => `Last used ${d}`, unused: 'Not used yet',
+    connectKick: 'Connect a phone', connectTitle: 'Scan with your phone', connectHere: 'Connect this phone',
+    step1: 'On the phone, turn on the VPN.', step2: "Point the phone's camera at the code and open the link.",
+    step3: 'Tap Open the app (or install it first), or record in the browser. Done.',
+    orType: 'Or type this code in the app', valid: (t) => `Valid until ${t}, once. Only for your account.`,
+    waiting: 'Waiting for your phone', connectedNow: (n) => `Connected: ${n}`, expired: 'This code has expired.',
+    newCode: 'Make a new code', done: 'Done',
   },
   de: {
     brand: 'Indie recorder', title: 'Meetings', back: 'Zurück', settings: 'Einstellungen', private: 'Ihre Meetings sehen nur Sie',
+    countN: (n) => (n === 1 ? '1 Meeting' : `${n} Meetings`),
     defaultDrive: 'Neue Aufnahmen in Google Drive ablegen', folder: 'Drive-Ordner', audio: 'Audio mit ablegen',
     storage: 'Ablage', storageNote: 'Aus: Aufnahmen, Transkripte und Zusammenfassungen bleiben auf aibox1. Sie können das für jedes Meeting ändern.',
     settingsKick: 'Ihr Recorder auf aibox1', drive: 'Google Drive', openFolder: 'Ordner öffnen', length: 'Länge', speakers: 'Sprecher',
     speakerNames: 'Namen der Sprecher', saveNames: 'Namen speichern', transcript: 'Transkript', more: 'Mehr', newSummary: 'Neue Zusammenfassung schreiben',
-    openBox: 'Auf aibox1 öffnen (VPN)', none: 'Noch keine Meetings.', noneHint: 'Verbinden Sie Ihr Telefon unter Einstellungen und nehmen Sie eines auf.',
+    openBox: 'Auf aibox1 öffnen (VPN)', noneHead: 'Noch keine Meetings', none1: 'Verbinden Sie Ihr Telefon.', none2: 'Nehmen Sie damit ein Meeting auf. Die Zusammenfassung erscheint hier.',
+    connected: (n) => `Erledigt: ${n}`,
     today: 'Heute', yesterday: 'Gestern', local: 'Lokal', processing: 'In Arbeit', failed: 'Fehler', notYet: 'Noch nicht',
     noteLocal: 'Bleibt auf aibox1.', noteWaiting: 'Wartet auf das Hochladen nach Drive.', noteDone: 'In Drive abgelegt.',
     queued: 'Eine neue Zusammenfassung ist unterwegs.', saved: 'Gespeichert.',
@@ -334,14 +364,14 @@ const STR = {
     setup2: 'Oder fügen Sie in den Einstellungen einen eigenen MCP-Server für den Recorder hinzu.',
     status: (s) => 'aibox1 · ' + (s.worker ? (s.current_job ? 'Arbeitet' : 'Bereit') : 'Nicht erreichbar'), forDrive: (n) => ` · ${n} für Drive`,
     you: 'Sie', yourName: 'Ihr Name', yourNameNote: 'Ihre Telefone zeigen ihn an, damit Sie sehen, in welches Konto sie aufnehmen.',
-    phones: 'Telefone', noPhones: 'Noch kein Telefon verbunden.', connectPhone: 'Telefon verbinden', phoneName: 'Name des Telefons',
-    makeCode: 'Code anzeigen', done: 'Fertig',
-    pair1: 'Auf dem Telefon das VPN verbinden und einmal die App installieren:',
-    pair2: 'Scannen Sie den Code mit der Kamera des Telefons. Die App öffnet sich und verbindet sich mit Ihrem Konto.',
-    pair3: 'Der Code ist persönlich: Wer ihn scannt, nimmt in Ihr Konto auf. Ein hier entferntes Telefon ist ausgesperrt.',
-    apkLink: 'Android-App (nur im VPN)', showLink: 'Link anzeigen', androidLink: 'Android-App: öffnet die App, wenn sie installiert ist',
-    webLink: 'Web-App, für jedes Telefon: auf dem Telefon öffnen', remove: 'Entfernen', lastUsed: (d) => `Zuletzt ${d}`,
-    unused: 'Noch nicht benutzt', myPhone: 'Mein Telefon',
+    phones: 'Telefone', noPhones: 'Noch kein Telefon verbunden.', connectPhone: 'Telefon verbinden', remove: 'Entfernen',
+    lastUsed: (d) => `Zuletzt ${d}`, unused: 'Noch nicht benutzt',
+    connectKick: 'Telefon verbinden', connectTitle: 'Mit dem Telefon scannen', connectHere: 'Dieses Telefon verbinden',
+    step1: 'Auf dem Telefon das VPN einschalten.', step2: 'Die Kamera des Telefons auf den Code richten und den Link öffnen.',
+    step3: 'App öffnen tippen (oder sie zuerst installieren) oder im Browser aufnehmen. Fertig.',
+    orType: 'Oder diesen Code in der App eingeben', valid: (t) => `Gültig bis ${t}, einmal. Nur für Ihr Konto.`,
+    waiting: 'Warte auf Ihr Telefon', connectedNow: (n) => `Verbunden: ${n}`, expired: 'Dieser Code ist abgelaufen.',
+    newCode: 'Neuen Code erstellen', done: 'Fertig',
   },
 };
 const t = (k) => (STR[LANG][k] !== undefined ? STR[LANG][k] : STR.en[k]);
@@ -350,7 +380,7 @@ const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':
 const pad = (n) => String(n).padStart(2, '0');
 document.querySelectorAll('[data-t]').forEach((el) => { el.textContent = t(el.dataset.t); });
 
-let SERVER = null, VIA = null, meetings = [], current = null, settings = null, view = 'home';
+let SERVER = null, VIA = null, meetings = [], current = null, settings = null, view = 'home', backTo = 'home', phoneList = null;
 
 /* The deployment's "indie-recorder" connector names the person to the recorder,
    so everyone sees only their own meetings. Without it (another deployment),
@@ -386,12 +416,13 @@ function fail(e) {
 
 /* One view at a time, like the phone: the bar says Back everywhere but the list. */
 function show(name) {
+  if (name !== 'connect') stopWaiting();
   view = name;
-  for (const v of ['setup', 'home', 'settings', 'detail']) $(v).hidden = v !== name;
+  for (const v of ['setup', 'home', 'connect', 'settings', 'detail']) $(v).hidden = v !== name;
   const top = name === 'home' || name === 'setup';
   $('brand').hidden = !top; $('back').hidden = top;
   document.body.classList.toggle('top', top);
-  $('gear').hidden = name === 'settings' || name === 'setup';
+  $('gear').hidden = name === 'settings' || name === 'setup' || name === 'connect';
   window.scrollTo(0, 0);
 }
 const on = (el) => el.getAttribute('aria-checked') === 'true';
@@ -418,9 +449,15 @@ function stateCell(m) {
 }
 
 function renderHome() {
+  $('count').textContent = meetings.length ? t('countN')(meetings.length) : '';
   if (!meetings.length) {
-    $('list').innerHTML = `<div class="empty"><span class="big ghost" aria-hidden="true">00:00</span>` +
-      `<p class="lead">${esc(t('none'))}</p><p class="note muted">${esc(t('noneHint'))}</p></div>`;
+    // the first steps, with the phone step done once a phone is connected
+    const phone = phoneList && phoneList[0];
+    $('list').innerHTML = `<div><h2 class="section">${esc(t('noneHead'))}</h2><div class="rows steps">` +
+      `<div class="row"><span class="num">01</span><span>${esc(t('none1'))}</span>` +
+      (phone ? `<span class="done">${esc(t('connected')(phone.name))}</span>` : `<button class="btn go" id="startConnect">${esc(t('connectPhone'))}</button>`) + '</div>' +
+      `<div class="row"><span class="num">02</span><span>${esc(t('none2'))}</span><span></span></div></div></div>`;
+    if ($('startConnect')) $('startConnect').addEventListener('click', () => openConnect('home'));
     return;
   }
   let html = '', open = null, n = 0;
@@ -508,6 +545,7 @@ async function load() {
     $('error').hidden = true;
     if (view === 'setup') show('home');
     settings = st.settings; meetings = list || [];
+    if (!meetings.length && VIA === 'connector' && phoneList === null) phoneList = await call('phones').catch(() => []);
     $('status').textContent = t('status')(st);
     $('statusExtra').textContent = st.pending_drive ? t('forDrive')(st.pending_drive) : '';
     $('status').classList.toggle('red', !st.worker);
@@ -536,13 +574,13 @@ function switchTo(el, apply) {
 }
 
 async function loadPhones() {
-  if (VIA === 'mcp') { $('pairBtn').hidden = true; $('youBox').hidden = true; return; }   // both need the connector (it knows the person)
+  if (VIA === 'mcp') { $('phonesBox').hidden = true; $('youBox').hidden = true; return; }   // both need the connector (it knows the person)
   try {
     const me = await call('whoami');
     if (document.activeElement !== $('myName')) $('myName').value = me.name || '';
-    const list = await call('phones') || [];
-    $('noPhones').hidden = list.length > 0;
-    $('phones').innerHTML = list.map((p, i) => {
+    phoneList = await call('phones') || [];
+    $('noPhones').hidden = phoneList.length > 0;
+    $('phones').innerHTML = phoneList.map((p, i) => {
       const last = p.last_used_at ? t('lastUsed')(new Date(p.last_used_at).toLocaleDateString(LANG)) : t('unused');
       return `<div class="row phone"><span class="num">${pad(i + 1)}</span><span>${esc(p.name)}</span>` +
         `<span class="side">${esc(last)}</span><button class="textbtn" data-id="${esc(p.id)}">${esc(t('remove'))}</button></div>`;
@@ -552,28 +590,56 @@ async function loadPhones() {
     }));
   } catch (e) { fail(e); }
 }
-function closePairing() { $('pair').hidden = true; $('pairOut').hidden = true; $('pairQr').innerHTML = ''; $('pairBtn').hidden = false; }
 
-$('gear').addEventListener('click', () => { show('settings'); closePairing(); loadPhones(); });
-$('back').addEventListener('click', () => { current = null; show('home'); renderHome(); });
-$('pairBtn').addEventListener('click', () => {
-  $('pair').hidden = false; $('pairBtn').hidden = true;
-  if (!$('pairName').value) $('pairName').value = t('myPhone');
-  $('pairName').focus();
-});
-$('pairGo').addEventListener('click', async () => {
+/* Connect a phone: one code, to scan or to type. It works once, for a quarter
+   of an hour; the box tells us when a phone has used it. */
+let waiting = null, expiry = null;
+function stopWaiting() { clearInterval(waiting); clearTimeout(expiry); waiting = expiry = null; }
+const onPhone = () => window.matchMedia('(max-width: 560px)').matches || /Android|iPhone|iPad/i.test(navigator.userAgent);
+
+async function openConnect(from) {
+  backTo = from || view;
+  show('connect');
+  $('wait').className = 'wait'; $('wait').textContent = t('waiting');
+  $('newCode').hidden = true;
   try {
-    const r = await call('pair_phone', { name: $('pairName').value });
-    $('pairQr').innerHTML = r.android_qr || r.qr;          // SVG made by the recorder
-    $('pairLink').textContent = r.android || ''; $('pairLink').href = r.android || '#';
-    $('pairLink').hidden = $('lAndroid').hidden = !r.android;
-    $('pairWeb').textContent = r.pair; $('pairWeb').href = r.pair;
-    $('apk').hidden = !r.apk_url; if (r.apk_url) $('apk').href = r.apk_url;
-    $('pairOut').hidden = false;
-    await loadPhones();
+    const before = new Set((await call('phones') || []).map((p) => p.id));
+    const r = await call('pair_phone');
+    $('qr').innerHTML = r.qr;                               // SVG made by the recorder
+    $('code').textContent = r.code;
+    const until = new Date(r.expires_at);
+    $('valid').textContent = t('valid')(time(until));
+    $('here').href = r.url;
+    $('here').hidden = !onPhone();
+    stopWaiting();
+    waiting = setInterval(async () => {
+      try {
+        const now = await call('phones') || [];
+        const fresh = now.find((p) => !before.has(p.id));
+        if (!fresh) return;
+        stopWaiting();
+        phoneList = now;
+        $('wait').className = 'wait ok'; $('wait').textContent = t('connectedNow')(fresh.name);
+        $('codeBox').hidden = true; $('here').hidden = true;
+      } catch (e) { /* the next round tries again */ }
+    }, 3000);
+    expiry = setTimeout(() => {
+      stopWaiting();
+      $('wait').className = 'wait ok'; $('wait').textContent = t('expired');
+      $('codeBox').hidden = true; $('here').hidden = true; $('newCode').hidden = false;
+    }, Math.max(0, until - Date.now()));
+    $('codeBox').hidden = false;
   } catch (e) { fail(e); }
+}
+
+$('gear').addEventListener('click', () => { show('settings'); loadPhones(); });
+$('back').addEventListener('click', () => {
+  if (view === 'connect' && backTo === 'settings') { show('settings'); loadPhones(); return; }
+  current = null; show('home'); load();
 });
-$('pairDone').addEventListener('click', closePairing);
+$('pairBtn').addEventListener('click', () => openConnect('settings'));
+$('newCode').addEventListener('click', () => openConnect(backTo));
+$('connectDone').addEventListener('click', () => $('back').click());
 switchTo($('defDrive'), (v) => updateSettings({ storage_default: v ? 'drive' : 'local' }));
 switchTo($('audio'), (v) => updateSettings({ drive_include_audio: v }));
 $('folder').addEventListener('change', () => updateSettings({ drive_folder: $('folder').value }).catch(fail));

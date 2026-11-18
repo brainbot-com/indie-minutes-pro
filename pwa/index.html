@@ -16,7 +16,7 @@
 <body>
 <main>
   <header class="bar">
-    <span id="barLeft"><span data-t="brand"></span><button id="back" data-t="back" hidden></button></span>
+    <span id="barLeft"><span class="brand" data-t="brand"></span><button id="back" data-t="back" hidden></button></span>
     <span class="end"><span id="status" data-t="notConnected"></span><button id="gear" type="button" data-t="settings" hidden></button></span>
   </header>
 
@@ -29,7 +29,7 @@
     </div>
     <form id="pairForm" class="view">
       <label class="cell"><span class="label" data-t="pairLabel"></span>
-        <input class="boxed" id="pairInput" autocomplete="off" placeholder="https://.../app/#pair=..." required></label>
+        <input class="boxed code" id="pairInput" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX" required></label>
       <button class="btn go block" data-t="connect"></button>
     </form>
     <p class="error" id="pairError"></p>

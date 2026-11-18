@@ -102,11 +102,9 @@ records with the screen off.
    certificate, CA certificate. Compare the SHA-256 fingerprint with the one
    `deploy/make-ca.sh` printed. Android then shows "network may be
    monitored"; that refers to this CA.
-3. In brainbot:agent command, Meetings, Settings, Connect a phone; under
-   "Show the link", open the web app link on the phone. That opens the
-   recorder app (`/app/`) connected to your account. (An admin can also make
-   a token on the recorder's Devices page and paste it into the app.) Install
-   it from the browser's menu (Add to home screen).
+3. Connect it (see "Connecting a phone"): scan the code from Meetings and
+   choose "Record in the browser", or type the code on the web app's first
+   screen. Install the web app from the browser's menu (Add to home screen).
 4. Record, Pause, Resume, Stop. A pause releases the microphone (the browser's
    mic indicator goes off) and the clock counts recorded time only; the
    waveform shows the last seconds, grey while paused. Chunks are stored on
@@ -120,6 +118,42 @@ The phone simulator streams any audio file through the same upload API (Opus
 in 30 s chunks by default): `python3 sim/phone_sim.py --cacert secrets/tls/ca.crt
 --token-file <token> meeting.wav --wait`. `--flaky 0.3` drops uploads on purpose
 to exercise the resume path.
+
+## Connecting a phone
+
+One code for every phone and both apps. In brainbot:agent command, Meetings,
+Connect a phone (on the empty list, or in Settings) shows a QR code and the
+same code to type, for example `K7Q4-M2XB`:
+
+1. The phone (VPN on) scans the QR code. It opens the connect page,
+   `https://ai-knowledge.mz.brainbot.com/indie-recorder/connect#K7Q4M2XB`,
+   through brain-tls, so the browser trusts it without the box's CA.
+2. The page says whose account the phone will record into. On Android:
+   "Open the app" (or "Install the app" first, then "Open the app"); the app
+   asks once more, "Record into Luis's account", and connects. On any phone:
+   "Record in the browser" opens the web app, which connects at once.
+3. The Meetings app shows "Connected: Pixel 8" (the phone names itself) and
+   lists the phone under Settings, Phones, where "Remove" locks it out.
+
+Without a camera at hand, type the code in the Android app's or the web app's
+first screen. On the phone that shows brainbot:agent command itself, the
+Meetings app offers "Connect this phone" instead of the QR code.
+
+- A code works once, for 15 minutes, and a new one replaces the person's
+  older ones. It carries no token, address or certificate: the phone gets
+  its own token, the box's address and its CA when it spends the code
+  (`GET /api/v1/pair/{code}` shows whose it is, `POST /api/v1/pair` spends
+  it). 30 wrong codes in 10 minutes close the door for everyone for a while
+  (8 characters from 31: about 10^12 codes).
+- Recordings go from the phone straight to the box (`https://10.1.9.7:8443`,
+  the app pins its CA); only the connect page, the two code endpoints, the
+  APK and the page's stylesheet pass through ai-knowledge. The web app still
+  runs on the box's own address, so a phone needs the box's CA once to use it
+  (see "Phone web app").
+- Settings: `CONNECT_URL` (where the code's link points; on aibox1 the
+  brain-tls address, default the box's `/connect`), `WEBAPP_URL`, `APK_URL`.
+  An admin makes a code on the Devices page or with `recorder.cli connect
+  --user <id>`.
 
 ## Web view
 
@@ -270,7 +304,8 @@ through the phone simulator into the running recorder, end to end.
   again.
 - Server certificate: 397 days; renew with `deploy/make-ca.sh secrets/tls`
   (keeps the CA) and `docker compose restart caddy`. The CA lasts 10 years.
-- Tokens: `docker compose exec recorder python -m recorder.cli token add|list|revoke`.
+- Tokens: `docker compose exec recorder python -m recorder.cli token add|list|revoke`
+  (phones connect with codes, see above; tokens are for agents).
 - People: `recorder.cli user add|list|claim|remove`. A person appears on their
   first visit to the Meetings app; `claim` gives a token, and the meetings its
   phone recorded, to a person; `remove` revokes their phones and deletes them
@@ -355,22 +390,22 @@ Settings.
   while recording.
 - A live waveform (the spec under Design) replaces the level meter.
 - Says when a call takes the microphone.
-- Pairing: in brainbot:agent command, Meetings, Settings, Connect a phone shows
-  a QR code for the app (`indierecorder://pair?...`; an admin's Devices page
-  has one too) that carries the address, the phone's token and the box's CA
-  certificate. The token belongs to the person who made the code: the Ready
-  screen shows "For <their name>" (from `/api/v1/me`, read again whenever the
-  app comes to the front), or the phone's name while they have set none. The app trusts that CA for the box and nothing
-  else, so the phone needs no CA in its settings. The token is encrypted with
-  an Android Keystore key; recordings and token are excluded from cloud backup.
+- Connecting: see "Connecting a phone". The app gets the box's address and
+  CA certificate with its token and trusts that CA for the box and nothing
+  else, so the phone needs no CA in its settings. The Ready screen shows
+  "For <their name>" (from `/api/v1/me`, read again whenever the app comes to
+  the front), or the phone's name while they have set none. The token is
+  encrypted with an Android Keystore key; recordings and token are excluded
+  from cloud backup.
 - Per recording a title and "Save to Google Drive" (the box's default); the
   list shows upload and processing state; a meeting shows its summary and the
   Drive switch. English and German, light and dark.
 
-Install: on the phone (VPN on) open `http://10.1.9.7:8480/indie-recorder.apk`,
-allow installs from the browser, install. Then scan the code from Meetings,
-Settings, Connect a phone with the camera. Inter is bundled under the SIL Open
-Font License (`assets/licenses/Inter-OFL.txt` in the APK).
+Install: the connect page offers it ("Install the app"), from
+`https://ai-knowledge.mz.brainbot.com/indie-recorder/indie-recorder.apk` (VPN
+on; Android asks to allow installs from the browser; the same file is at
+`http://10.1.9.7:8480/indie-recorder.apk`). Inter is bundled under the SIL
+Open Font License (`assets/licenses/Inter-OFL.txt` in the APK).
 
 Build and test, on aibox1 from `~/indie-recorder`:
 

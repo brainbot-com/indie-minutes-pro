@@ -11,9 +11,10 @@ const STR = {
   en: {
     brand: 'Indie recorder', back: 'Back', notConnected: 'Not connected', setUp: 'Set up', connectTitle: 'Connect to your recorder',
     pair1: 'In brainbot:agent command, open Meetings, then Settings, then Connect a phone.',
-    pair2: 'Under "Show the link", open the web app link on this phone. It connects this page to your account.',
-    pair3: 'No way to open it? Paste the link, or a token from the box, below.',
-    pairLabel: 'Link or token', connect: 'Connect',
+    pair2: "Scan the code with this phone's camera and choose Record in the browser.",
+    pair3: 'No camera at hand? Type the code here.',
+    pairLabel: 'Code', connect: 'Connect', pairUsed: 'This code is used or expired. Make a new one in Meetings.',
+    pairSlow: 'Too many wrong codes. Wait a few minutes.',
     pairNote: 'This page talks only to the box, over the VPN. Recordings go to this box and nowhere else.',
     pairBad: 'The box did not accept this token.', pairNoBox: 'Cannot reach the box. Is the VPN on?',
     pairAgain: "The box no longer accepts this phone's token. Connect it again.",
@@ -36,9 +37,10 @@ const STR = {
   de: {
     brand: 'Indie recorder', back: 'Zurück', notConnected: 'Nicht verbunden', setUp: 'Einrichten', connectTitle: 'Mit Ihrem Recorder verbinden',
     pair1: 'Öffnen Sie in brainbot:agent command Meetings, dann Einstellungen, dann Telefon verbinden.',
-    pair2: 'Öffnen Sie unter "Link anzeigen" den Link zur Web-App auf diesem Telefon. Er verbindet diese Seite mit Ihrem Konto.',
-    pair3: 'Lässt er sich nicht öffnen? Fügen Sie den Link oder ein Token der Box unten ein.',
-    pairLabel: 'Link oder Token', connect: 'Verbinden',
+    pair2: 'Scannen Sie den Code mit der Kamera dieses Telefons und wählen Sie Im Browser aufnehmen.',
+    pair3: 'Keine Kamera zur Hand? Geben Sie den Code hier ein.',
+    pairLabel: 'Code', connect: 'Verbinden', pairUsed: 'Dieser Code ist benutzt oder abgelaufen. Erstellen Sie in Meetings einen neuen.',
+    pairSlow: 'Zu viele falsche Codes. Bitte einige Minuten warten.',
     pairNote: 'Diese Seite spricht nur mit der Box, über das VPN. Aufnahmen gehen an diese Box und nirgendwo sonst hin.',
     pairBad: 'Die Box hat dieses Token nicht angenommen.', pairNoBox: 'Die Box ist nicht erreichbar. Ist das VPN an?',
     pairAgain: 'Die Box nimmt das Token dieses Telefons nicht mehr an. Bitte neu verbinden.',
@@ -496,11 +498,37 @@ async function render() {
   });
 }
 
-// A link from the Meetings app (".../app/#pair=TOKEN") or a bare token.
+// A link from an older pairing (".../app/#pair=TOKEN") or a bare token.
 function tokenFrom(text) {
   const m = /#pair=([^&\s]+)/.exec(text || '');
   return m ? decodeURIComponent(m[1]) : (text || '').trim();
 }
+
+// A connect code, typed ("K7Q4-M2XB") or in a link ("...#code=K7Q4M2XB", "...connect#K7Q4M2XB").
+function codeFrom(text) {
+  const tail = String(text || '').split('#').pop().replace(/^code=/, '');
+  const code = tail.toUpperCase().replace(/[^23456789ABCDEFGHJKMNPQRSTUVWXYZ]/g, '');
+  return code.length === 8 && !/irt_/i.test(text) ? code : null;
+}
+
+const deviceName = () => {
+  const ua = navigator.userAgent;
+  const where = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? 'Android' : 'computer';
+  return LANG === 'de' ? `Browser (${where})` : `Browser on ${where}`;
+};
+
+// Spends a connect code: the box answers with this phone's own token.
+async function redeem(code) {
+  const r = await fetch('/api/v1/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code, device: deviceName() }) }).catch(() => null);
+  if (!r) { show('pair', t('pairNoBox')); return false; }
+  if (r.status === 404) { show('pair', t('pairUsed')); return false; }
+  if (r.status === 429) { show('pair', t('pairSlow')); return false; }
+  if (!r.ok) { show('pair', t('pairNoBox')); return false; }
+  return pair((await r.json()).token);
+}
+
+const connect = text => (codeFrom(text) ? redeem(codeFrom(text)) : pair(tokenFrom(text)));
 
 async function pair(tok) {
   const r = await fetch('/api/v1/me', { headers: { Authorization: 'Bearer ' + tok } }).catch(() => null);
@@ -545,12 +573,12 @@ async function boot() {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   $('pairForm').onsubmit = async e => {
     e.preventDefault();
-    if (await pair(tokenFrom($('pairInput').value))) boot();
+    if (await connect($('pairInput').value)) boot();
   };
-  if (location.hash.startsWith('#pair=')) {
-    const tok = tokenFrom(location.hash);
+  if (location.hash.startsWith('#pair=') || location.hash.startsWith('#code=')) {
+    const link = location.hash;
     history.replaceState(null, '', location.pathname);
-    await pair(tok);
+    await connect(link);
   }
   $('server').textContent = location.host;
   checkBox();
