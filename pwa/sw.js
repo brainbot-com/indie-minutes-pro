@@ -1,9 +1,9 @@
 // App shell cache so the recorder opens without a network. Uploads are not
 // handled here: the page keeps unsent chunks in IndexedDB and retries.
-const CACHE = 'indie-recorder-v4';
+const CACHE = 'indie-recorder-v5';
 // The app lives at /app/ on the box or /indie-recorder/app/ behind brain-tls: paths from its scope.
 const SCOPE = new URL(self.registration.scope).pathname;
-const SHARED = new Set(['static/swiss.css', 'static/Inter.woff2'].map(p => SCOPE.replace(/app\/$/, '') + p));
+const SHARED = new Set(['static/swiss.css', 'static/Inter.woff2', 'static/meetings.css', 'static/meetings.js'].map(p => SCOPE.replace(/app\/$/, '') + p));
 const SHELL = ['./', 'index.html', 'app.js', 'app.css', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', ...SHARED];
 
 self.addEventListener('install', e => {

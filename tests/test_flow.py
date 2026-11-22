@@ -634,8 +634,15 @@ def test_hints_for_naming_speakers(app, client, tmp_path, monkeypatch):
     assert "Speaker 1" in hedged["refused"]                                   # refused, and the earlier one stays
     one = next(c for c in call("get_meeting", {"meeting_id": mid, "include_transcript": False})["speakers"] if c["label"] == "Speaker 1")
     assert [(x["name"], x["by"]) for x in one["suggestions"]] == [("Anna", "agent")]
+    agent = {"Authorization": f"Bearer {service}", "X-Indie-User": "ext-cleo", "X-Indie-Caller": "agent"}
+    renamed = client.post("/api/v1/indiechat", json={"op": "rename_speakers", "args": {"meeting_id": mid, "names": {"Speaker 1": "Anna"}}},
+                          headers=agent)
+    assert renamed.status_code == 400 and app.state.store.names(mid).get("Speaker 1") != "Anna"   # an agent suggests, never renames
     clip = client.get(one["clip_url"].replace("https://box.test", ""))
     assert clip.status_code == 200 and clip.headers["content-type"] == "audio/wav"
+    part = client.get(one["clip_url"].replace("https://box.test", ""), headers={"Range": "bytes=0-99"})
+    assert part.status_code == 206 and len(part.content) == 100 and part.content == clip.content[:100]   # what Safari needs
+    assert part.headers["content-range"] == f"bytes 0-99/{len(clip.content)}"
     w = wave.open(io.BytesIO(clip.content))
     assert w.getframerate() == 16000 and 0 < w.getnframes() / 16000 <= 7.01
     plain = wave.open(io.BytesIO(read_bytes(app.state.store.audio(mid))))
@@ -643,6 +650,35 @@ def test_hints_for_naming_speakers(app, client, tmp_path, monkeypatch):
     start = profile(app.state.store.transcript(mid))["Speaker 1"]["clip"]["s"]
     plain.setpos(int(start * 16000))
     assert w.readframes(w.getnframes()) == plain.readframes(w.getnframes())
+
+
+def test_a_phone_sees_all_of_its_persons_meetings(app, client, tmp_path):
+    """The phone apps call the same ops as the app in brainbot:agent command, for
+    their own person: every meeting of theirs, from whichever phone, with its
+    transcript."""
+    service = create_token(app.state.db, "brainbot:agent command", "agent", trusts_identity=True)
+    h = {"Authorization": f"Bearer {service}", "X-Indie-User": "ext-dana", "X-Indie-Caller": "user"}
+
+    def phone():
+        offer = client.post("/api/v1/indiechat", json={"op": "pair_phone", "args": {}}, headers=h).json()["result"]
+        return {"Authorization": "Bearer " + redeem(client, offer["url"]).json()["token"]}
+
+    one, two = phone(), phone()
+    mid, _ = make_meeting(app, client, tmp_path, headers=one)
+    other, _ = make_meeting(app, client, tmp_path)                            # a phone of nobody's
+
+    def op(name, args=None, headers=two):
+        return client.post("/api/v1/app", json={"op": name, "args": args or {}}, headers=headers)
+
+    assert [m["id"] for m in op("list_meetings").json()["result"]] == [mid]     # recorded with the other phone
+    m = op("get_meeting", {"meeting_id": mid, "include_transcript": True}).json()["result"]
+    assert m["transcript_md"] and m["summary_md"] and [c["label"] for c in m["speakers"]]
+    assert op("get_meeting", {"meeting_id": other}).status_code == 400
+    assert op("rename_speakers", {"meeting_id": mid, "names": {"Speaker 1": "Dana"}}).json()["result"]["names"]["Speaker 1"] == "Dana"
+    for name in ("pending_work", "pair_phone", "agent_setup", "suggest_speakers", "ack_outbox_item"):
+        assert op(name).status_code == 400, name
+    nobody = {"Authorization": f"Bearer {create_token(app.state.db, 'old phone', 'device')}"}
+    assert op("list_meetings", headers=nobody).status_code == 403
 
 
 def test_a_suggestion_is_a_name():

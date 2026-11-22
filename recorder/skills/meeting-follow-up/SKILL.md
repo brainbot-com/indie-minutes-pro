@@ -52,9 +52,11 @@ Drive is the person's own, through your Drive tools.
      about the people, projects and earlier meetings (your memory, the wiki,
      `list_meetings` and `get_meeting` for earlier ones): a short TL;DR,
      decisions, action items (owner and due date only where they were said),
-     open questions. Keep the labels "Speaker 1", "Speaker 2" unless names
-     are set; if you are fairly sure who a speaker is, say so in the note, do
-     not rename. Never invent decisions, owners or dates.
+     open questions. Call speakers by their labels ("Speaker 2") or by the
+     names the person set, never by a name you only guess, not even in
+     brackets: the app shows the summary as it is, and a guess there reads
+     like a set name. Guesses go into suggest_speakers (step 3). Never invent
+     decisions, owners or dates.
    - Store it: `{"op": "update_summary", "args": {"meeting_id": ID, "markdown": "...",
      "action_items": [{"text": "...", "owner": "...", "due": "..."}], "note": "what you changed and which context you used"}}`
      (markdown without a title line).

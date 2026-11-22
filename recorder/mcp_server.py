@@ -280,6 +280,8 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
                 threading.Thread(target=followup.run, kwargs={"meeting_ids": [mid]}, daemon=True).start()
             return {"meeting_id": mid, "storage": args["storage"]}
         if name == "rename_speakers":
+            if author(who) == "agent":
+                raise ToolError("an agent suggests names with suggest_speakers; only the person names speakers")
             names = args.get("names") or {}
             if not isinstance(names, dict):
                 raise ToolError("names must be an object")

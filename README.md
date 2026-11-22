@@ -142,8 +142,20 @@ records with the screen off.
    the phone (IndexedDB) until the box has them, so a dead network only delays
    the upload. The app keeps the screen on with a Screen Wake Lock while
    recording; recording with the screen off is the main job of the native app
-   (see below). The list shows upload and processing state and links to the
-   summary.
+   (see below).
+5. Meetings (the button under Record) lists all of the person's meetings on
+   the box, from any of their phones, with what this phone has not handed
+   over yet on top. A meeting opens with its summary, speaker names (play a
+   speaker's voice, name them) and the transcript: the same views and words as
+   indie-recorder in brainbot:agent command (see Design). Settings has Google
+   Drive (connect or disconnect).
+
+The phone apps reach those meetings with the same ops as indie-recorder,
+for the person their token belongs to: `POST /api/v1/app {op, args}` with the
+device token (`list_meetings`, `get_meeting` with the transcript,
+`rename_speakers`, `set_storage`, `new_summary`, `status`, the settings, Google
+Drive). Not the agent's ops and not pairing; a phone that belongs to nobody
+gets 403. Only a person names speakers: an agent suggests (`suggest_speakers`).
 
 The phone simulator streams any audio file through the same upload API (Opus
 in 30 s chunks by default): `python3 sim/phone_sim.py --cacert secrets/tls/ca.crt
@@ -506,6 +518,11 @@ sections and 1px rules between numbered rows, square switches and buttons.
   tokens in its Compose theme and the same Inter cuts in `res/font`.
 - Inter 4.1, subset to Latin (`recorder/static/Inter.woff2`, 53 KB), SIL Open
   Font License (`recorder/static/Inter-OFL.txt`, also in the APK).
+- The meeting views, the same in every app: the person's meetings by day, and
+  a meeting with its summary, speaker cards and the transcript as turns.
+  `recorder/static/meetings.js` and `meetings.css` draw them; the PWA loads
+  them from the box, `inline_assets.py` puts them into the indie-recorder app,
+  and the Android app mirrors them in Compose with the same order and words.
 - The waveform, the same in the PWA and the Android app: one bar per 100 ms of
   recorded audio, bar 3 px wide every 5 px, the loudest sample of the window
   mapped from -50 dBFS (2 px) to 0 dBFS (88 px), centred, newest at the right;
