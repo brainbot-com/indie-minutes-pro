@@ -83,7 +83,8 @@ class Offer(val person: String?, val box: String, val boxUrl: String, val caDer:
 /** The phone's own token and what to show about it, from spending a code (POST /api/v1/pair). */
 class Joined(val cfg: BoxConfig, val person: String?, val box: String)
 
-private fun text(o: JSONObject, key: String): String? = o.optString(key).takeIf { it.isNotBlank() && it != "null" }
+/** A string field, or null when it is missing, empty or JSON null. */
+fun text(o: JSONObject, key: String): String? = o.optString(key).takeIf { it.isNotBlank() && it != "null" }
 
 /**
  * A name for this phone in the person's list of phones: the name its owner gave it ("Luis's S24",

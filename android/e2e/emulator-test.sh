@@ -270,7 +270,7 @@ record "Emulator test"
 sleep 20; shots 2-recording
 wait_final "Emulator test" 240
 sealed "Emulator test"
-if tap_text "Recordings"; then sleep 2; shot 3-list; A shell input keyevent 4; sleep 2; else echo "no Recordings button on the screen"; fi
+if tap_text "Meetings"; then sleep 2; shot 3-list; A shell input keyevent 4; sleep 2; else echo "no Meetings button on the screen"; fi
 
 say "2. network cut during the recording: chunks wait on the phone, sealed"
 wait_box_free
@@ -328,7 +328,7 @@ sealed "Emulator pause test"
 
 say "5. a small phone with large text: 360 x 640 dp, font scale 1.3, English and German"
 A shell wm size 1080x1920; A shell wm density 480; A shell settings put system font_scale 1.3
-fit_check() {  # name, texts: nothing on the page scrolls; the texts show, the last one (the Recordings button) above the navigation bar
+fit_check() {  # name, texts: nothing on the page scrolls; the texts show, the last one (the Meetings button) above the navigation bar
 	A shell uiautomator dump /sdcard/ui.xml > /dev/null
 	A shell cat /sdcard/ui.xml | python3 -c "
 import re, sys
@@ -338,7 +338,7 @@ texts = set(re.findall(r'(?:text|content-desc)=\"([^\"]+)\"', x))
 want = [w for w in sys.argv[2:] if w not in texts]
 b = re.search(r'text=\"' + re.escape(sys.argv[-1]) + r'\"[^>]*bounds=\"\[\d+,\d+\]\[\d+,(\d+)\]\"', x)
 on = b is not None and int(b[1]) <= 1920 - 144
-print(sys.argv[1] + ':', len(areas), 'scrollable areas,', 'the Recordings button on the screen' if on else 'the Recordings button NOT on the screen',
+print(sys.argv[1] + ':', len(areas), 'scrollable areas,', 'the Meetings button on the screen' if on else 'the Meetings button NOT on the screen',
       '| labels shown' if not want else '| MISSING ' + ', '.join(want))
 sys.exit(0 if not areas and on and not want else 1)" "$1" "${@:2}" || { echo "fit check failed: $1"; FIT_FAILED=1; }
 }
@@ -347,10 +347,10 @@ for lang in en de; do
 	if [ $lang = de ]; then
 		A shell cmd locale set-app-locales $PKG --locales de-DE
 		A shell am force-stop $PKG; A shell am start -W -n $PKG/.MainActivity > /dev/null; sleep 3
-		L_REC=Aufnehmen; L_PAUSE=Pause; L_RESUME=Weiter; L_STOP=Stopp; L_LIST=Aufnahmen
+		L_REC=Aufnehmen; L_PAUSE=Pause; L_RESUME=Weiter; L_STOP=Stopp; L_LIST=Meetings
 	else
 		A shell am start -W -n $PKG/.MainActivity > /dev/null; sleep 3
-		L_REC=Record; L_PAUSE=Pause; L_RESUME=Resume; L_STOP=Stop; L_LIST=Recordings
+		L_REC=Record; L_PAUSE=Pause; L_RESUME=Resume; L_STOP=Stop; L_LIST=Meetings
 	fi
 	shot fit-ready-$lang; fit_check "ready ($lang)" "$L_REC" "$L_LIST"
 	wait_box_free
@@ -362,7 +362,7 @@ for lang in en de; do
 done
 A shell cmd locale set-app-locales $PKG --locales en-US
 A shell wm size reset; A shell wm density reset; A shell settings put system font_scale 1.0
-[ "$FIT_FAILED" = 0 ] && echo "fit: no page scroll, every label and the Recordings button shown on Ready, Recording and Paused, in English and German" ||
+[ "$FIT_FAILED" = 0 ] && echo "fit: no page scroll, every label and the Meetings button shown on Ready, Recording and Paused, in English and German" ||
 	echo "fit: FAILED (see above)"
 
 say "the meetings on the box"
@@ -413,12 +413,12 @@ sys.exit(1 if bad else 0)"
 LEFT=$(A shell "run-as $PKG sh -c 'ls files/recordings/*/'" | tr -d '\r' | grep -c '\.aac' || true)
 [ "$LEFT" = 0 ] && echo "no audio left on the phone" || { echo "$LEFT audio files left on the phone"; exit 1; }
 
-say "the recordings, a summary and the settings on the phone"
+say "the meetings, one with its summary, speakers and transcript, and the settings on the phone"
 A shell am start -n $PKG/.MainActivity > /dev/null
 sleep 3
-if tap_text "Recordings"; then sleep 3; shots 6-recordings; else echo "no Recordings button on the screen"; fi
+if tap_text "Meetings"; then sleep 3; shots 6-meetings; else echo "no Meetings button on the screen"; fi
 if tap_text "Emulator test"; then sleep 4; shots 6-meeting; else echo "no row for the meeting on the screen"; fi
-A shell input keyevent 4; sleep 2                         # back to the recordings
+A shell input keyevent 4; sleep 2                         # back to the meetings
 A shell input keyevent 4; sleep 2                         # back to the main screen
 if tap_text "SETTINGS"; then sleep 2; shots 7-settings; else echo "no settings link on the screen"; fi
 

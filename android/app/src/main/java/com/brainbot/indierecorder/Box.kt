@@ -157,6 +157,9 @@ object Keystore {
 class BoxApi(val cfg: BoxConfig) {
     class HttpError(val code: Int, val body: String) : IOException("HTTP $code: ${body.take(200)}")
 
+    /** An op the box refused: 401 the phone is no longer accepted, 403 it belongs to nobody, 400 its own reason. */
+    class OpError(val code: Int, message: String) : IOException(message)
+
     private val http: OkHttpClient = client(cfg.caDer)
     private fun send(method: String, path: String, body: ByteArray? = null, type: String = "application/json",
                      headers: Map<String, String> = emptyMap()): String {
@@ -172,10 +175,36 @@ class BoxApi(val cfg: BoxConfig) {
 
     private fun post(path: String, o: JSONObject) = JSONObject(send("POST", path, o.toString().toByteArray()))
 
+    /**
+     * One of the ops every indie-recorder app uses (POST /api/v1/app): the same ones the
+     * indie-recorder app in brainbot:agent command calls through its connector, here for the
+     * person this phone records for. Its result: a JSONObject, a JSONArray or a string.
+     */
+    fun op(name: String, args: JSONObject = JSONObject()): Any? {
+        val text = try {
+            send("POST", "/api/v1/app", JSONObject().put("op", name).put("args", args).toString().toByteArray())
+        } catch (e: HttpError) {
+            throw OpError(e.code, runCatching { JSONObject(e.body).optString("error") }.getOrNull()?.ifBlank { null } ?: "HTTP ${e.code}")
+        }
+        val j = JSONObject(text)
+        if (!j.optBoolean("ok")) throw OpError(400, j.optString("error"))
+        return j.opt("result")
+    }
+
+    fun obj(name: String, args: JSONObject = JSONObject()) = op(name, args) as JSONObject
+
+    /** A file of a meeting by its signed link's path (a speaker's clip), from the box itself. */
+    fun bytes(path: String): ByteArray {
+        val r = Request.Builder().url(cfg.url + path).build()
+        http.newCall(r).execute().use { res ->
+            if (!res.isSuccessful) throw HttpError(res.code, res.body?.string() ?: "")
+            return res.body?.bytes() ?: ByteArray(0)
+        }
+    }
+
     fun health(): JSONObject = JSONObject(send("GET", "/api/v1/health"))
     fun settings(): JSONObject = JSONObject(send("GET", "/api/v1/settings"))
     fun recording(rid: String): JSONObject = JSONObject(send("GET", "/api/v1/recordings/$rid"))
-    fun meeting(mid: String): JSONObject = JSONObject(send("GET", "/api/v1/meetings/$mid"))
 
     /** Whom this phone records for; null from a box that does not tell yet (404). */
     fun me(): JSONObject? = try {
@@ -195,10 +224,6 @@ class BoxApi(val cfg: BoxConfig) {
 
     fun finalize(rid: String, total: Int, title: String): JSONObject = post("/api/v1/recordings/$rid/finalize",
         JSONObject().put("total_chunks", total).put("title", title.ifBlank { JSONObject.NULL }))
-
-    fun setStorage(mid: String, storage: String) {
-        send("PUT", "/api/v1/meetings/$mid/storage", JSONObject().put("storage", storage).toString().toByteArray())
-    }
 
     companion object {
         /** HTTPS that trusts only the box's own CA; a box that sent none is checked against the phone's trust store. */

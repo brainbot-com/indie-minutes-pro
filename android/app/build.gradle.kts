@@ -13,8 +13,8 @@ android {
         applicationId = "com.brainbot.indierecorder"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.4.1"
+        versionCode = 6
+        versionName = "0.5.0"
         // Where a typed connect code is looked up: the recorder behind an address with a public
         // certificate (brain-tls on ai-knowledge), so the lookup needs no CA of its own.
         val connectBase = System.getenv("CONNECT_BASE") ?: "https://ai-knowledge.mz.brainbot.com/indie-recorder"

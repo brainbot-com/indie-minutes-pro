@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -55,6 +56,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
@@ -68,6 +70,7 @@ import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -82,6 +85,7 @@ import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.layout.FirstBaseline
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layoutId
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -92,6 +96,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -107,6 +113,7 @@ import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
@@ -116,15 +123,16 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
-import java.time.Instant
+import java.io.File
+import java.time.LocalDate
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.time.format.FormatStyle
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
@@ -394,7 +402,7 @@ private fun Section(title: String) = Column {
 }
 
 @Composable
-private fun NumberedRow(n: Int, text: String, side: String? = null) {
+private fun NumberedRow(n: Int, text: AnnotatedString, side: String? = null) {
     Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("%02d".format(n), Modifier.width(34.dp).alignByBaseline(), fontSize = 15.sp, fontWeight = FontWeight.W700)
         Text(text, Modifier.weight(1f).alignByBaseline(), fontSize = 15.sp, lineHeight = 21.sp)
@@ -474,6 +482,20 @@ private fun WideButton(label: String, enabled: Boolean, onClick: () -> Unit) {
     }
 }
 
+/** A row's red action, as the web apps' .btn.go: the word, then a white square. */
+@Composable
+private fun RedButton(label: String, onClick: () -> Unit) {
+    val p = pal()
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    Row(Modifier.heightIn(min = 44.dp).background(if (pressed) p.redDark else p.red)
+        .clickable(source, indication = null, role = Role.Button, onClick = onClick).padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(label, color = p.onRed, fontSize = 15.sp, fontWeight = FontWeight.W700)
+        Box(Modifier.size(12.dp).background(p.onRed))
+    }
+}
+
 @Composable
 private fun OutlineButton(label: String, onClick: () -> Unit) {
     val p = pal()
@@ -487,18 +509,18 @@ private fun OutlineButton(label: String, onClick: () -> Unit) {
 }
 
 /**
- * The way from the main screen to the recordings, an outlined button as in the web app: the word on
+ * The way from the main screen to the meetings, an outlined button as in the web app: the word on
  * the left, how many there are and an arrow on the right, and before them in red what is under way
  * ("1 uploading"). Where one line is too narrow for all of it (large text), the red note goes under
  * the word, so nothing is cut off.
  */
 @Composable
-private fun RecordingsButton(count: Int, busy: String?, height: Dp, onClick: () -> Unit) {
+private fun MeetingsButton(count: Int, busy: String?, height: Dp, onClick: () -> Unit) {
     val p = pal()
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
     val ink = if (pressed) p.paper else p.ink
-    val word = stringResource(R.string.recordings)
+    val word = stringResource(R.string.meetings)
     Layout(contents = listOf(
         { Text(word, color = ink, fontSize = 15.sp, lineHeight = 20.sp, fontWeight = FontWeight.W700, maxLines = 1, softWrap = false) },
         { busy?.let { Text(it, color = p.red, fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.W700, maxLines = 1, softWrap = false) } },
@@ -605,18 +627,34 @@ private val boxState = MutableStateFlow<String?>(null)
 /** The box's name ("aibox1") from its health answer; null until it has said. */
 private val boxName = MutableStateFlow<String?>(null)
 
-/** How far the box is with the meetings the phone's recordings became ("done", "failed", ...), by meeting id. */
-private val meetingStates = mutableStateMapOf<String, String>()
+/** The person's meetings as the box last listed them (list_meetings), from any of their phones; null before the first answer. */
+private val meetingList = MutableStateFlow<List<MeetingRow>?>(null)
 
-/** Asks the box about the meetings it is not done with yet. */
-private suspend fun askStates(api: BoxApi, items: List<LocalRecording>) {
-    for (r in items) {
-        val mid = r.meetingId ?: continue
-        if (meetingStates[mid] == "done" || meetingStates[mid] == "failed") continue
-        withContext(Dispatchers.IO) { runCatching { api.meeting(mid).optString("state") } }
-            .onSuccess { meetingStates[mid] = it }
-    }
+/** Why the list could not be had: "unreachable", "rejected" (the box no longer takes the phone), "nobody" (the phone is no one's). */
+private val listProblem = MutableStateFlow<String?>(null)
+
+/** Asks the box for the person's meetings: all of them, whichever phone recorded them. */
+private suspend fun loadMeetings(api: BoxApi) {
+    withContext(Dispatchers.IO) { runCatching { MeetingRow.list(api.op("list_meetings") as JSONArray) } }
+        .onSuccess { meetingList.value = it; listProblem.value = null }
+        .onFailure { listProblem.value = problemOf(it) }
 }
+
+/** What went wrong with an op, as the screens say it. */
+private fun problemOf(e: Throwable): String = when ((e as? BoxApi.OpError)?.code) {
+    401 -> "rejected"
+    403 -> "nobody"
+    400 -> "refused"
+    else -> "unreachable"
+}
+
+@Composable
+private fun problemText(problem: String): String = stringResource(when (problem) {
+    "nobody" -> R.string.list_nobody
+    "rejected" -> R.string.box_rejected
+    "refused" -> R.string.meeting_gone
+    else -> R.string.list_unreachable
+})
 
 @Composable
 private fun boxText(box: String?): Pair<String, Color> = when (box) {
@@ -648,8 +686,8 @@ private suspend fun learnName(ctx: Context, api: BoxApi) {
 
 private sealed interface Screen {
     data object Home : Screen
-    data object Recordings : Screen
-    data class Detail(val meetingId: String) : Screen
+    data object Meetings : Screen
+    data class Meeting(val meetingId: String) : Screen
     data object Settings : Screen
 }
 
@@ -657,15 +695,15 @@ private sealed interface Screen {
 private val ScreenSaver = Saver<Screen, String>(
     save = { s ->
         when (s) {
-            Screen.Home -> "home"; Screen.Recordings -> "recordings"; Screen.Settings -> "settings"
-            is Screen.Detail -> "detail:" + s.meetingId
+            Screen.Home -> "home"; Screen.Meetings -> "meetings"; Screen.Settings -> "settings"
+            is Screen.Meeting -> "meeting:" + s.meetingId
         }
     },
     restore = { v ->
         when {
-            v == "recordings" -> Screen.Recordings
+            v == "meetings" -> Screen.Meetings
             v == "settings" -> Screen.Settings
-            v.startsWith("detail:") -> Screen.Detail(v.removePrefix("detail:"))
+            v.startsWith("meeting:") -> Screen.Meeting(v.removePrefix("meeting:"))
             else -> Screen.Home
         }
     },
@@ -688,23 +726,26 @@ fun Root(link: MutableState<String?>, autoPair: Boolean) {
         return
     }
     when (val s = screen) {
-        is Screen.Detail -> {
-            BackHandler { screen = Screen.Recordings }
-            DetailScreen(current, s.meetingId, onBack = { screen = Screen.Recordings })
+        is Screen.Meeting -> {
+            BackHandler { screen = Screen.Meetings }
+            MeetingScreen(current, s.meetingId, onBack = { screen = Screen.Meetings })
         }
-        Screen.Recordings -> {
+        Screen.Meetings -> {
             BackHandler { screen = Screen.Home }
-            kept.SaveableStateProvider("recordings") {
-                RecordingsScreen(current, onOpen = { screen = Screen.Detail(it) }, onBack = { screen = Screen.Home })
+            kept.SaveableStateProvider("meetings") {
+                MeetingsScreen(current, onOpen = { screen = Screen.Meeting(it) }, onBack = { screen = Screen.Home })
             }
         }
         Screen.Settings -> {
             BackHandler { screen = Screen.Home }
             SettingsScreen(current, onBack = { screen = Screen.Home },
-                onDisconnect = { Pairing.clear(ctx); boxState.value = null; boxName.value = null; cfg = null; screen = Screen.Home })
+                onDisconnect = {
+                    Pairing.clear(ctx); boxState.value = null; boxName.value = null
+                    meetingList.value = null; listProblem.value = null; cfg = null; screen = Screen.Home
+                })
         }
         Screen.Home -> kept.SaveableStateProvider("home") {
-            HomeScreen(current, onRecordings = { screen = Screen.Recordings }, onSettings = { screen = Screen.Settings })
+            HomeScreen(current, onMeetings = { screen = Screen.Meetings }, onSettings = { screen = Screen.Settings })
         }
     }
 }
@@ -924,7 +965,7 @@ private fun rememberDefault(ctx: Context, settings: JSONObject) {
 }
 
 @Composable
-private fun HomeScreen(cfg: BoxConfig, onRecordings: () -> Unit, onSettings: () -> Unit) {
+private fun HomeScreen(cfg: BoxConfig, onMeetings: () -> Unit, onSettings: () -> Unit) {
     val ctx = LocalContext.current
     val p = pal()
     val store = remember { Store(ctx) }
@@ -945,8 +986,9 @@ private fun HomeScreen(cfg: BoxConfig, onRecordings: () -> Unit, onSettings: () 
     var parts by remember { mutableIntStateOf(0) }
     var denied by remember { mutableStateOf(false) }
 
-    // While the screen is visible: the phone's list every 2 s, the box every 15 s, and whom the phone
-    // records for each time the app comes to the front (a name set in the Meetings app shows up then).
+    // While the screen is visible: the phone's list every 2 s, the box and the person's meetings every
+    // 14 s, and whom the phone records for each time the app comes to the front (a name set in the
+    // indie-recorder app shows up then).
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(cfg) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -970,12 +1012,14 @@ private fun HomeScreen(cfg: BoxConfig, onRecordings: () -> Unit, onSettings: () 
                     }
                     learnName(ctx, api)
                 }
-                if (tick % 3 == 0) askStates(api, items)
+                if (boxState.value == "ok" && tick % 7 == 0) loadMeetings(api)
                 tick++
                 delay(2000)
             }
         }
     }
+    val listed by meetingList.collectAsState()
+    LaunchedEffect(listed) { listed?.let { prefs.edit().putInt("meetings", it.size).apply() } }
 
     val needed = buildList {
         add(Manifest.permission.RECORD_AUDIO)
@@ -1005,10 +1049,12 @@ private fun HomeScreen(cfg: BoxConfig, onRecordings: () -> Unit, onSettings: () 
     // Whom the recordings go to: the person when the box knows a name, else this phone's name.
     val whom = me?.let { m -> m.person?.let { stringResource(R.string.for_label) to it } ?: (stringResource(R.string.phone_label) to m.device) }
 
-    // On the Recordings button: how many, and in red what is under way: what the box does not have
-    // all of yet (the one being recorded too, as in the web app), else the meetings it works on.
+    // On the Meetings button: how many the person has on the box (from any of their phones), and in
+    // red what is under way: what the box does not have all of yet (the one being recorded too, as in
+    // the web app), else the meetings it works on.
+    val count = listed?.size ?: prefs.getInt("meetings", 0)
     val uploading = items.count { it.state != LocalRecording.FINALIZED }
-    val working = items.count { r -> r.meetingId?.let { meetingStates[it] }.let { it != null && it != "done" && it != "failed" } }
+    val working = listed?.count { it.state != "done" && it.state != "failed" } ?: 0
     val busy = when {
         uploading > 0 -> pluralStringResource(R.plurals.n_uploading, uploading, uploading)
         working > 0 -> pluralStringResource(R.plurals.n_processing, working, working)
@@ -1078,16 +1124,18 @@ private fun HomeScreen(cfg: BoxConfig, onRecordings: () -> Unit, onSettings: () 
             recError?.let { Text(it, color = p.red, fontSize = 14.sp, fontWeight = FontWeight.W700) }
             if (denied) Text(stringResource(R.string.mic_denied), color = p.red, fontSize = 14.sp, fontWeight = FontWeight.W700)
         }
-        RecordingsButton(items.size, busy, if (short) 56.dp else 64.dp, onRecordings)
+        MeetingsButton(count, busy, if (short) 56.dp else 64.dp, onMeetings)
     }
 }
 
 /**
- * The recordings on this phone, newest first: title, length and how far each is; a row opens its
- * meeting, one the box does not have yet is sent again. This screen scrolls like the others.
+ * The person's meetings, as in the other apps (recorder/static/meetings.js): what this phone has not
+ * handed to the box yet first, under "On this phone"; then every meeting on the box, whichever phone
+ * recorded it, by the phone's own day, newest first. A meeting opens its screen; a recording the box
+ * does not have yet is sent again. This screen scrolls like the others.
  */
 @Composable
-private fun RecordingsScreen(cfg: BoxConfig, onOpen: (String) -> Unit, onBack: () -> Unit) {
+private fun MeetingsScreen(cfg: BoxConfig, onOpen: (String) -> Unit, onBack: () -> Unit) {
     val ctx = LocalContext.current
     val store = remember { Store(ctx) }
     val api = remember(cfg) { BoxApi(cfg) }
@@ -1095,16 +1143,18 @@ private fun RecordingsScreen(cfg: BoxConfig, onOpen: (String) -> Unit, onBack: (
     val paused by RecState.paused.collectAsState()
     val recordedMs by RecState.recordedMs.collectAsState()
     val box by boxState.collectAsState()
+    val listed by meetingList.collectAsState()
+    val problem by listProblem.collectAsState()
     var items by remember { mutableStateOf(store.list()) }
 
-    // While the screen is visible: the phone's list every 2 s, the meetings on the box every 6 s.
+    // While the screen is visible: the phone's own every 2 s, the box's list on opening and every 10 s.
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(cfg) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             var tick = 0
             while (true) {
                 items = withContext(Dispatchers.IO) { store.list() }
-                if (tick % 3 == 0) askStates(api, items)
+                if (tick % 5 == 0) loadMeetings(api)
                 tick++
                 delay(2000)
             }
@@ -1112,23 +1162,67 @@ private fun RecordingsScreen(cfg: BoxConfig, onOpen: (String) -> Unit, onBack: (
     }
 
     val (boxValue, boxColor) = boxLine(box)
+    val locale = ctx.resources.configuration.locales[0]
+    val zone = remember { ZoneId.systemDefault() }
+    val wide = LocalConfiguration.current.screenWidthDp >= 560      // room for the time, as in the web apps
+    val today = LocalDate.now(zone)
+    val todayWord = stringResource(R.string.today)
+    val yesterdayWord = stringResource(R.string.yesterday)
     Page {
         Bar(stringResource(R.string.back), boxValue, onLeft = onBack, rightColor = boxColor)
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Kicker(stringResource(R.string.on_this_phone))
-            H1(stringResource(R.string.recordings))
+            Kicker(stringResource(R.string.only_you))
+            H1(stringResource(R.string.meetings))
         }
-        Column {
-            Rule(thick = true)
-            if (items.isEmpty()) Text(stringResource(R.string.none_yet), Modifier.padding(top = 12.dp), color = pal().muted)
+        val unsent = items.filter { it.state != LocalRecording.FINALIZED }
+        if (unsent.isNotEmpty()) Column {
+            Section(stringResource(R.string.on_this_phone))
             val a = active
-            items.forEachIndexed { i, r ->
+            unsent.forEachIndexed { i, r ->
                 val live = r.clientId == a?.clientId
-                RecordingRow(i + 1, r, r.meetingId?.let { meetingStates[it] }, live && paused, if (live) recordedMs else null) {
-                    r.meetingId?.let(onOpen) ?: UploadWorker.enqueue(ctx, r.clientId, now = true)
+                RecordingRow(i + 1, r, live && paused, if (live) recordedMs else null) {
+                    UploadWorker.enqueue(ctx, r.clientId, now = true)
                 }
             }
         }
+        problem?.let { Text(problemText(it), fontSize = 14.sp, lineHeight = 20.sp, color = pal().red, fontWeight = FontWeight.W700) }
+        val rows = listed
+        if (rows != null && rows.isEmpty() && unsent.isEmpty()) Column {
+            Section(stringResource(R.string.none_head))
+            Text(stringResource(R.string.none_text), Modifier.padding(top = 12.dp), fontSize = 15.sp, lineHeight = 22.sp, color = pal().muted)
+        }
+        rows?.let { meetingDays(it, zone) }?.forEach { (day, dayRows) ->
+            Column {
+                Section(dayLabel(day, today, locale, todayWord, yesterdayWord))
+                dayRows.forEachIndexed { i, m -> MeetingListRow(i + 1, m, zone, locale, wide) { onOpen(m.id) } }
+            }
+        }
+    }
+}
+
+/** A meeting in the list, as the web apps' rows: number, title, (time,) length, and where it is or how far. */
+@Composable
+private fun MeetingListRow(n: Int, m: MeetingRow, zone: ZoneId, locale: Locale, wide: Boolean, onClick: () -> Unit) {
+    val p = pal()
+    val st = rowState(m.state, m.storage)
+    val word = stringResource(when (st) {
+        RowState.UPLOADING -> R.string.st_uploading
+        RowState.FAILED -> R.string.st_failed
+        RowState.PROCESSING -> R.string.st_processing
+        RowState.DRIVE -> R.string.drive_short
+        RowState.LOCAL -> R.string.st_local
+    })
+    Column(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+        Row(Modifier.fillMaxWidth().padding(vertical = 11.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("%02d".format(n), Modifier.width(34.dp).alignByBaseline(), fontSize = 15.sp, fontWeight = FontWeight.W700, style = tnum())
+            Text(m.title, Modifier.weight(1f).alignByBaseline(), fontSize = 15.sp, fontWeight = FontWeight.W500,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (wide) m.startedAt?.let { Text(meetingTime(it, zone, locale), Modifier.alignByBaseline(), fontSize = 15.sp, style = tnum()) }
+            Text(meetingLength(m.durationS), Modifier.alignByBaseline(), fontSize = 15.sp, style = tnum())
+            Text(word, Modifier.widthIn(min = 70.dp).alignByBaseline(), fontSize = 14.sp, textAlign = TextAlign.End,
+                color = if (st.busy) p.red else p.ink, fontWeight = if (st.busy) FontWeight.W700 else FontWeight.W400, maxLines = 1)
+        }
+        Rule()
     }
 }
 
@@ -1149,8 +1243,9 @@ private fun LineField(value: String, onChange: (String) -> Unit, hint: String) {
         })
 }
 
+/** A recording of this phone that the box does not have all of yet: recording, paused, uploading or waiting. */
 @Composable
-private fun RecordingRow(n: Int, r: LocalRecording, meetingState: String?, paused: Boolean, liveMs: Long?, onClick: () -> Unit) {
+private fun RecordingRow(n: Int, r: LocalRecording, paused: Boolean, liveMs: Long?, onClick: () -> Unit) {
     val p = pal()
     val (status, alert) = when {
         r.state == LocalRecording.RECORDING && paused -> stringResource(R.string.st_paused) to false
@@ -1159,8 +1254,6 @@ private fun RecordingRow(n: Int, r: LocalRecording, meetingState: String?, pause
         r.state == LocalRecording.STOPPED && r.uploaded < r.chunks && r.error != "unreachable" ->
             stringResource(R.string.st_uploading) to true
         r.state == LocalRecording.STOPPED -> stringResource(R.string.st_waiting) to false
-        meetingState == "done" -> stringResource(R.string.st_done) to false
-        meetingState == "failed" -> stringResource(R.string.st_failed) to true
         else -> stringResource(R.string.st_processing) to false
     }
     val length = liveMs ?: r.durationMs
@@ -1172,7 +1265,7 @@ private fun RecordingRow(n: Int, r: LocalRecording, meetingState: String?, pause
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (r.interrupted) Text(stringResource(R.string.interrupted), fontSize = 12.sp, lineHeight = 16.sp, color = p.muted)
             }
-            if (length > 0) Text(clock(length), Modifier.alignByBaseline(), fontSize = 15.sp, style = tnum())
+            if (length > 0) Text(meetingLength(length / 1000.0), Modifier.alignByBaseline(), fontSize = 15.sp, style = tnum())
             Text(status, Modifier.widthIn(min = 86.dp).alignByBaseline(), fontSize = 15.sp, textAlign = TextAlign.End,
                 color = if (alert) p.red else p.ink, fontWeight = if (alert) FontWeight.W700 else FontWeight.W400, maxLines = 1)
         }
@@ -1180,91 +1273,300 @@ private fun RecordingRow(n: Int, r: LocalRecording, meetingState: String?, pause
     }
 }
 
+/** The names typed into a meeting's speaker cards survive a rotation. */
+private val NamesSaver = Saver<SnapshotStateMap<String, String>, String>(
+    save = { JSONObject(it.toMap()).toString() },
+    restore = { v -> mutableStateMapOf<String, String>().apply { val o = JSONObject(v); o.keys().forEach { put(it, o.getString(it)) } } },
+)
+
+/**
+ * One meeting, as in the other apps (recorder/static/meetings.js): when and what, its length, its
+ * speakers and whether it is kept in Drive; the summary; then folds for the speakers' names (their
+ * share of the talk, their lines, their voice, suggested names), the transcript (fetched when opened)
+ * and more. While the box works on it, the screen looks again every 5 s.
+ */
 @Composable
-private fun DetailScreen(cfg: BoxConfig, mid: String, onBack: () -> Unit) {
+private fun MeetingScreen(cfg: BoxConfig, mid: String, onBack: () -> Unit) {
     val ctx = LocalContext.current
+    val p = pal()
     val api = remember(cfg) { BoxApi(cfg) }
     val scope = rememberCoroutineScope()
     val box by boxState.collectAsState()
-    var m by remember { mutableStateOf<JSONObject?>(null) }
-    var unreachable by remember { mutableStateOf(false) }
-    var drive by remember { mutableStateOf(false) }
+    val name by boxName.collectAsState()
+    var m by remember(mid) { mutableStateOf<JSONObject?>(null) }
+    var problem by remember(mid) { mutableStateOf<String?>(null) }
+    var note by remember(mid) { mutableStateOf<String?>(null) }       // "Saved.", "A new summary is on its way."
+    var drive by remember(mid) { mutableStateOf(false) }
+    var spkOpen by rememberSaveable(mid) { mutableStateOf(false) }
+    var trOpen by rememberSaveable(mid) { mutableStateOf(false) }
+    var moreOpen by rememberSaveable(mid) { mutableStateOf(false) }
+    var transcript by remember(mid) { mutableStateOf<List<TranscriptPart>?>(null) }
+    val names = rememberSaveable(mid, saver = NamesSaver) { mutableStateMapOf() }
+    var playing by remember { mutableStateOf<String?>(null) }
+    val player = remember { MediaPlayer() }
+    DisposableEffect(Unit) { onDispose { runCatching { player.release() } } }
+
+    suspend fun load() {
+        withContext(Dispatchers.IO) { runCatching { api.obj("get_meeting", JSONObject().put("meeting_id", mid).put("include_transcript", false)) } }
+            .onSuccess { j ->
+                m = j
+                drive = j.optString("storage") == "drive"
+                problem = null
+                speakerCards(j).forEach { c -> if (c.label !in names) names[c.label] = c.name }
+            }
+            .onFailure { problem = problemOf(it) }
+    }
 
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(mid) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
-                withContext(Dispatchers.IO) { runCatching { api.meeting(mid) } }
-                    .onSuccess { m = it; drive = it.optString("storage") == "drive"; unreachable = false }
-                    .onFailure { unreachable = true }
+                load()
                 val state = m?.optString("state")
                 if (state == "done" || state == "failed") break
                 delay(5000)
             }
         }
     }
+    // the transcript when its fold is open, again after names changed
+    LaunchedEffect(trOpen, transcript == null) {
+        if (!trOpen || transcript != null) return@LaunchedEffect
+        withContext(Dispatchers.IO) { runCatching { api.obj("get_meeting", JSONObject().put("meeting_id", mid).put("include_transcript", true)) } }
+            .onSuccess { transcript = transcriptParts(text(it, "transcript_md") ?: "") }
+            .onFailure { problem = problemOf(it) }
+    }
+
+    val saved = stringResource(R.string.saved)
+    val queued = stringResource(R.string.queued)
+    val unreachable = stringResource(R.string.list_unreachable)
+    fun setDrive(v: Boolean) {
+        drive = v
+        scope.launch {
+            withContext(Dispatchers.IO) { runCatching { api.op("set_storage", JSONObject().put("meeting_id", mid).put("storage", if (v) "drive" else "local")) } }
+                .onSuccess { load(); loadMeetings(api) }
+                .onFailure { drive = !v; note = it.message }
+        }
+    }
+    fun saveNames() {
+        val o = JSONObject()
+        names.forEach { (k, v) -> o.put(k, v) }
+        scope.launch {
+            withContext(Dispatchers.IO) { runCatching { api.op("rename_speakers", JSONObject().put("meeting_id", mid).put("names", o)) } }
+                .onSuccess { load(); transcript = null; note = saved }
+                .onFailure { note = it.message }
+        }
+    }
+    fun newSummary() = scope.launch {
+        withContext(Dispatchers.IO) { runCatching { api.op("new_summary", JSONObject().put("meeting_id", mid)) } }
+            .onSuccess { note = queued }
+            .onFailure { note = it.message }
+    }
+    // Seven seconds of a speaker's voice, from the box itself (the link names brain-tls), played from the cache.
+    fun play(c: SpeakerCard) {
+        runCatching { player.reset() }
+        if (playing == c.label) { playing = null; return }
+        playing = null
+        val path = clipPath(c.clipUrl) ?: return
+        scope.launch {
+            val f = withContext(Dispatchers.IO) { runCatching { File(ctx.cacheDir, "clip.wav").apply { writeBytes(api.bytes(path)) } } }.getOrNull()
+            if (f == null) { note = unreachable; return@launch }
+            runCatching {
+                player.setDataSource(f.path)
+                player.setOnCompletionListener { playing = null }
+                player.prepare()
+                player.start()
+                playing = c.label
+            }
+        }
+    }
 
     val (boxValue, boxColor) = boxLine(box)
+    val locale = ctx.resources.configuration.locales[0]
+    val zone = remember { ZoneId.systemDefault() }
+    val where = name ?: stringResource(R.string.box_label)
     Page {
         Bar(stringResource(R.string.back), boxValue, onLeft = onBack, rightColor = boxColor)
         val mm = m
         if (mm == null) {
-            if (unreachable) Text(stringResource(R.string.box_unreachable), color = pal().muted)
+            problem?.let { Text(problemText(it), color = p.muted) }
             return@Page
         }
+        val started = instant(text(mm, "started_at")) ?: instant(text(mm, "created_at"))
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Kicker(dateTime(mm.optString("started_at")))
-            H1(mm.optString("title").ifBlank { mid }, 36.sp)
+            Kicker(started?.let { meetingDate(it, zone, locale) + " · " + meetingTime(it, zone, locale) } ?: "")
+            H1(text(mm, "title") ?: mid, 36.sp)
         }
-        val speakers = mm.optInt("speakers")
+        val cards = speakerCards(mm)
+        val speakers = if (mm.optJSONArray("speakers") != null) cards.size else mm.optInt("speakers")
         val storeDrive = stringResource(R.string.store_drive)
-        Cells(3, listOf(
-            CellSpec(stringResource(R.string.length_label)) {
-                Text(clock((mm.optDouble("duration_s", 0.0) * 1000).toLong()), fontSize = 17.sp, fontWeight = FontWeight.W500, style = tnum())
-            },
-            CellSpec(stringResource(R.string.speakers_label)) { Value(if (speakers > 0) "$speakers" else "…") },
-            CellSpec(stringResource(R.string.drive_short)) {
-                Toggle(drive, { v ->
-                    drive = v
-                    scope.launch(Dispatchers.IO) { runCatching { api.setStorage(mid, if (v) "drive" else "local") } }
-                }, null, storeDrive)
-            },
-        ))
-        val folder = mm.optString("drive_url").takeIf { it.startsWith("https://") }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(stringResource(when {
-                !drive -> R.string.note_local
-                folder != null -> R.string.note_done
-                else -> R.string.note_waiting
-            }), fontSize = 14.sp)
-            if (drive && folder != null) LinkText(stringResource(R.string.open_folder)) { open(ctx, folder) }
+        Column {
+            Cells(3, listOf(
+                CellSpec(stringResource(R.string.length_label)) {
+                    Text(meetingLength(mm.optDouble("duration_s", 0.0)), fontSize = 17.sp, fontWeight = FontWeight.W500, style = tnum())
+                },
+                CellSpec(stringResource(R.string.speakers_label)) { Value(if (speakers > 0) "$speakers" else stringResource(R.string.not_yet)) },
+                CellSpec(stringResource(R.string.drive_name)) { Toggle(drive, { setDrive(it) }, null, storeDrive) },
+            ))
+            Spacer(Modifier.height(12.dp))
+            val folder = text(mm, "drive_url")?.takeIf { it.startsWith("https://") }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(note ?: when {
+                    !drive -> stringResource(R.string.note_local, where)
+                    folder != null -> stringResource(R.string.note_done)
+                    else -> stringResource(R.string.note_waiting)
+                }, Modifier.weight(1f, fill = false), fontSize = 14.sp, lineHeight = 20.sp)
+                if (drive && folder != null) LinkText(stringResource(R.string.open_folder)) { open(ctx, folder) }
+            }
         }
-        if (mm.optString("state") != "done") Text(stringResource(R.string.not_ready), color = pal().muted)
-        else Summary(mm.optString("summary_md"))
-        mm.optString("url").takeIf { it.startsWith("https://") }?.let { url ->
-            LinkText(stringResource(R.string.open_box)) { open(ctx, url) }
+        if (mm.optString("state") == "done") Summary(mm.optString("summary_md"))
+        else Text(stringResource(if (mm.optString("state") == "failed") R.string.st_failed else R.string.not_ready), color = p.muted)
+        Column {
+            Rule(thick = true)
+            if (cards.isNotEmpty()) {
+                val unnamed = cards.count { it.name.isBlank() }
+                Fold(stringResource(R.string.speaker_names) + if (unnamed > 0) stringResource(R.string.unnamed, unnamed) else "",
+                    spkOpen, { spkOpen = !spkOpen }) {
+                    cards.forEachIndexed { i, c ->
+                        SpeakerCardView(i + 1, c, names[c.label] ?: "", { names[c.label] = it }, playing == c.label) { play(c) }
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    OutlineButton(stringResource(R.string.save_names)) { saveNames() }
+                }
+            }
+            Fold(stringResource(R.string.transcript), trOpen, { trOpen = !trOpen }) {
+                val t = transcript
+                when {
+                    t == null -> Text("…", color = p.muted)
+                    t.isEmpty() -> Text(stringResource(R.string.not_yet), color = p.muted)
+                    else -> TranscriptView(t)
+                }
+            }
+            Fold(stringResource(R.string.more), moreOpen, { moreOpen = !moreOpen }) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlineButton(stringResource(R.string.new_summary)) { newSummary() }
+                    text(mm, "url")?.takeIf { it.startsWith("https://") }?.let { url ->
+                        LinkText(stringResource(R.string.open_box, where)) { open(ctx, url) }
+                    }
+                }
+            }
         }
     }
 }
 
+/** A fold, as the web apps' details.fold: its name in small capitals, + or − on the right, then what it holds; a 1dp rule under it. */
 @Composable
-private fun Summary(md: String) {
+private fun Fold(title: String, open: Boolean, onToggle: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     Column {
-        for (part in summaryParts(md)) {
-            when (part) {
-                is SummaryPart.Lead -> {
-                    Text(part.text, fontSize = 18.sp, fontWeight = FontWeight.W500, lineHeight = 26.sp)
-                    Spacer(Modifier.height(22.dp))
-                }
-                is SummaryPart.Heading -> {
-                    Spacer(Modifier.height(12.dp))
-                    Section(part.text)
-                }
-                is SummaryPart.Item -> NumberedRow(part.n, part.text, part.side)
-                is SummaryPart.Para -> Text(part.text, Modifier.padding(vertical = 6.dp), fontSize = 15.sp, lineHeight = 22.sp)
+        Row(Modifier.fillMaxWidth().clickable(onClick = onToggle).padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(title.uppercase(), Modifier.weight(1f), fontSize = 11.sp, fontWeight = FontWeight.W700, letterSpacing = 0.55.sp)
+            Text(if (open) "−" else "+", fontSize = 18.sp, fontWeight = FontWeight.W500)
+        }
+        if (open) Column(Modifier.padding(bottom = 16.dp), content = content)
+        Rule()
+    }
+}
+
+/**
+ * A speaker: how much they said and when first, Play (seven seconds of their voice), a few of their
+ * lines, names suggested for them with why (a tap puts one in the field), and the name field.
+ */
+@Composable
+private fun SpeakerCardView(n: Int, c: SpeakerCard, name: String, onName: (String) -> Unit, playing: Boolean, onPlay: () -> Unit) {
+    val p = pal()
+    val by = mapOf("recorder" to stringResource(R.string.by_recorder), "agent" to stringResource(R.string.by_agent),
+        "person" to stringResource(R.string.by_person))
+    Column(Modifier.fillMaxWidth().padding(vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("%02d".format(n), Modifier.width(34.dp).alignByBaseline(), fontSize = 15.sp, fontWeight = FontWeight.W700)
+            Text(c.label, Modifier.weight(1f).alignByBaseline(), fontSize = 15.sp, fontWeight = FontWeight.W700)
+            if (c.clipUrl != null) Text(stringResource(if (playing) R.string.stop_play else R.string.play),
+                Modifier.alignByBaseline().clickable(onClick = onPlay).padding(vertical = 4.dp), fontSize = 14.sp,
+                fontWeight = FontWeight.W700, textDecoration = TextDecoration.Underline)
+        }
+        if (c.turns > 0) Text(stringResource(R.string.talk, c.share, c.turns, meetingLength(c.first)), fontSize = 13.sp, lineHeight = 18.sp, color = p.muted)
+        c.lines.forEach { Text("\"$it\"", fontSize = 14.sp, lineHeight = 20.sp, color = p.muted) }
+        c.suggestions.forEach { s ->
+            val use = stringResource(R.string.use_name, s.name)
+            Text(buildAnnotatedString {
+                withStyle(SpanStyle(color = p.red, fontWeight = FontWeight.W700, textDecoration = TextDecoration.Underline)) { append(use) }
+                withStyle(SpanStyle(color = p.muted)) { append("  " + (by[s.by] ?: "") + if (s.why.isNotBlank()) ": " + s.why else "") }
+            }, Modifier.clickable { onName(s.name) }, fontSize = 14.sp, lineHeight = 20.sp)
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Label(stringResource(R.string.name_label))
+            NameField(name, onName)
+        }
+    }
+    Rule()
+}
+
+/** A speaker's name: the text over a 1dp rule. */
+@Composable
+private fun NameField(value: String, onChange: (String) -> Unit) {
+    val p = pal()
+    BasicTextField(value, onChange, Modifier.fillMaxWidth(), singleLine = true, cursorBrush = SolidColor(p.ink),
+        textStyle = LocalTextStyle.current.copy(fontSize = 17.sp, lineHeight = 24.sp, fontWeight = FontWeight.W500, color = p.ink),
+        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Done),
+        decorationBox = { inner ->
+            Column {
+                Box(Modifier.padding(top = 4.dp, bottom = 8.dp)) { inner() }
+                Rule()
+            }
+        })
+}
+
+/** The transcript as turns: who (bold) and when (quiet), then what they said. */
+@Composable
+private fun TranscriptView(parts: List<TranscriptPart>) {
+    val p = pal()
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        for (part in parts) when (part) {
+            is TranscriptPart.Meta -> Text(part.text, fontSize = 13.sp, lineHeight = 19.sp, color = p.muted)
+            is TranscriptPart.Said -> Text(part.text, fontSize = 15.sp, lineHeight = 23.sp)
+            is TranscriptPart.Turn -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(buildAnnotatedString {
+                    withStyle(SpanStyle(fontWeight = FontWeight.W700)) { append(part.who) }
+                    withStyle(SpanStyle(color = p.muted, fontSize = 13.sp, fontFeatureSettings = "tnum")) { append("  " + part.at) }
+                }, fontSize = 15.sp)
+                if (part.said.isNotEmpty()) Text(part.said.joinToString("\n\n"), fontSize = 15.sp, lineHeight = 23.sp)
             }
         }
     }
+}
+
+/** The summary as the web apps draw it: the lead, then sections with numbered rows; known sections in the app's language. */
+@Composable
+private fun Summary(md: String) {
+    val sections = mapOf("decisions" to stringResource(R.string.sec_decisions), "actions" to stringResource(R.string.sec_actions),
+        "questions" to stringResource(R.string.sec_questions))
+    Column {
+        var leads = 0
+        for (part in summaryParts(md)) {
+            when (part) {
+                is SummaryPart.Lead -> {
+                    if (leads++ > 0) Spacer(Modifier.height(8.dp))
+                    Text(bold(part.text), fontSize = 18.sp, fontWeight = FontWeight.W500, lineHeight = 26.sp)
+                }
+                is SummaryPart.Heading -> {
+                    Spacer(Modifier.height(26.dp))
+                    Section(part.key?.let { sections[it] } ?: part.text)
+                }
+                is SummaryPart.Item -> NumberedRow(part.n, bold(part.text), part.side)
+                is SummaryPart.Para -> Text(bold(part.text), Modifier.padding(vertical = 6.dp), fontSize = 15.sp, lineHeight = 22.sp)
+            }
+        }
+    }
+}
+
+/** The summary's **bold** as bold. */
+private fun bold(text: String): AnnotatedString = buildAnnotatedString {
+    var at = 0
+    for (m in Regex("\\*\\*(.+?)\\*\\*").findAll(text)) {
+        append(text.substring(at, m.range.first))
+        withStyle(SpanStyle(fontWeight = FontWeight.W700)) { append(m.groupValues[1]) }
+        at = m.range.last + 1
+    }
+    append(text.substring(at))
 }
 
 @Composable
@@ -1274,11 +1576,31 @@ private fun SettingsScreen(cfg: BoxConfig, onBack: () -> Unit, onDisconnect: () 
     val me = remember { Pairing.me(ctx) }
     val pm = remember { ctx.getSystemService(PowerManager::class.java) }
     var ignoring by remember { mutableStateOf(pm.isIgnoringBatteryOptimizations(ctx.packageName)) }
+    val api = remember(cfg) { BoxApi(cfg) }
+    val scope = rememberCoroutineScope()
+    var google by remember { mutableStateOf<JSONObject?>(null) }       // the status op's "google"
+    var googleAsk by remember { mutableStateOf(false) }
+    var googleNote by remember { mutableStateOf<String?>(null) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(Unit) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {      // back from the system dialog
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {      // back from the system dialog, or from Google's sign-in
             ignoring = pm.isIgnoringBatteryOptimizations(ctx.packageName)
+            withContext(Dispatchers.IO) { runCatching { api.obj("status").optJSONObject("google") } }.getOrNull()?.let {
+                google = it
+                if (it.optBoolean("connected")) googleNote = null
+            }
         }
+    }
+    val finish = stringResource(R.string.g_finish)
+    fun connectGoogle() = scope.launch {
+        withContext(Dispatchers.IO) { runCatching { api.obj("drive_connect").getString("url") } }
+            .onSuccess { open(ctx, it); googleNote = finish }
+            .onFailure { googleNote = it.message }
+    }
+    fun disconnectGoogle() = scope.launch {
+        withContext(Dispatchers.IO) { runCatching { api.obj("drive_disconnect") } }
+            .onSuccess { google = it; googleAsk = false }
+            .onFailure { googleNote = it.message }
     }
     val (boxValue, boxColor) = boxLine(box)
     Page {
@@ -1293,6 +1615,36 @@ private fun SettingsScreen(cfg: BoxConfig, onBack: () -> Unit, onDisconnect: () 
             phone?.let { add(CellSpec(stringResource(R.string.phone_label)) { Value(it) }) }
             add(CellSpec(stringResource(R.string.box_label)) { Value(listOfNotNull(boxName.value, cfg.host).joinToString(" · ")) })
         })
+        // Google Drive, as in the indie-recorder app: the person connects their own once; the box then
+        // puts the meetings they keep in Drive there itself.
+        val g = google
+        if (g != null && g.optBoolean("available")) Column {
+            Section(stringResource(R.string.storage_label))
+            val connected = g.optBoolean("connected")
+            Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.drive_name), fontSize = 16.sp)
+                    Text(googleNote ?: when {
+                        connected -> stringResource(R.string.g_connected, text(g, "email") ?: "")
+                        text(g, "problem") == "expired" -> stringResource(R.string.g_expired)
+                        else -> stringResource(R.string.g_not)
+                    }, fontSize = 13.sp, lineHeight = 18.sp, color = pal().muted)
+                }
+                if (connected) OutlineButton(stringResource(R.string.g_disconnect)) { googleAsk = true }
+                else RedButton(stringResource(R.string.g_connect)) { connectGoogle() }
+            }
+            if (googleAsk && connected) {
+                Text(stringResource(R.string.g_ask), fontSize = 14.sp, lineHeight = 20.sp)
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    RedButton(stringResource(R.string.g_disconnect)) { disconnectGoogle() }
+                    LinkText(stringResource(R.string.cancel)) { googleAsk = false }
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+            Rule()
+        }
         Column {
             Section(stringResource(R.string.battery_section))
             Spacer(Modifier.height(12.dp))
@@ -1314,9 +1666,3 @@ private fun SettingsScreen(cfg: BoxConfig, onBack: () -> Unit, onDisconnect: () 
 
 private fun open(ctx: Context, url: String) =
     runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
-
-/** "18 Nov 2026 · 09:00" in the phone's language. */
-private fun dateTime(iso: String): String = runCatching {
-    val t = Instant.parse(iso).atZone(ZoneId.systemDefault())
-    DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).format(t) + " · " + DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT).format(t)
-}.getOrDefault(iso)
