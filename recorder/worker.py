@@ -165,5 +165,5 @@ class Worker:
                  for x in summary.get("speakers") or [] if (x.get("name") or "").strip()
                  and speakers.plausible(x.get("label"), x.get("name"), x.get("evidence"))}
         if named:
-            speakers.suggest(self.store.folder(mid), set(self.store.names(mid)), named, by="recorder")
+            speakers.suggest(self.store.folder(mid), set(self.store.names(mid)), named, by="recorder")   # names only
         log(f"summary v{version} ({self.s.llm_model}, {time.monotonic() - t0:.1f} s)")

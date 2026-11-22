@@ -59,26 +59,49 @@ def plausible(label, name, why):
     return bool(name) and any(line[x.end():].startswith(name) for x in _SELF.finditer(line))
 
 
+# A suggestion is a name and nothing else: an agent once suggested "Lewis
+# (probably Luis) - tentative", which the app then offered for the name field.
+# Doubts and reasons belong in "why".
+_HEDGE = re.compile(r"\b(probably|maybe|perhaps|possibly|likely|tentative|unsure|unclear|unknown|guess|or|vermutlich|"
+                    r"wahrscheinlich|eventuell|vielleicht|unklar|unbekannt|oder|speaker|sprecher)\b", re.I)
+
+
+def plain_name(name):
+    """The name if it is one ("Anna", "Anna Meier", "Jean-Luc"), else None."""
+    name = " ".join(str(name or "").split()).strip("\"'\u201c\u201d\u2018\u2019 ")
+    if not 2 <= len(name) <= 40 or len(name.split()) > 4 or not name[0].isalpha():
+        return None
+    if re.search(r"[()\[\]{}?!:;,/|<>@#\d]| - ", name) or _HEDGE.search(name):
+        return None
+    return name
+
+
 def hints(folder):
     return read_json(folder / "speaker_hints.json", {}) or {}
 
 
 def suggest(folder, labels, suggestions, by):
     """suggestions: {label: {name, why}}. One per author and label: a newer one
-    replaces that author's older one; an empty name withdraws it."""
+    replaces that author's older one; an empty name withdraws it. Returns all
+    suggestions and the ones refused for not being a name, with why."""
     if by not in WHO:
         raise ValueError(f"by must be one of {WHO}")
-    cur = hints(folder)
+    cur, refused = hints(folder), {}
     for label, s in (suggestions or {}).items():
         if label not in labels or not isinstance(s, dict):
             continue
+        raw = " ".join(str(s.get("name") or "").split())
+        name = plain_name(raw)
+        if raw and not name:
+            refused[label] = ("not a name: give only the name the person is called, like \"Anna\" or \"Anna Meier\"; "
+                              "doubts and reasons go into why, and if you are not fairly sure, suggest nothing")
+            continue
         keep = [x for x in cur.get(label, []) if x.get("by") != by]
-        name = " ".join(str(s.get("name") or "").split())[:60]
         if name:
             keep.append({"name": name, "why": " ".join(str(s.get("why") or "").split())[:300], "by": by, "at": now_iso()})
         cur[label] = keep
     write_json(folder / "speaker_hints.json", cur)
-    return cur
+    return cur, refused
 
 
 def clip_wav(path, start, end):

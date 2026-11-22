@@ -119,9 +119,11 @@ TOOLS = [
      "inputSchema": {"type": "object", "required": ["meeting_id"], "properties": {"meeting_id": {"type": "string"}}}},
     {"name": "suggest_speakers",
      "description": "Suggest who a speaker label is, e.g. {\"Speaker 2\": {\"name\": \"Anna\", \"why\": \"addressed as Anna at "
-                    "00:12:03; leads the sales topics like in earlier meetings\"}}. The person sees each suggestion with its "
-                    "reason and decides; nothing is renamed. A new suggestion of yours for a label replaces your older one; an "
-                    "empty name withdraws it.",
+                    "00:12:03; leads the sales topics like in earlier meetings\"}}. name is only the name the person is "
+                    "called (\"Anna\", \"Anna Meier\"), never a sentence, a question or \"probably ...\": doubts and reasons "
+                    "go into why, and when you are not fairly sure, suggest nothing. The person sees each suggestion with "
+                    "its reason and decides; nothing is renamed. A new suggestion of yours for a label replaces your older "
+                    "one; an empty name withdraws it.",
      "inputSchema": {"type": "object", "required": ["meeting_id", "suggestions"], "properties": {
          "meeting_id": {"type": "string"},
          "suggestions": {"type": "object", "additionalProperties": {"type": "object", "properties": {
@@ -170,8 +172,8 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
         names, sugg, audio = store.names(mid), speakers.hints(store.folder(mid)), store.audio(mid).exists()
         # the recorder's own suggestions once more through the plausibility check (older ones too)
         cards = [{"label": label, "name": names.get(label, ""),
-                  "suggestions": [x for x in sugg.get(label, []) if x.get("by") != "recorder"
-                                  or speakers.plausible(label, x.get("name"), x.get("why"))],
+                  "suggestions": [x for x in sugg.get(label, []) if speakers.plain_name(x.get("name")) and (
+                                  x.get("by") != "recorder" or speakers.plausible(label, x.get("name"), x.get("why")))],
                   **{k: p[k] for k in ("share", "words", "turns", "first", "lines")},
                   "clip_url": f"{s.files_base_url}/{sign(s, mid, 'clip:' + label)}" if audio and p["clip"] else None}
                  for label, p in prof.items()]
@@ -258,7 +260,9 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
             raise ToolError(f"no meeting {mid!r}")
         if name == "suggest_speakers":
             try:
-                return speakers.suggest(store.folder(mid), set(store.names(mid)), args.get("suggestions") or {}, author(who))
+                hints, refused = speakers.suggest(store.folder(mid), set(store.names(mid)), args.get("suggestions") or {},
+                                                  author(who))
+                return {"suggestions": hints, **({"refused": refused} if refused else {})}
             except ValueError as e:
                 raise ToolError(str(e))
         if name == "meeting_files":

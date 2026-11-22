@@ -629,6 +629,11 @@ def test_hints_for_naming_speakers(app, client, tmp_path, monkeypatch):
                                                                   "Speaker 9": {"name": "Nobody"}}}, caller="agent")
     one = next(c for c in call("get_meeting", {"meeting_id": mid, "include_transcript": False})["speakers"] if c["label"] == "Speaker 1")
     assert [(x["name"], x["by"]) for x in one["suggestions"]] == [("Anna", "agent")]
+    hedged = call("suggest_speakers", {"meeting_id": mid, "suggestions": {"Speaker 1": {"name": "Lewis (probably Luis) - tentative",
+                                                                                     "why": "x"}}}, caller="agent")
+    assert "Speaker 1" in hedged["refused"]                                   # refused, and the earlier one stays
+    one = next(c for c in call("get_meeting", {"meeting_id": mid, "include_transcript": False})["speakers"] if c["label"] == "Speaker 1")
+    assert [(x["name"], x["by"]) for x in one["suggestions"]] == [("Anna", "agent")]
     clip = client.get(one["clip_url"].replace("https://box.test", ""))
     assert clip.status_code == 200 and clip.headers["content-type"] == "audio/wav"
     w = wave.open(io.BytesIO(clip.content))
@@ -638,6 +643,14 @@ def test_hints_for_naming_speakers(app, client, tmp_path, monkeypatch):
     start = profile(app.state.store.transcript(mid))["Speaker 1"]["clip"]["s"]
     plain.setpos(int(start * 16000))
     assert w.readframes(w.getnframes()) == plain.readframes(w.getnframes())
+
+
+def test_a_suggestion_is_a_name():
+    from recorder.speakers import plain_name
+    assert plain_name(" Anna  Meier ") == "Anna Meier" and plain_name("Jean-Luc") == "Jean-Luc" and plain_name("O'Brien")
+    for junk in ("Lewis (probably Luis) - tentative", "Luis?", "Speaker 2", "Anna or Bea", "vermutlich Anna",
+                 "Anna, the PM", "S2", "", "Luis - tentative"):
+        assert plain_name(junk) is None, junk
 
 
 def test_a_speaker_is_not_whom_they_address():
