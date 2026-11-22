@@ -12,6 +12,7 @@ from .render import words_to_segments
 from .util import now_iso, read_json, write_json
 
 CLIP_S = 7.0
+VOICE_S = 30.0
 WHO = ("recorder", "agent", "person")
 
 
@@ -36,6 +37,26 @@ def profile(transcript):
                       "first": round(mine[0]["s"], 1) if mine else None,
                       "lines": [_line(s["text"]) for s in sorted(longest[:3], key=lambda s: s["s"])],
                       "clip": clip}
+    return out
+
+
+def voice_spans(transcript, limit=VOICE_S, least=3.0):
+    """Per label, stretches of that speaker's own voice, longest first, up to
+    limit seconds in all: what the accent hints listen to. A label with less
+    than least seconds of speech gets none (too little to go on)."""
+    segs = words_to_segments([w for w in (transcript or {}).get("words", []) if (w.get("w") or "").strip()])
+    out = {}
+    for label in sorted({s["spk"] for s in segs}):
+        spans, total = [], 0.0
+        for s in sorted((x for x in segs if x["spk"] == label), key=lambda x: x["e"] - x["s"], reverse=True):
+            end = min(s["e"], s["s"] + limit - total)
+            if end - s["s"] >= 0.5:
+                spans.append([round(s["s"], 2), round(end, 2)])
+                total += end - s["s"]
+            if total >= limit - 0.5:
+                break
+        if total >= least:
+            out[label] = spans
     return out
 
 

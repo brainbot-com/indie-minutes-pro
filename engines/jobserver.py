@@ -9,6 +9,7 @@ volume (/data/.gpu.lock) keeps the two engine containers from using the GPU at
 the same time. A running GPU process is never killed: on this box a killed
 Vulkan job once stalled the amdgpu driver. While a job runs, GTT use and GPU
 busy are sampled from sysfs (rocm-smi shows no VRAM on this APU)."""
+import contextlib
 import fcntl
 import glob
 import json
@@ -113,9 +114,11 @@ class gpu_lock:
 
 
 class JobServer:
-    """handlers: {op: fn(job_params) -> dict}; info: fn() -> dict for /v1/health."""
+    """handlers: {op: fn(job_params) -> dict}; info: fn() -> dict for /v1/health.
+    gpu=False for an engine that runs on the CPU: its jobs skip the GPU lock."""
 
-    def __init__(self, handlers, info, port, keep=500):
+    def __init__(self, handlers, info, port, keep=500, gpu=True):
+        self.gpu = gpu
         self.handlers = handlers
         self.info = info
         self.port = port
@@ -147,8 +150,8 @@ class JobServer:
             if not job:
                 continue
             self.current = jid
-            job["state"] = "waiting for GPU"
-            with gpu_lock():
+            job["state"] = "waiting for GPU" if self.gpu else "running"
+            with gpu_lock() if self.gpu else contextlib.nullcontext():
                 job["state"] = "running"
                 job["started"] = time.time()
                 try:

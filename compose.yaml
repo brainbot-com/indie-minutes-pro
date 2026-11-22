@@ -69,6 +69,22 @@ services:
     networks: [rec]
 
   # Engine B: Qwen3-ASR + ForcedAligner on PyTorch ROCm (TheRock, gfx1151).
+  # accent hints for naming speakers: whisper-accent on the CPU (engines/accent);
+  # it sees only the plain audio the worker puts into the RAM scratch, and the model
+  engine-accent:
+    build:
+      context: engines
+      dockerfile: accent/Dockerfile
+    image: indie-recorder-engine-accent:latest
+    restart: unless-stopped
+    user: "1000:1000"
+    environment:
+      THREADS: "8"
+    volumes:
+      - ./models:/models:ro
+      - scratch:/data/scratch
+    networks: [rec]
+
   engine-qwen:
     build:
       context: engines

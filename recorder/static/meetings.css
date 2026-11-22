@@ -17,6 +17,7 @@
 .irm .spkhead { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto auto; gap: 12px; align-items: baseline; }
 .irm .spkhead .who { font-weight: 700; }
 .irm .said { margin: 0 0 0 52px; color: var(--muted); font-size: 14px; }
+.irm .said.accent { color: var(--ink); }
 .irm .sugg { margin: 0 0 0 52px; font-size: 14px; }
 .irm .sugg .use { color: var(--red); margin-right: 8px; }
 .irm .spk .cell { margin-left: 52px; max-width: 320px; }
@@ -31,5 +32,5 @@
   .irm .mrow .when { display: none; }
   .irm .said, .irm .sugg, .irm .spk .cell { margin-left: 0; }
   .irm .spkhead { grid-template-columns: 30px minmax(0, 1fr) auto; }
-  .irm .spkhead .side { display: none; }
+  .irm .spkhead .side { grid-column: 2 / -1; grid-row: 2; font-size: 13px; color: var(--muted); }
 }

@@ -17,6 +17,11 @@
       talk: (share, turns, first) => `${share}% of the talk · ${turns} turns · first at ${first}`,
       play: 'Play', stopPlay: 'Stop', use: (n) => `Use "${n}"`, nameLabel: 'Name',
       by: { recorder: 'In the meeting', agent: 'Your agent', person: 'You' },
+      accentGuess: (s) => `Accent, a guess: ${s}`,
+      accents: { english: 'English (England)', american: 'American', scottish: 'Scottish', irish: 'Irish', canadian: 'Canadian',
+        northernirish: 'Northern Irish', indian: 'Indian', spanish: 'Spanish', dutch: 'Dutch', german: 'German', czech: 'Czech',
+        polish: 'Polish', french: 'French', italian: 'Italian', hungarian: 'Hungarian', finnish: 'Finnish', vietnamese: 'Vietnamese',
+        romanian: 'Romanian', slovak: 'Slovak', estonian: 'Estonian', lithuanian: 'Lithuanian', croatian: 'Croatian', slovene: 'Slovene' },
       transcript: 'Transcript', more: 'More', newSummary: 'Write a new summary', openBox: 'Open on aibox1 (VPN)',
       tldr: 'Summary', decisions: 'Decisions', actions: 'Action items', questions: 'Open questions',
     },
@@ -29,6 +34,11 @@
       talk: (share, turns, first) => `${share} % der Redezeit · ${turns} Beiträge · zuerst bei ${first}`,
       play: 'Anhören', stopPlay: 'Stopp', use: (n) => `"${n}" übernehmen`, nameLabel: 'Name',
       by: { recorder: 'Im Meeting', agent: 'Ihr Agent', person: 'Sie' },
+      accentGuess: (s) => `Akzent, geschätzt: ${s}`,
+      accents: { english: 'Englisch (England)', american: 'Amerikanisch', scottish: 'Schottisch', irish: 'Irisch', canadian: 'Kanadisch',
+        northernirish: 'Nordirisch', indian: 'Indisch', spanish: 'Spanisch', dutch: 'Niederländisch', german: 'Deutsch', czech: 'Tschechisch',
+        polish: 'Polnisch', french: 'Französisch', italian: 'Italienisch', hungarian: 'Ungarisch', finnish: 'Finnisch', vietnamese: 'Vietnamesisch',
+        romanian: 'Rumänisch', slovak: 'Slowakisch', estonian: 'Estnisch', lithuanian: 'Litauisch', croatian: 'Kroatisch', slovene: 'Slowenisch' },
       transcript: 'Transkript', more: 'Mehr', newSummary: 'Neue Zusammenfassung schreiben', openBox: 'Auf aibox1 öffnen (VPN)',
       tldr: 'Zusammenfassung', decisions: 'Entscheidungen', actions: 'Aufgaben', questions: 'Offene Fragen',
     },
@@ -111,7 +121,7 @@
         if (/^\|[\s:|-]+\|$/.test(line) || /^\|\s*#\s*\|/.test(line)) continue;
         if ((m = /^\|(.*)\|$/.exec(line))) {
           const c = m[1].split('|').map((x) => x.trim());
-          add(inline(c[1] || c[0]), [c[2], c[3]].filter(Boolean).join(' · '));
+          add(inline(c[1] || c[0]), [c[2], c[3]].filter((x) => x && !/^[-\u2013\u2014]$/.test(x)).join(' · '));
           continue;
         }
         if ((m = /^[-*]\s+(.*)/.exec(line))) { add(inline(m[1])); continue; }
@@ -144,13 +154,18 @@
     }
 
     /* Speaker cards, the most talkative first. Play: seven seconds of the voice
-       from this meeting (a signed link, two hours). Use: puts a suggested name
-       in the field; Save names applies them everywhere. */
+       from this meeting (a signed link, two hours). The accent: a guess from up
+       to 30 s of their voice (engines/accent), only for English meetings, the
+       likelier ones only. Use: puts a suggested name in the field; Save names
+       applies them everywhere. */
+    const accent = (list) => (list || []).filter((a) => a.p >= 0.1)
+      .map((a) => `${t('accents')[a.accent] || a.accent} ${Math.round(a.p * 100)}%`).join(' · ');
     function speakers(cards) {
       return cards.map((c, i) => `<div class="spk">
         <div class="spkhead"><span class="num">${pad(i + 1)}</span><span class="who">${esc(c.label)}</span>
           <span class="side">${c.turns ? esc(t('talk')(c.share, c.turns, length(c.first))) : ''}</span>
           ${c.clip_url ? `<button type="button" class="textbtn play" data-url="${esc(c.clip_url)}">${esc(t('play'))}</button>` : '<span></span>'}</div>
+        ${accent(c.accent) ? `<p class="said accent">${esc(t('accentGuess')(accent(c.accent)))}</p>` : ''}
         ${(c.lines || []).map((l) => `<p class="said">"${esc(l)}"</p>`).join('')}
         ${(c.suggestions || []).map((x) => `<p class="sugg"><button type="button" class="textbtn use" data-label="${esc(c.label)}" data-name="${esc(x.name)}">${esc(t('use')(x.name))}</button>` +
           `<span class="muted">${esc(t('by')[x.by] || '')}${x.why ? ': ' + esc(x.why) : ''}</span></p>`).join('')}

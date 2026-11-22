@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse, Response
 
 from . import __version__, speakers, vault
 from .people import resolve
-from .util import read_text
+from .util import read_json, read_text
 
 SKILL = Path(__file__).parent / "skills" / "meeting-follow-up" / "SKILL.md"
 
@@ -170,12 +170,14 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
         from .signing import sign
         prof = speakers.profile(store.transcript(mid) or {})
         names, sugg, audio = store.names(mid), speakers.hints(store.folder(mid)), store.audio(mid).exists()
+        accent = (read_json(store.folder(mid) / "accents.json", {}) or {}).get("speakers") or {}
         # the recorder's own suggestions once more through the plausibility check (older ones too)
         cards = [{"label": label, "name": names.get(label, ""),
                   "suggestions": [x for x in sugg.get(label, []) if speakers.plain_name(x.get("name")) and (
                                   x.get("by") != "recorder" or speakers.plausible(label, x.get("name"), x.get("why")))],
                   **{k: p[k] for k in ("share", "words", "turns", "first", "lines")},
-                  "clip_url": f"{s.files_base_url}/{sign(s, mid, 'clip:' + label)}" if audio and p["clip"] else None}
+                  "clip_url": f"{s.files_base_url}/{sign(s, mid, 'clip:' + label)}" if audio and p["clip"] else None,
+                  "accent": accent.get(label) or []}
                  for label, p in prof.items()]
         return sorted(cards, key=lambda c: -c["words"])
 
