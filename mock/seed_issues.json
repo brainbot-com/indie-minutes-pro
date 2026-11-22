@@ -1,0 +1,12 @@
+{
+  "brainbot-com/indie-recorder-sandbox": [
+    {"title": "Product evaluation of the remote control prototype", "body": "Collect user feedback on the prototype and compare it with the original requirements."},
+    {"title": "Decide on the energy source for the remote (battery, kinetic, solar)", "body": "Compare options for cost and user expectations."},
+    {"title": "Update the corporate website with the new product line", "body": "The website still shows last year's products and colour scheme."},
+    {"title": "Marketing research: what users dislike about current remotes", "body": "Summarize the survey results for the next meeting."},
+    {"title": "Release deck for the beta", "body": "Slides for the beta launch: scope, timeline, open risks."},
+    {"title": "Security review of the login flow", "body": "Check token handling and session expiry before the beta."},
+    {"title": "Android app: keep recording with the screen off", "body": "Foreground service with a microphone type, offline queue, VPN check."},
+    {"title": "Meeting room: projector and microphone setup", "body": "Lights cannot be dimmed; check camera angle and slide display.", "state": "closed"}
+  ]
+}

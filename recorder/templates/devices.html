@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Devices · Indie recorder{% endblock %}
+{% block main %}
+<h1>Devices and agents</h1>
+{% if offer %}
+<section class="card highlight connect">
+  <h2>Connect a phone{% if offer_for %} for {{ offer_for }}{% endif %}</h2>
+  <div class="qr big">{{ offer.qr|safe }}</div>
+  <div>
+    <p class="lead">Scan it with the phone's camera (VPN on), or type the code in the app:</p>
+    <p class="code">{{ offer.code }}</p>
+    <p class="note muted">Valid for {{ offer.minutes }} minutes, once. <a href="{{ offer.url }}">{{ offer.url }}</a></p>
+  </div>
+</section>
+{% endif %}
+{% if created %}
+<section class="card highlight">
+  <h2>New agent token for {{ created.name }}</h2>
+  <p>Shown once. Copy it now.</p>
+  <p><code class="token">{{ created.token }}</code></p>
+  <p>Give it to the agent as <code>Authorization: Bearer &lt;token&gt;</code> for <code>{{ s.public_url }}/mcp</code> or the JSON API.</p>
+</section>
+{% endif %}
+<section class="card">
+  <h2>Connect a phone</h2>
+  <form method="post" action="/devices/connect" class="inline">
+    <select name="user_id" aria-label="Person">
+      <option value="">nobody (shared)</option>
+      {% for u in users %}<option value="{{ u.id }}">{{ u.name or u.email or u.ext_id }}</option>{% endfor %}
+    </select>
+    <button>Show a connect code</button>
+  </form>
+  <p class="muted">People connect their own phones in brainbot:agent command: indie-recorder, Connect a phone.</p>
+</section>
+<section class="card">
+  <h2>Token for an agent</h2>
+  <form method="post" action="/devices" class="inline">
+    <input name="name" placeholder="Meeting agent" required>
+    <select name="user_id" aria-label="Person">
+      <option value="">nobody (shared)</option>
+      {% for u in users %}<option value="{{ u.id }}">{{ u.name or u.email or u.ext_id }}</option>{% endfor %}
+    </select>
+    <button>Create token</button>
+  </form>
+</section>
+<section class="card">
+  <h2>Tokens</h2>
+  <table>
+    <thead><tr><th>Name</th><th>Role</th><th>Person</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+    <tr class="{% if r.revoked_at %}muted{% endif %}">
+      <td>{{ r.name }}</td><td>{{ r.role }}{% if r.trusts_identity %} (service){% endif %}</td><td>{{ r.person }}</td><td>{{ local_time(r.created_at) }}</td>
+      <td>{{ local_time(r.last_used_at) if r.last_used_at else '' }}</td>
+      <td>{% if r.revoked_at %}revoked{% elif r.id != tok.id %}<form method="post" action="/devices/{{ r.id }}/revoke"><button class="secondary small">Revoke</button></form>{% else %}this session{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

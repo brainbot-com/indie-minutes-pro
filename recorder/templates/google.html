@@ -1,0 +1,56 @@
+<!doctype html>
+{# Where Google sends a person back after Connect Google Drive (gdrive.py). Relative
+   links: the page lives at oauth/google/callback, on the box and behind brain-tls. #}
+{% set de = lang == "de" %}
+{% set code = error.code if error else "" %}
+{% set want = error.info.get("want", "") if error else "" %}
+{% set got = error.info.get("got", "") if error else "" %}
+{% if de %}
+{% set why = {
+  "expired": "Dieser Link ist abgelaufen. Starten Sie in der indie-recorder-App neu.",
+  "replaced": "Diese Anmeldung wurde durch eine neuere ersetzt oder schon benutzt. Starten Sie in der App neu.",
+  "denied": "Sie haben den Zugriff nicht erlaubt. Nichts wurde verbunden.",
+  "no_drive": "Google Drive wurde nicht erlaubt. Starten Sie neu und lassen Sie das Häkchen bei Drive gesetzt.",
+  "wrong_account": "Sie haben sich bei Google als " ~ got ~ " angemeldet, aber dies ist der Recorder von " ~ want ~ ". Melden Sie sich als " ~ want ~ " an.",
+  "unavailable": "Auf dieser Box ist keine Google-Anmeldung eingerichtet.",
+} %}
+{% else %}
+{% set why = {
+  "expired": "This link has expired. Start again in the indie-recorder app.",
+  "replaced": "This sign-in was replaced by a newer one or used already. Start again in the app.",
+  "denied": "You did not allow access. Nothing was connected.",
+  "no_drive": "Google Drive was not allowed. Start again and leave the Drive box ticked.",
+  "wrong_account": "You signed in to Google as " ~ got ~ ", but this is " ~ want ~ "'s recorder. Sign in as " ~ want ~ ".",
+  "unavailable": "This box has no Google sign-in set up.",
+} %}
+{% endif %}
+<html lang="{{ lang }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<title>Google Drive · Indie recorder</title>
+<link rel="preload" href="../../static/Inter.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="../../static/swiss.css">
+<style>
+main { max-width: 520px; margin: 0 auto; padding: 24px 24px calc(32px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 22px; }
+.done { border-top: 3px solid var(--ink); padding-top: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <header class="bar"><span class="brand">Indie recorder</span><span>{{ s.box_name }}</span></header>
+  <div class="head">
+    <span class="kicker{{ ' live' if not ok }}">Google Drive</span>
+    <h1 class="h1">{% if ok %}{{ "Verbunden" if de else "Connected" }}{% else %}{{ "Nicht verbunden" if de else "Not connected" }}{% endif %}</h1>
+  </div>
+  {% if ok %}
+  <p class="note">{% if de %}Meetings, die Sie in Drive behalten, legt der Recorder jetzt selbst in das Google Drive von <strong>{{ email }}</strong>, sobald sie fertig sind. Er sieht dort nur, was er selbst angelegt hat.{% else %}The recorder now puts the meetings you keep in Drive into <strong>{{ email }}</strong>'s Google Drive itself, as soon as they are done. It sees only what it made there itself.{% endif %}</p>
+  <p class="note muted done">{{ "Sie können diesen Tab schließen." if de else "You can close this tab." }}</p>
+  {% else %}
+  <p class="note">{{ why.get(code) or (("Google hat abgelehnt: " if de else "Google said no: ") ~ (error.detail or code)) }}</p>
+  <p class="note muted done">{{ "Ändern können Sie das in der indie-recorder-App unter Einstellungen, Ablage." if de else "You can change this in the indie-recorder app under Settings, Storage." }}</p>
+  {% endif %}
+</main>
+</body>
+</html>

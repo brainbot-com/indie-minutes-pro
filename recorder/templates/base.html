@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Indie recorder{% endblock %}</title>
+<link rel="preload" href="/static/Inter.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/swiss.css">
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="/favicon.ico">
+{% block head %}{% endblock %}
+</head>
+<body>
+<header class="top"><div class="bar">
+  <span>{% block barleft %}<a class="brand" href="/">Indie recorder</a>{% endblock %}</span>
+  {% if tok %}
+  <nav class="end">
+    <a href="/app/">Record</a>
+    {% if tok.role == 'admin' %}<a href="/devices">Devices</a>{% endif %}
+  </nav>
+  {% endif %}
+</div></header>
+<main>
+{% block main %}{% endblock %}
+</main>
+<footer>Indie recorder {{ version }} · <a href="/review">Follow-ups</a> · <a href="/logout">Log out</a></footer>
+</body>
+</html>

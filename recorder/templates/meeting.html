@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}{{ m.title or m.id }} · Indie recorder{% endblock %}
+{% block head %}{% if m.state not in ('done', 'failed') %}<meta http-equiv="refresh" content="5">{% endif %}{% endblock %}
+{% block barleft %}<a href="/">Back</a>{% endblock %}
+{% block main %}
+<div class="head">
+  <span class="kicker">{{ local_time(m.started_at or m.created_at) }}</span>
+  <h1 class="h2">{{ m.title or m.id }}</h1>
+</div>
+
+{% if m.state == 'failed' %}<p class="error">Processing failed: {{ m.error }}</p>
+{% elif m.state != 'done' %}<p class="error">Processing ({{ m.state }}). This page refreshes itself.</p>{% endif %}
+{% for note in t.notes or [] %}<p class="note muted">{{ note }}</p>{% endfor %}
+
+<div>
+  <div class="cells">
+    <div class="cell"><span class="label">Length</span><span class="v tnum">{{ fmt_clock(m.duration_s) }}</span></div>
+    <div class="cell"><span class="label">Speakers</span><span class="v">{{ m.speakers or 'Not yet' }}</span></div>
+    <form method="post" action="/m/{{ m.id }}/storage" class="cell">
+      <span class="label" id="lDrive">Google Drive</span>
+      <input type="hidden" name="storage" value="{{ 'local' if m.storage == 'drive' else 'drive' }}">
+      <button class="switch" role="switch" aria-checked="{{ 'true' if m.storage == 'drive' else 'false' }}" aria-labelledby="lDrive"></button>
+    </form>
+  </div>
+  <p class="note" style="margin-top: 12px">{% if m.storage != 'drive' %}Stays on this box.{% elif m.drive_url %}Stored in Drive. <a href="{{ m.drive_url }}">Open folder</a>{% else %}Waiting for the Drive upload.{% endif %}</p>
+</div>
+
+{% if has_audio %}<audio id="player" controls preload="none" src="/m/{{ m.id }}/audio"></audio>{% endif %}
+
+{% if summary_md %}
+<div class="summary">{{ summary_md|md|safe }}</div>
+{% if versions|length > 1 %}
+<p class="note muted">Versions:
+  {% for v in versions %}<a href="/m/{{ m.id }}{% if not loop.last %}?v={{ v.version }}{% endif %}" class="{% if (shown and shown.version == v.version) or (not shown and loop.last) %}current{% endif %}">v{{ v.version }} {{ v.author }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
+</p>
+{% endif %}
+{% endif %}
+
+<div class="folds">
+{% if names %}
+<details class="fold">
+  <summary>Speaker names</summary>
+  <div class="inner">
+  <form method="post" action="/m/{{ m.id }}/speakers" class="speakers">
+    {% for label, name in names.items() %}<label>{{ label }}<input name="name:{{ label }}" value="{{ name }}" placeholder="name"></label>{% endfor %}
+    <button class="btn">Save names</button>
+  </form>
+  <p class="note muted">Names replace "Speaker N" everywhere. No voice profiles are stored.</p>
+  </div>
+</details>
+{% endif %}
+
+{% if segs %}
+<details class="fold">
+  <summary>Transcript</summary>
+  <div class="inner transcript">
+  {% for seg in segs %}<p><span class="spk">{{ seg.name }}</span> <a class="ts" href="#" data-t="{{ seg.s }}">{{ fmt_ts(seg.s) }}</a><br>{{ seg.text }}</p>{% endfor %}
+  </div>
+</details>
+{% endif %}
+
+<details class="fold">
+  <summary>Details</summary>
+  <div class="inner small">
+    {% if t.engine %}<p class="muted">{{ t.engine.label or t.engine.name }}{% if t.timings and t.timings.engine_wall_s %} · transcribed in {{ t.timings.engine_wall_s|round|int }} s{% endif %}</p>{% endif %}
+    {% if proposals %}<p class="muted">Follow-ups: {% for p in proposals.values() %}{{ p.kind|replace('_', ' ') }} ({{ p.state }}){% if not loop.last %}, {% endif %}{% endfor %} · <a href="/review">review</a></p>{% endif %}
+    <p>{% for f in ['summary.md', 'actions.json', 'transcript.md', 'transcript.json'] %}<a href="/m/{{ m.id }}/files/{{ f }}">{{ f }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</p>
+    <form method="post" action="/m/{{ m.id }}/reprocess" class="inline">
+      <input type="hidden" name="kind" value="transcribe">
+      <select name="engine">{% for e in engines %}<option {% if e == m.engine %}selected{% endif %}>{{ e }}</option>{% endfor %}</select>
+      <button class="btn">Transcribe again</button>
+    </form>
+    <form method="post" action="/m/{{ m.id }}/reprocess" class="inline">
+      <input type="hidden" name="kind" value="summarize">
+      <button class="btn">New summary</button>
+    </form>
+  </div>
+</details>
+</div>
+<script>
+document.querySelectorAll('a.ts').forEach(a => a.addEventListener('click', e => {
+  e.preventDefault();
+  const p = document.getElementById('player');
+  if (p) { p.currentTime = Number(a.dataset.t); p.play(); }
+}));
+</script>
+{% endblock %}

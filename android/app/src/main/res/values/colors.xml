@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Swiss: paper and ink; the window behind the first frame matches the paper. -->
+    <color name="bg">#FFFFFF</color>
+    <color name="rec">#E1251B</color>
+    <color name="ic_bg">#E1251B</color>
+</resources>

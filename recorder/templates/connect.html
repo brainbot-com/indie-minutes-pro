@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111111" media="(prefers-color-scheme: dark)">
+<meta name="referrer" content="no-referrer">
+<title>Connect a phone · Indie recorder</title>
+{# Relative links: the same page works on the box and behind brain-tls under /indie-recorder/. #}
+<link rel="preload" href="static/Inter.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="static/swiss.css">
+<style>
+main { max-width: 520px; margin: 0 auto; padding: 24px 24px calc(32px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 22px; }
+.go { min-height: 150px; border: 0; padding: 18px; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start; gap: 18px;
+  background: var(--red); color: var(--on-red); font-size: 34px; font-weight: 900; letter-spacing: -.03em; text-decoration: none; }
+.go:active { background: var(--red-dark); }
+.go .dot { flex: none; width: 26px; height: 26px; border-radius: 50%; background: var(--on-red); }
+.steps { border-top: 3px solid var(--ink); }
+.steps .row { grid-template-columns: 40px minmax(0, 1fr); }
+.more { display: flex; flex-wrap: wrap; gap: 14px 20px; align-items: center; }
+</style>
+</head>
+<body>
+<main>
+  <header class="bar"><span class="brand">Indie recorder</span><span id="box"></span></header>
+
+  <div class="head">
+    <span class="kicker live" id="kicker"></span>
+    <h1 class="h1" id="title"></h1>
+  </div>
+  <p class="note" id="sub"></p>
+
+  <a class="go" id="open" hidden><span class="dot" aria-hidden="true"></span><span id="openLabel"></span></a>
+
+  <section id="install" hidden>
+    <h2 class="section" id="installHead"></h2>
+    <div class="rows steps">
+      <div class="row"><span class="num">01</span><span id="install1"></span></div>
+      <div class="row"><span class="num">02</span><span id="install2"></span></div>
+    </div>
+    <p style="margin-top: 14px"><a class="btn" id="apk"></a></p>
+  </section>
+
+  <div class="more" id="alt" hidden><a class="textbtn" id="web"></a></div>
+  <p class="note muted" id="foot"></p>
+</main>
+<script>
+'use strict';
+const LANG = (navigator.language || 'en').toLowerCase().startsWith('de') ? 'de' : 'en';
+const T = {
+  en: {
+    kicker: 'Connect this phone', titleFor: (p) => `Record into ${p}'s account`, title: 'Record into your account',
+    code: (c, t) => `Code ${c}, valid until ${t}. It works once.`,
+    openApp: 'Open the app', openWeb: 'Record in the browser', orWeb: 'Or record in the browser',
+    installHead: 'The app is not on this phone yet', installHeadMaybe: 'No app yet?',
+    install1: 'Install it (about 7 MB): open the download and allow installs from the browser.',
+    install2: 'Come back here and tap Open the app.', apk: 'Install the app',
+    webNote: 'The browser needs the box\'s certificate on the phone once (see the recorder\'s README); the app does not.',
+    badKicker: 'Code not valid', badTitle: 'This code is used or expired',
+    badSub: 'Make a new one in brainbot:agent command: indie-recorder, Connect a phone.',
+    noBox: 'The box is not reachable. Is the VPN on? Then reload this page.',
+    noCode: 'This page opens from the code in brainbot:agent command: indie-recorder, Connect a phone.',
+    foot: 'Recordings go from this phone to the box over the VPN and nowhere else.',
+  },
+  de: {
+    kicker: 'Dieses Telefon verbinden', titleFor: (p) => `Aufnahmen für ${p}`, title: 'Aufnahmen in Ihr Konto',
+    code: (c, t) => `Code ${c}, gültig bis ${t}. Er funktioniert einmal.`,
+    openApp: 'App öffnen', openWeb: 'Im Browser aufnehmen', orWeb: 'Oder im Browser aufnehmen',
+    installHead: 'Die App ist noch nicht auf diesem Telefon', installHeadMaybe: 'Noch keine App?',
+    install1: 'Installieren Sie sie (etwa 7 MB): den Download öffnen und Installationen aus dem Browser erlauben.',
+    install2: 'Kommen Sie hierher zurück und tippen Sie auf App öffnen.', apk: 'App installieren',
+    webNote: 'Der Browser braucht einmal das Zertifikat der Box auf dem Telefon (siehe README des Recorders); die App nicht.',
+    badKicker: 'Code ungültig', badTitle: 'Dieser Code ist benutzt oder abgelaufen',
+    badSub: 'Erstellen Sie einen neuen in brainbot:agent command: indie-recorder, Telefon verbinden.',
+    noBox: 'Die Box ist nicht erreichbar. Ist das VPN an? Dann diese Seite neu laden.',
+    noCode: 'Diese Seite öffnet sich über den Code in brainbot:agent command: indie-recorder, Telefon verbinden.',
+    foot: 'Aufnahmen gehen von diesem Telefon über das VPN an die Box und nirgendwo sonst hin.',
+  },
+}[LANG];
+const $ = (id) => document.getElementById(id);
+const code = decodeURIComponent((location.hash || '').slice(1)).replace(/[^0-9A-Za-z]/g, '').toUpperCase();
+const android = /Android/i.test(navigator.userAgent);
+const missing = new URLSearchParams(location.search).has('missing');
+document.documentElement.lang = LANG;
+$('foot').textContent = T.foot;
+
+function bad(kicker, title, sub) {
+  $('kicker').textContent = kicker; $('title').textContent = title; $('sub').textContent = sub;
+}
+
+async function main() {
+  if (code.length !== 8) { bad(T.kicker, T.title, T.noCode); return; }
+  let info;
+  try {
+    const r = await fetch('api/v1/pair/' + code, { cache: 'no-store' });
+    if (r.status === 404) { bad(T.badKicker, T.badTitle, T.badSub); return; }
+    if (!r.ok) throw new Error(String(r.status));
+    info = await r.json();
+  } catch (e) { bad(T.kicker, T.title, T.noBox); return; }
+  $('box').textContent = info.box || '';
+  $('kicker').textContent = T.kicker;
+  $('title').textContent = info.person ? T.titleFor(info.person) : T.title;
+  const until = new Date(info.expires_at).toLocaleTimeString(LANG, { hour: '2-digit', minute: '2-digit' });
+  $('sub').textContent = T.code(code.slice(0, 4) + '-' + code.slice(4), until);
+  const web = info.webapp + '#code=' + code;
+  if (android) {
+    // The app gets the code, the box's address and its certificate; without the app, Chrome comes back here.
+    const back = location.href.split('#')[0].split('?')[0] + '?missing=1#' + code;
+    $('open').href = 'intent://pair?c=' + code + '&u=' + encodeURIComponent(info.box_url) + (info.ca ? '&ca=' + info.ca : '') +
+      '#Intent;scheme=indierecorder;package=com.brainbot.indierecorder;S.browser_fallback_url=' + encodeURIComponent(back) + ';end';
+    $('openLabel').textContent = T.openApp;
+    $('open').hidden = false;
+    if (info.apk_url) {
+      $('installHead').textContent = missing ? T.installHead : T.installHeadMaybe;
+      $('install1').textContent = T.install1; $('install2').textContent = T.install2;
+      $('apk').textContent = T.apk; $('apk').href = info.apk_url;
+      $('install').hidden = false;
+      if (missing) $('install').parentNode.insertBefore($('install'), $('open'));
+    }
+    $('web').textContent = T.orWeb; $('web').href = web; $('alt').hidden = false;
+  } else {
+    $('open').href = web;
+    $('openLabel').textContent = T.openWeb;
+    $('open').hidden = false;
+    // on the box's own address the browser needs its certificate; behind brain-tls it does not
+    if (new URL(info.webapp, location.href).origin !== location.origin) $('foot').textContent = T.webNote + ' ' + T.foot;
+  }
+}
+main();
+</script>
+</body>
+</html>
