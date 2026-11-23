@@ -24,6 +24,11 @@ class Engine:
     def info(self):
         return {"name": self.name, "label": self.label}
 
+    def waiting(self):
+        """Why the engine cannot take a recording now, or None when it can: not up
+        yet, or its model still downloading. The worker leaves such jobs queued."""
+        return None
+
 
 def _spk_num(label):
     m = re.search(r"(\d+)$", label)

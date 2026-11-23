@@ -1,0 +1,25 @@
+{
+	admin off
+	auto_https off
+}
+
+# The recorder: the meetings app, the phones' upload API and web app, MCP for agents.
+https://:8443 {
+	tls /certs/server.crt /certs/server.key
+	request_body {
+		max_size 80MB
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy same-origin
+		Permissions-Policy "microphone=(self)"
+	}
+	reverse_proxy recorder:8000
+}
+
+# Plain HTTP, only to hand a phone the CA certificate it trusts first.
+http://:8480 {
+	root * /certs/public
+	file_server browse
+}

@@ -1,0 +1,7 @@
+# what a running recorder makes here
+.env
+data/
+models/
+secrets/
+scratch/
+engine-bin/

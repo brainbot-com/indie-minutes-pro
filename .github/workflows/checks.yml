@@ -1,0 +1,68 @@
+# On every pull request: the tests, and the box app file stays installable
+# (the box refuses an app file that does not resolve or breaks the label
+# contract) and releasable (a release rewrites the image pins and the version
+# label together, and asserts their exact shape).
+name: Checks
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]     # main runs them in publish-images.yml
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: indie-recorder:test
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/indie-recorder:buildcache
+      - run: docker run --rm -e PYTHONDONTWRITEBYTECODE=1 indie-recorder:test python -m pytest -q -p no:cacheprovider tests
+      - run: python3 -m py_compile engines/jobserver.py engines/nemo/server.py
+
+  box-app:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The app file can still be pinned
+        run: indiebox/pin-images.sh --check
+
+      - name: The app file is a valid Compose project
+        run: |
+          set -euo pipefail
+          # secure-gate comes from the box, and the :? values from its install form
+          cat > "$RUNNER_TEMP/gate.yml" <<'EOF'
+          services:
+            secure-gate:
+              image: busybox
+              command: ["true"]
+          EOF
+          INDIE_RECORDER_PASSWORD=dummy INDIE_RECORDER_DATA_KEY=dummy \
+          docker compose -f indiebox/indie-recorder.compose.yml -f "$RUNNER_TEMP/gate.yml" \
+            --profile stable config --images
+
+      - name: One labelled UI service named after the app, and a literal version
+        run: |
+          set -euo pipefail
+          f=indiebox/indie-recorder.compose.yml
+          test "$(grep -c 'indiebox.app.name:' "$f")" = 1
+          grep -Eq '^  indie-recorder:$' "$f"
+          grep -Eq '^\s+indiebox\.app\.version: "[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?"$' "$f"
+
+      - name: The box's hard rules
+        run: |
+          set -euo pipefail
+          f=indiebox/indie-recorder.compose.yml
+          # no published ports (the gateway owns them), no build (only this file
+          # reaches the box), no relative bind mounts
+          ! grep -Eq '^\s+ports:' "$f"
+          ! grep -Eq '^\s+build:' "$f"
+          ! grep -Eq '^\s+- \.{1,2}/' "$f"

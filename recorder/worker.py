@@ -40,6 +40,7 @@ class Worker:
         self.stopping = threading.Event()
         self.thread = None
         self.current = None
+        self.waiting = None       # why queued recordings wait (the speech model still downloading)
 
     def start(self):
         self.db.run("UPDATE jobs SET state = 'queued', started_at = NULL WHERE state = 'running'")
@@ -60,12 +61,35 @@ class Worker:
         return self.db.all("SELECT * FROM jobs WHERE state IN ('queued', 'running') ORDER BY id")
 
     def _claim(self):
-        with self.db.tx() as con:
-            row = con.execute("SELECT * FROM jobs WHERE state = 'queued' ORDER BY id LIMIT 1").fetchone()
-            if not row:
-                return None
-            con.execute("UPDATE jobs SET state = 'running', started_at = ? WHERE id = ?", (now_iso(), row["id"]))
-            return dict(row)
+        """The oldest queued job that can run now. One that needs the speech engine
+        waits while the engine cannot take it (not up yet, its model downloading),
+        and the others go ahead of it meanwhile."""
+        waits, why = {}, None
+        for row in self.db.all("SELECT * FROM jobs WHERE state = 'queued' ORDER BY id"):
+            name = self._needs_engine(row)
+            if name:
+                if name not in waits:
+                    try:
+                        waits[name] = self.engines.get(name).waiting()
+                    except EngineError:
+                        waits[name] = None            # an unknown engine: the job fails and says so
+                if waits[name]:
+                    why = why or waits[name]
+                    continue
+            if self.db.run("UPDATE jobs SET state = 'running', started_at = ? WHERE id = ? AND state = 'queued'",
+                           now_iso(), row["id"]):
+                self.waiting = None
+                return dict(row)
+        self.waiting = why
+        return None
+
+    def _needs_engine(self, job):
+        """The speech engine a job will use, if it transcribes."""
+        if job["kind"] == "summarize":
+            return None
+        if job["kind"] == "process" and (self.store.folder(job["meeting_id"]) / "transcript.json").exists():
+            return None
+        return job["engine"] or self.s.engine
 
     def _loop(self):
         while not self.stopping.is_set():

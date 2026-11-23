@@ -1,13 +1,16 @@
 """HTTP service: chunked upload API for phones, JSON API for agents, web view, PWA.
 
-Caddy terminates TLS on 10.1.9.7:8443 and lets in VPN clients only; this app
-listens on the host's loopback (published 127.0.0.1:18000) and on the internal
-Docker network, never on the LAN."""
+A proxy in front terminates TLS: Caddy on 10.1.9.7:8443 for VPN clients only on
+aibox1, the gateway on an Indie Box. This app never listens on the LAN itself."""
 import base64
 import contextlib
+import hmac
 import mimetypes
+import os
 import shutil
 import threading
+import time
+from datetime import timedelta
 from pathlib import Path
 from urllib.parse import quote
 
@@ -21,24 +24,28 @@ from starlette.concurrency import run_in_threadpool
 from markdown_it import MarkdownIt
 from pydantic import BaseModel, Field
 
-from . import __version__, audio, speakers, vault
+from . import __version__, audio, speakers, urls, vault
 from .config import Settings
 from .connect import CODE_MINUTES, Codes, Guesses, shown
 from .db import open_index
 from .engines import NAMES as ENGINE_NAMES, Engines
 from .followup import Followup
 from .gdrive import Google, GoogleError
-from .people import label, resolve
+from .people import label, person_for, resolve
 from .render import display_name, local_time, render_summary_md, words_to_segments
 from .store import Store
 from .util import (fmt_clock, fmt_duration, fmt_ts, hash_token, new_id, new_meeting_id, new_token, now_iso,
-                   parse_iso, read_bytes, read_text, sha256_hex, write_bytes)
+                   parse_iso, read_bytes, read_text, sha256_hex, utcnow, write_bytes)
 from .worker import Worker
 
 HERE = Path(__file__).parent
 PWA_DIR = HERE.parent / "pwa"
+# the Meetings app of brainbot:agent command, which is also the web app in a browser
+WEB_APP = HERE.parent / "integrations" / "indie-chat" / "indie-recorder.html"
+AGENT_SKILL = HERE.parent / "agents" / "meeting-follow-up" / "SKILL.md"
 mimetypes.add_type("font/woff2", ".woff2")   # the slim image does not know it
 COOKIE = "ir_token"
+SESSION_DAYS = 30
 READERS = ("device", "admin")
 WRITERS = ("agent", "admin")
 FILES = {"transcript.json", "transcript.md", "summary.md", "summary.json", "actions.json",
@@ -151,6 +158,16 @@ def create_app(settings=None):
     app.state.worker, app.state.followup, app.state.engines = worker, followup, engines
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     app.mount("/app", StaticFiles(directory=PWA_DIR, html=True), name="app")
+    app.add_middleware(Address)
+
+    # The box's owner of the recorder, who signs in with a password (OWNER_PASSWORD,
+    # from an Indie Box's install form). Without one, only tokens sign in.
+    owner_id = None
+    if s.owner_password:
+        owner = person_for(db, "owner")
+        if s.owner_name and not owner["name"]:
+            db.run("UPDATE users SET name = ? WHERE id = ?", s.owner_name.strip()[:80], owner["id"])
+        owner_id = owner["id"]
 
     # -- auth: per-device and per-agent tokens, stored hashed ----------------
 
@@ -165,7 +182,17 @@ def create_app(settings=None):
         row = db.one("SELECT * FROM tokens WHERE token_hash = ? AND revoked_at IS NULL", hash_token(raw))
         if row and (row["last_used_at"] or "")[:16] != now_iso()[:16]:
             db.run("UPDATE tokens SET last_used_at = ? WHERE id = ?", now_iso(), row["id"])
-        return row
+        return row or session_row(raw)
+
+    def session_row(raw):
+        """A browser signed in with the owner's password: a token-like row of role "web"."""
+        ses = db.one("SELECT * FROM sessions WHERE token_hash = ? AND expires_at > ?", hash_token(raw), now_iso())
+        if not ses:
+            return None
+        if (ses["last_used_at"] or "")[:16] != now_iso()[:16]:
+            db.run("UPDATE sessions SET last_used_at = ? WHERE id = ?", now_iso(), ses["id"])
+        return {"id": ses["id"], "name": "Browser", "role": "web", "user_id": ses["user_id"], "trusts_identity": 0,
+                "created_at": ses["created_at"], "last_used_at": ses["last_used_at"], "revoked_at": None}
 
     def need(*roles, html=False):
         def dep(request: Request):
@@ -197,9 +224,10 @@ def create_app(settings=None):
             return who.caller != "user"
         return who.token["role"] == "agent"
 
-    def page(request, name, who, **ctx):
+    def page(request, name, who, status_code=200, **ctx):
         tok = who.token if hasattr(who, "token") else who
-        return templates.TemplateResponse(request, name, {"tok": tok, "who": who, "s": s, **ctx})
+        return templates.TemplateResponse(request, name, {"tok": tok, "who": who, "s": s, **ctx},
+                                          status_code=status_code)
 
     def meeting_or_404(mid, who=None):
         m = store.meta(mid)
@@ -434,6 +462,7 @@ def create_app(settings=None):
     def health():
         alive = bool(worker.thread and worker.thread.is_alive())
         return {"ok": True, "version": __version__, "worker": alive, "engine": s.engine, "llm": s.llm_model, "box": s.box_name,
+                "drive": s.drive or google.available(),
                 # phones encrypt their chunks for this key before they store or send them
                 "seal": vault.SEALER.describe() if vault.SEALER else None}
 
@@ -470,33 +499,101 @@ def create_app(settings=None):
 
     # -- web view ---------------------------------------------------------------
 
+    logins = Guesses(limit=10)          # wrong passwords from anyone, per 10 minutes
+
+    def lang_of(request):
+        return "de" if request.headers.get("accept-language", "").lower().startswith("de") else "en"
+
     @app.get("/login", response_class=HTMLResponse)
     def login_form(request: Request, next: str = "/"):
-        return page(request, "login.html", None, next=next, error=None)
+        return page(request, "login.html", None, next=next, error=None, lang=lang_of(request))
 
     @app.post("/login")
     def login(request: Request, token: str = Form(...), next: str = Form("/")):
-        row = db.one("SELECT * FROM tokens WHERE token_hash = ? AND revoked_at IS NULL", hash_token(token.strip()))
-        if not row or row["role"] not in READERS:
-            return page(request, "login.html", None, next=next, error="Unknown or revoked token.")
+        given, lang = token.strip(), lang_of(request)
         safe = next.startswith("/") and not next.startswith("//") and "\\" not in next
         resp = RedirectResponse(next if safe else "/", status_code=303)
-        resp.set_cookie(COOKIE, token.strip(), httponly=True, secure=s.secure_cookies,
-                        samesite="strict", max_age=180 * 86400)
+        # a cookie marked Secure is never sent back over plain HTTP (an Indie Box's default)
+        secure = s.secure_cookies and request.url.scheme == "https"
+        if s.owner_password:
+            if logins.blocked():
+                return page(request, "login.html", None, next=next, lang=lang, error="blocked", status_code=429)
+            if hmac.compare_digest(given.encode(), s.owner_password.encode()):
+                raw = new_token()
+                expires = (utcnow() + timedelta(days=SESSION_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+                db.run("INSERT INTO sessions (id, user_id, token_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
+                       new_id("ses"), owner_id, hash_token(raw), now_iso(), expires)
+                db.run("DELETE FROM sessions WHERE expires_at <= ?", now_iso())
+                resp.set_cookie(COOKIE, raw, httponly=True, secure=secure, samesite="strict",
+                                max_age=SESSION_DAYS * 86400)
+                return resp
+        row = db.one("SELECT * FROM tokens WHERE token_hash = ? AND revoked_at IS NULL", hash_token(given))
+        if not row or row["role"] not in READERS:
+            if s.owner_password:
+                logins.miss()
+            return page(request, "login.html", None, next=next, lang=lang,
+                        error="password" if s.owner_password else "token", status_code=401)
+        resp.set_cookie(COOKIE, given, httponly=True, secure=secure, samesite="strict", max_age=180 * 86400)
         return resp
 
     @app.get("/logout")
-    def logout():
+    def logout(request: Request):
+        raw = request.cookies.get(COOKIE, "")
+        if raw:
+            db.run("DELETE FROM sessions WHERE token_hash = ?", hash_token(raw))
         resp = RedirectResponse("/login", status_code=303)
         resp.delete_cookie(COOKIE)
         return resp
 
     @app.get("/", response_class=HTMLResponse)
-    def index(request: Request, who=Depends(person(*READERS, html=True))):
+    def index(request: Request):
+        row = token_row(request)
+        if row and row["role"] == "web":
+            return web_app(request)
+        who = resolve(db, row, request.headers) if row and row["role"] in READERS else None
+        if not who:
+            return RedirectResponse("/login?next=/", status_code=303)
         return page(request, "meetings.html", who, meetings=store.list(who=who), jobs=worker.queue())
 
+    def web_app(request):
+        """The Meetings app, as in brainbot:agent command, talking to /api/v1/web."""
+        lang = lang_of(request)
+        html = WEB_APP.read_text()
+        shim = ("<script>window.IndieApp = window.IndieApp || { web: true, ask: async () => { throw new Error('no agent'); },"
+                " fetch: async (connector, body) => {"
+                " const r = await fetch('/api/v1/web', { method: 'POST', credentials: 'same-origin',"
+                " headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });"
+                " if (r.status === 401) { location.href = '/login?next=/'; throw new Error('signed out'); }"
+                " const j = await r.json().catch(() => ({})); if (!j.ok) throw new Error(j.error || r.statusText);"
+                " return j; } };</script>")
+        html = html.replace("<html>", f"<html lang=\"{lang}\">", 1).replace("<script", shim + "<script", 1)
+        return HTMLResponse(html, headers={"Cache-Control": "no-store", "X-Frame-Options": "DENY",
+                                           "Referrer-Policy": "same-origin"})
+
+    @app.get("/agent/SKILL.md", response_class=PlainTextResponse)
+    def agent_skill():
+        """The meeting-follow-up skill for any agent with MCP (agents/README.md)."""
+        return PlainTextResponse(AGENT_SKILL.read_text(), media_type="text/markdown; charset=utf-8")
+
+    @app.get("/agent/", response_class=HTMLResponse)
+    def agent_guide(request: Request):
+        """How to set up one's own agent (agents/README.md), with this recorder's address in it."""
+        text = (AGENT_SKILL.parent.parent / "README.md").read_text().replace("https://recorder.example:9207",
+                                                                               s.public_url)
+        return templates.TemplateResponse(request, "agent.html", {"s": s, "tok": None, "body": md.render(text)})
+
+    def web_or_person(request: Request):
+        """A browser signed in with the password goes to the meetings app instead
+        (its meeting links land there); everyone else as person(*READERS) does."""
+        row = token_row(request)
+        if row and row["role"] == "web":
+            return row
+        return person(*READERS, html=True)(request)
+
     @app.get("/m/{mid}", response_class=HTMLResponse)
-    def meeting_page(request: Request, mid: str, v: int | None = None, who=Depends(person(*READERS, html=True))):
+    def meeting_page(request: Request, mid: str, v: int | None = None, who=Depends(web_or_person)):
+        if isinstance(who, dict):                        # a web session: the meetings app opens it
+            return RedirectResponse("/#m=" + quote(mid), status_code=303)
         m = meeting_or_404(mid, who)
         versions = store.summary_versions(mid)
         shown = next((x for x in versions if x["version"] == v), None) if v else None
@@ -743,11 +840,20 @@ def create_app(settings=None):
     from .engines.remote import health as engine_health
     from .mcp_server import mount_mcp
 
+    seen = {"at": -60.0, "engines": {}}
+
     def engines_health():
+        """The engines as the apps show them, asked at most every 15 s; an engine set
+        to "off" (engine B on an Indie Box, QWEN_URL=off) is not there to ask."""
+        if time.monotonic() - seen["at"] < 15:
+            return seen["engines"]
         out = {}
         for name, url in (("A", s.nemo_url), ("B", s.qwen_url)):
-            h = engine_health(url)
+            if url == "off":
+                continue
+            h = engine_health(url, timeout=3)
             out[name] = {"ok": bool(h.get("ok")), "busy": bool(h.get("current"))} if h else {"ok": False}
+        seen.update(at=time.monotonic(), engines=out)
         return out
     mcp_call = mount_mcp(app, s, db, store, followup, token_row, worker=worker, engines_health=engines_health)
 
@@ -782,6 +888,17 @@ def create_app(settings=None):
             return JSONResponse({"ok": False, "error": "this phone belongs to nobody: connect it again with a code"},
                                 status_code=403)
         return await answer(request, who, PHONE_OPS)
+
+    # A browser signed in with the owner's password (an Indie Box, or a recorder on a Mac):
+    # the phone's ops plus connecting phones and giving the person's own agent a token.
+    AGENT_OPS = {"agent_tokens", "new_agent_token", "revoke_agent_token"}
+    WEB_OPS = PHONE_OPS | {"pair_phone", "phones", "remove_phone"} | AGENT_OPS
+
+    @app.post("/api/v1/web")
+    async def web_ops(request: Request, who=Depends(person("web"))):
+        if "application/json" not in request.headers.get("content-type", ""):
+            return JSONResponse({"ok": False, "error": "send JSON"}, status_code=415)
+        return await answer(request, who, WEB_OPS)
 
     async def answer(request, who, allowed=None):
         try:
@@ -832,7 +949,37 @@ def create_app(settings=None):
             if not n:
                 raise ToolError("no such phone")
             return {"removed": args.get("id")}
+        if op in AGENT_OPS:
+            if who.token["role"] != "web":
+                raise ToolError("agents in brainbot:agent command use the connector, not a token")
+            return agent_op(op, args, who)
         return mcp_call(op, args, who)
+
+    MAX_AGENTS = 5
+
+    def agent_op(op, args, who):
+        """A token for the person's own agent (Claude, OpenClaw, Hermes, ...) to use the MCP
+        server: it acts for them, writes summaries and suggests speaker names."""
+        if op == "new_agent_token":
+            if len(agent_tokens(who)) >= MAX_AGENTS:
+                raise ToolError(f"at most {MAX_AGENTS} agents: remove one first")
+            name = " ".join(str(args.get("name") or "").split())[:60] or "Agent"
+            raw = create_token(db, name, "agent", user_id=who.user_id)
+            return {"name": name, "token": raw, "mcp_url": s.public_url + "/mcp",
+                    "skill_url": s.public_url + "/agent/SKILL.md", "agents": agent_tokens(who)}
+        if op == "revoke_agent_token":
+            n = db.run("UPDATE tokens SET revoked_at = ? WHERE id = ? AND user_id = ? AND role = 'agent'"
+                       " AND revoked_at IS NULL", now_iso(), str(args.get("id", "")), who.user_id)
+            if not n:
+                raise ToolError("no such agent")
+            return {"removed": args.get("id"), "agents": agent_tokens(who)}
+        return {"agents": agent_tokens(who), "mcp_url": s.public_url + "/mcp",
+                "skill_url": s.public_url + "/agent/SKILL.md"}
+
+    def agent_tokens(who):
+        return [{"id": r["id"], "name": r["name"], "created_at": r["created_at"], "last_used_at": r["last_used_at"]}
+                for r in db.all("SELECT * FROM tokens WHERE user_id = ? AND role = 'agent' AND revoked_at IS NULL"
+                                " ORDER BY created_at", who.user_id)]
 
     def phones(who):
         return [{"id": r["id"], "name": r["name"], "created_at": r["created_at"], "last_used_at": r["last_used_at"]}
@@ -841,6 +988,19 @@ def create_app(settings=None):
 
     from .mcp_server import ToolError
     return app
+
+
+class Address:
+    """Notes the address each request came in on (recorder/urls.py), for PUBLIC_URL=auto.
+    Plain ASGI, so the endpoint and the threads it runs in see it."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            urls.set_from(Request(scope))
+        await self.app(scope, receive, send)
 
 
 def create_token(db, name, role, user_id=None, trusts_identity=False):
@@ -868,8 +1028,12 @@ def main():
     # where a stuck server stands: `docker kill -s USR1 indie-recorder-recorder-1`
     # writes every thread's stack to the log (the host allows no debugger to attach)
     faulthandler.register(signal.SIGUSR1, all_threads=True)
-    uvicorn.run(create_app(), host="0.0.0.0", port=8000, proxy_headers=True,
-                forwarded_allow_ips="127.0.0.1,172.16.0.0/12", log_level="info")
+    # the proxies whose X-Forwarded-Proto counts: Caddy on aibox1's Docker network by default;
+    # an Indie Box's gateway sits on a network of the box's choosing ("*" there: only the
+    # box's own containers reach this one)
+    uvicorn.run(create_app(), host="0.0.0.0", port=int(os.environ.get("PORT", "8000")), proxy_headers=True,
+                forwarded_allow_ips=os.environ.get("FORWARDED_ALLOW_IPS", "127.0.0.1,172.16.0.0/12"),
+                log_level="info")
 
 
 if __name__ == "__main__":

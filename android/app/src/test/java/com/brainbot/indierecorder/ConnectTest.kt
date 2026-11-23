@@ -44,7 +44,15 @@ class ConnectTest {
         assertNull(PairLink.parse("https://10.1.9.7:8443/connect#K7Q4M2XB"))
         assertNull(PairLink.parse("indierecorder://pair?c=K7Q4M2XB&u=${enc("http://10.1.9.7")}&ca=$ca"))   // no https
         assertNull(PairLink.parse("indierecorder://pair?c=K7Q4&u=${enc("https://10.1.9.7:8443")}&ca=$ca")) // short
-        assertNull(PairLink.parse("indierecorder://pair?c=K7Q4M2XB&u=${enc("https://10.1.9.7:8443")}"))    // no CA
+        assertNull(PairLink.parse("indierecorder://pair?c=K7Q4M2XB&u=${enc("https://10.1.9.7:8443")}&ca=@@@@"))  // a CA that does not decode
+    }
+
+    @Test
+    fun aBoxWithoutACaOfItsOwnConnectsWithThePhonesTrust() {
+        // an Indie Box: a public certificate, or its own CA installed on the phone
+        val l = PairLink.parse("indierecorder://pair?c=K7Q4M2XB&u=${enc("https://indiebox-7k2f.local:9207")}") as PairLink.Code
+        assertEquals("https://indiebox-7k2f.local:9207", l.url)
+        assertEquals(0, l.caDer.size)
     }
 
     @Test

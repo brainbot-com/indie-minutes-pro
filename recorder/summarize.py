@@ -2,7 +2,7 @@
 Center agent can later store a better version with its own context and memory."""
 import json
 
-from .llm import chat_json
+from .llm import chat_json, context_tokens
 from .render import words_to_segments
 from .util import LANGUAGE_NAMES, fmt_ts, guess_language
 
@@ -61,6 +61,14 @@ PART_CHARS = 60_000      # about 15-20k tokens per part
 SINGLE_CALL_CHARS = 120_000
 
 
+def limits(settings):
+    """(one call, one part) in characters for the model's context: the figures above
+    for a 64k model, less for a smaller one (about 3 characters per token, and room
+    for the instructions and the answer)."""
+    single = max(8_000, min(SINGLE_CALL_CHARS, (context_tokens(settings) - 6_000) * 3))
+    return single, min(PART_CHARS, single // 2)
+
+
 def transcript_lines(transcript):
     segs = words_to_segments(transcript.get("words", [])) or transcript.get("segments", [])
     return [f"[{fmt_ts(s['s'])}] {s['spk']}: {s['text']}" for s in segs]
@@ -72,15 +80,16 @@ def summarize(transcript, settings, log=print):
     lang = transcript.get("language") or guess_language(text)
     system = SYSTEM.format(lang=LANGUAGE_NAMES.get(lang, lang))
     stats = []
+    single, part_chars = limits(settings)
     if not lines:
         result = {"title": "", "tldr": "", "decisions": [], "action_items": [], "open_questions": []}
-    elif len(text) <= SINGLE_CALL_CHARS:
+    elif len(text) <= single:
         result, st = chat_json(settings, system, "Transcript:\n\n" + text, SCHEMA)
         stats.append(st)
     else:
         parts, cur = [], []
         for line in lines:
-            if cur and sum(len(x) for x in cur) + len(line) > PART_CHARS:
+            if cur and sum(len(x) for x in cur) + len(line) > part_chars:
                 parts.append(cur)
                 cur = []
             cur.append(line)

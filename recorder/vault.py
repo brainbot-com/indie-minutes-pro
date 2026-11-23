@@ -296,12 +296,20 @@ def _quiet():
 
 
 class Sealer:
-    def __init__(self, pem):
-        self.private = serialization.load_pem_private_key(pem, password=None)
+    def __init__(self, pem=None, private=None):
+        self.private = private or serialization.load_pem_private_key(pem, password=None)
         raw = self.private.public_key().public_bytes(serialization.Encoding.X962,
                                                       serialization.PublicFormat.UncompressedPoint)
         self.public = b64u(raw)
         self.kid = hashlib.sha256(raw).hexdigest()[:16]
+
+    @classmethod
+    def derived(cls, secret):
+        """A sealing key made from 32 secret bytes (the data key's "seal" subkey), so a
+        box that keeps one secret (an Indie Box's install form) needs no second file."""
+        n = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551   # the order of P-256
+        scalar = int.from_bytes(hashlib.sha512(b"indie-recorder/seal/derived/v1" + secret).digest(), "big") % (n - 1) + 1
+        return cls(private=ec.derive_private_key(scalar, ec.SECP256R1()))
 
     def describe(self):
         return {"kid": self.kid, "alg": SEAL_ALG, "key": self.public}
@@ -366,20 +374,12 @@ def configure(settings):
     was written with."""
     global VAULT, SEALER
     roots = [settings.meetings_dir, settings.uploads_dir, settings.outbox_dir]   # what holds meeting content
-    key = None
-    if settings.encrypt_at_rest:
-        try:
-            key = unb64u(Path(settings.data_key_file).read_text().strip())
-        except FileNotFoundError:
-            raise VaultError(f"no data key at {settings.data_key_file}: run deploy/make-keys.sh "
-                             "(or set ENCRYPT_AT_REST=0)") from None
-        if len(key) != 32:
-            raise VaultError(f"{settings.data_key_file} must hold 32 bytes (base64url)")
+    key, where = _data_key(settings) if settings.encrypt_at_rest else (None, None)
     vault = Vault(key, roots, scratch=settings.scratch_dir)
     marker = settings.data_dir / ".vault"
     if vault.on:
         if marker.exists() and marker.read_text().strip() != vault.fingerprint():
-            raise VaultError(f"the data in {settings.data_dir} was encrypted with another key than {settings.data_key_file}")
+            raise VaultError(f"the data in {settings.data_dir} was encrypted with another key than {where}")
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         marker.write_text(vault.fingerprint() + "\n")
     elif marker.exists():
@@ -391,5 +391,28 @@ def configure(settings):
     try:
         SEALER = Sealer(Path(settings.seal_key_file).read_bytes())
     except FileNotFoundError:
-        SEALER = None                                 # phones then send chunks without the extra layer
+        # no file of its own: made from the data key; without encryption at rest, phones
+        # send their chunks without the extra layer
+        SEALER = Sealer.derived(vault.subkey("seal")) if vault.on else None
     return vault
+
+
+def _data_key(settings):
+    """The data key and where it came from: DATA_KEY (base64url or hex, as an Indie
+    Box's install form makes it) or the file deploy/make-keys.sh writes."""
+    text, where = (settings.data_key or "").strip(), "DATA_KEY"
+    if not text:
+        where = str(settings.data_key_file)
+        try:
+            text = Path(settings.data_key_file).read_text().strip()
+        except FileNotFoundError:
+            raise VaultError(f"no data key: set DATA_KEY or run deploy/make-keys.sh for {where} "
+                             "(or set ENCRYPT_AT_REST=0)") from None
+    try:
+        hexed = len(text) == 64 and all(c in "0123456789abcdefABCDEF" for c in text)
+        key = bytes.fromhex(text) if hexed else unb64u(text)
+    except ValueError:
+        key = b""
+    if len(key) != 32:
+        raise VaultError(f"{where} must hold 32 bytes (base64url or hex)")
+    return key, where

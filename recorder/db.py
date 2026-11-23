@@ -127,6 +127,15 @@ CREATE TABLE IF NOT EXISTS pair_codes (
   used_at TEXT,
   token_id TEXT
 );
+-- a person signed in with a browser (the owner's password on an Indie Box)
+CREATE TABLE IF NOT EXISTS sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  last_used_at TEXT
+);
 CREATE INDEX IF NOT EXISTS jobs_state ON jobs (state, id);
 CREATE INDEX IF NOT EXISTS proposals_state ON proposals (state);
 """

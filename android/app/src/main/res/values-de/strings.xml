@@ -18,21 +18,21 @@
     <string name="code_label">Verbindungscode</string>
     <string name="pair_button">Verbinden</string>
     <string name="pair_bad">Dieser Link stammt nicht vom Recorder.</string>
-    <string name="pair_note">Aufnahmen gehen von diesem Telefon über das VPN an die Box und nirgendwo sonst hin.</string>
+    <string name="pair_note">Aufnahmen gehen von diesem Telefon an die Box und nirgendwo sonst hin.</string>
     <string name="confirm_kicker">Dieses Telefon verbinden</string>
     <string name="confirm_title_for">Aufnahmen für %1$s</string>
     <string name="confirm_title">Aufnahmen in Ihr Konto</string>
     <string name="cancel">Abbrechen</string>
     <string name="err_used">Dieser Code ist benutzt oder abgelaufen. Erstellen Sie einen neuen unter indie-recorder, Telefon verbinden.</string>
     <string name="err_many">Zu viele falsche Codes. Warten Sie ein paar Minuten und versuchen Sie es dann erneut.</string>
-    <string name="err_unreachable">Die Box ist nicht erreichbar. Ist das VPN an?</string>
+    <string name="err_unreachable">Die Box ist nicht erreichbar. Ist das Telefon in ihrem Netz (oder im VPN)?</string>
     <string name="err_other">Das Verbinden hat nicht geklappt (%1$s).</string>
 
     <string name="box_label">Box</string>
     <string name="box_ready">Bereit</string>
     <string name="box_offline">Nicht erreichbar</string>
     <string name="box_rejected_short">Abgelehnt</string>
-    <string name="box_unreachable">Box nicht erreichbar (VPN?). Aufnahmen warten auf dem Telefon.</string>
+    <string name="box_unreachable">Box nicht erreichbar. Aufnahmen warten auf dem Telefon.</string>
     <string name="box_rejected">Die Box nimmt dieses Telefon nicht mehr an. Bitte verbinden Sie es neu.</string>
 
     <string name="new_recording">Neue Aufnahme</string>
@@ -64,7 +64,7 @@
     <string name="st_local">Lokal</string>
     <string name="none_head">Noch keine Meetings</string>
     <string name="none_text">Nehmen Sie ein Meeting auf. Die Zusammenfassung erscheint hier.</string>
-    <string name="list_unreachable">Die Box ist nicht erreichbar (VPN?). Ihre Meetings erscheinen hier, sobald sie es ist.</string>
+    <string name="list_unreachable">Die Box ist nicht erreichbar. Ihre Meetings erscheinen hier, sobald sie es ist.</string>
     <string name="list_nobody">Dieses Telefon gehört auf der Box niemandem. Verbinden Sie es mit einem Code neu.</string>
     <string name="meeting_gone">Die Box hat dieses Meeting nicht (mehr).</string>
     <string name="not_yet">Noch nicht</string>
@@ -120,7 +120,7 @@
     <string name="note_waiting">Wartet auf das Hochladen nach Drive.</string>
     <string name="note_done">In Drive abgelegt.</string>
     <string name="open_folder">Ordner öffnen</string>
-    <string name="open_box">Auf %1$s öffnen (VPN)</string>
+    <string name="open_box">Auf %1$s öffnen</string>
     <string name="not_ready">Die Zusammenfassung erscheint hier, sobald die Box fertig ist.</string>
 
     <string name="settings_kicker">Dieses Telefon</string>

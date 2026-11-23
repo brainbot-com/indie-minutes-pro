@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Private CA for the phone plus the server certificate for https://BIND_IP:8443.
 # The CA is made once and kept; the server certificate is renewed by running
-# this again (397 days, the most Chrome accepts). Run on aibox1 from the repo root.
+# this again (397 days, the most Chrome accepts). Run on the recorder's machine:
+# from the repo root on aibox1, or from standalone/ (BIND_IP=<its LAN address>
+# TLS_DNS_NAMES="<its names>" ../deploy/make-ca.sh secrets/tls).
 set -euo pipefail
 OUT=${1:-secrets/tls}
 IP=${BIND_IP:-10.1.9.7}
@@ -12,7 +14,7 @@ chmod 700 "$OUT"
 if [ ! -f "$OUT/ca.key" ]; then
   openssl ecparam -name prime256v1 -genkey -noout -out "$OUT/ca.key"
   openssl req -x509 -new -key "$OUT/ca.key" -sha256 -days 3650 \
-    -subj "/CN=indie-recorder aibox1 private CA/O=brainbot" \
+    -subj "/CN=${CA_NAME:-indie-recorder private CA ($(hostname -s))}" \
     -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
     -addext "keyUsage=critical,keyCertSign,cRLSign" \
     -addext "subjectKeyIdentifier=hash" \

@@ -78,6 +78,20 @@ const T = {
     foot: 'Aufnahmen gehen von diesem Telefon über das VPN an die Box und nirgendwo sonst hin.',
   },
 }[LANG];
+// Away from aibox1 (an Indie Box, a computer of one's own): no VPN, and codes come from the recorder itself.
+const VPN = {{ 'true' if s.phone_reach == 'vpn' else 'false' }}, OWN = {{ 'true' if s.owner_password else 'false' }};
+if (!VPN) {
+  T.noBox = LANG === 'de' ? 'Die Box ist nicht erreichbar. Ist das Telefon in ihrem Netz? Dann diese Seite neu laden.'
+    : 'The box is not reachable. Is this phone on its network? Then reload this page.';
+  T.foot = LANG === 'de' ? 'Aufnahmen gehen von diesem Telefon an die Box und nirgendwo sonst hin.'
+    : 'Recordings go from this phone to the box and nowhere else.';
+}
+if (OWN) {
+  T.badSub = LANG === 'de' ? 'Erstellen Sie im Recorder einen neuen: Einstellungen, Telefon verbinden.'
+    : 'Make a new one in the recorder: Settings, Connect a phone.';
+  T.noCode = LANG === 'de' ? 'Diese Seite öffnet sich über den Code im Recorder: Einstellungen, Telefon verbinden.'
+    : 'This page opens from the code in the recorder: Settings, Connect a phone.';
+}
 const $ = (id) => document.getElementById(id);
 const code = decodeURIComponent((location.hash || '').slice(1)).replace(/[^0-9A-Za-z]/g, '').toUpperCase();
 const android = /Android/i.test(navigator.userAgent);

@@ -22,6 +22,17 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 GPU_LOCK = os.environ.get("GPU_LOCK", "/data/.gpu.lock")
+# Where the recorder's /data is on this machine, for an engine that runs outside its
+# containers (a Mac's Metal engine): PATH_MAP=/data=/Users/me/indie-recorder/data
+_src, _, _dst = os.environ.get("PATH_MAP", "").partition("=")
+DATA_ROOT = (_dst.rstrip("/") if _src else "/data") + "/"
+
+
+def local_path(path):
+    """A path the recorder gave (under /data) as this engine sees it."""
+    if _src and path and (path == _src or path.startswith(_src.rstrip("/") + "/")):
+        return _dst.rstrip("/") + path[len(_src.rstrip("/")):]
+    return path
 
 
 def amd_card():
@@ -132,8 +143,8 @@ class JobServer:
         if params.get("op") not in self.handlers:
             raise ValueError(f"op must be one of {sorted(self.handlers)}")
         for k in ("audio", "out"):
-            p = params.get(k)
-            if p and not os.path.realpath(p).startswith("/data/"):
+            p = params[k] = local_path(params.get(k))
+            if p and not os.path.realpath(p).startswith(os.path.realpath(DATA_ROOT) + "/"):
                 raise ValueError(f"{k} must be under /data")
         jid = uuid.uuid4().hex[:12]
         self.jobs[jid] = {"id": jid, "state": "queued", "params": params, "created": time.time()}

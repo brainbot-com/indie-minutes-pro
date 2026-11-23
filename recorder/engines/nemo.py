@@ -32,6 +32,20 @@ class NemoEngine(Engine):
         self.label = f"Nemotron 3.5 Transcribe {DECODER[variant]} · NeMo-Speech.cpp · Vulkan" + (
             " · Nemotron 3 Diarization" if external_diarizer else "")
 
+    def waiting(self):
+        h = health(self.s.nemo_url, timeout=3)
+        if not h:
+            return "the speech engine is not up"
+        need = [self.variant] + (["diar"] if self.diar else [])
+        if all((h.get("models") or {}).get(k, True) for k in need):
+            return None
+        f = h.get("fetch") or {}
+        if f.get("state") == "downloading" and f.get("total"):
+            return f"downloading the speech model: {100 * f['done'] // f['total']}%"
+        if f.get("state") == "failed":
+            return f"the speech model did not download: {f.get('error') or 'see the engine log'}"
+        return "the speech model is not there yet"
+
     def transcribe(self, wav, workdir, language=None, log=print, device="vulkan"):
         duration = wav_duration(wav)
         windows = plan_windows(duration, MAX_S, OVERLAP_S)
