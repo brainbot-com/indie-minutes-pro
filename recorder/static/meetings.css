@@ -1,0 +1,36 @@
+/* The meeting views every indie-recorder app shares (meetings.js): a person's
+   meetings by day, and a meeting with its summary, speakers and transcript.
+   On swiss.css; all under .irm, the class meetings.js gives what it draws. */
+.irm.list { display: flex; flex-direction: column; gap: 30px; }
+.irm .mrow { grid-template-columns: 40px minmax(0, 1fr) 92px 76px 96px; gap: 14px; }
+.irm .mrow .when, .irm .mrow .len { text-align: right; }
+.irm .mrow .title { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.irm .mrow .state { text-align: right; font-size: 14px; }
+.irm .mrow .state.busy { color: var(--red); font-weight: 700; }
+.irm .sum { display: flex; flex-direction: column; gap: 26px; }
+.irm .sum p { margin: 0; }
+.irm .sum .rows + p, .irm .sum p + .rows { margin-top: 10px; }
+.irm .folds { border-top: 3px solid var(--ink); }
+/* one card per speaker: how much they said, a few of their lines, their voice, suggested names */
+.irm .names { display: flex; flex-direction: column; margin: 0 0 16px; }
+.irm .spk { padding: 14px 0; border-bottom: 1px solid var(--ink); display: flex; flex-direction: column; gap: 8px; }
+.irm .spkhead { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto auto; gap: 12px; align-items: baseline; }
+.irm .spkhead .who { font-weight: 700; }
+.irm .said { margin: 0 0 0 52px; color: var(--muted); font-size: 14px; }
+.irm .said.accent { color: var(--ink); }
+.irm .sugg { margin: 0 0 0 52px; font-size: 14px; }
+.irm .sugg .use { color: var(--red); margin-right: 8px; }
+.irm .spk .cell { margin-left: 52px; max-width: 320px; }
+/* the transcript: who and when, then what they said */
+.irm .tr { max-height: 70vh; overflow: auto; display: flex; flex-direction: column; gap: 16px; font-size: 15px; line-height: 1.55; }
+.irm .tr p { margin: 0; }
+.irm .tr .turn { display: flex; flex-direction: column; gap: 6px; }
+.irm .tr .who .muted, .irm .tr .trmeta { font-size: 13px; }
+.irm .more { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; }
+@media (max-width: 560px) {
+  .irm .mrow { grid-template-columns: 30px minmax(0, 1fr) 70px 70px; gap: 10px; }
+  .irm .mrow .when { display: none; }
+  .irm .said, .irm .sugg, .irm .spk .cell { margin-left: 0; }
+  .irm .spkhead { grid-template-columns: 30px minmax(0, 1fr) auto; }
+  .irm .spkhead .side { grid-column: 2 / -1; grid-row: 2; font-size: 13px; color: var(--muted); }
+}

@@ -24,6 +24,9 @@ class Settings:
         self.engine = get("ENGINE", "A-iq4")
         self.nemo_url = get("NEMO_URL", "http://engine-nemo:8090").rstrip("/")
         self.qwen_url = get("QWEN_URL", "http://engine-qwen:8091").rstrip("/")
+        # accent hints for naming speakers (engines/accent, CPU), English meetings only
+        self.accent = get("ACCENT", "1") == "1"
+        self.accent_url = get("ACCENT_URL", "http://engine-accent:8092").rstrip("/")
         self.chunk_seconds = int(get("CHUNK_SECONDS", "30"))
         self.max_chunk_bytes = int(get("MAX_CHUNK_MB", "64")) * 1024 * 1024
         self.github_repo = get("GITHUB_REPO", "brainbot-com/indie-recorder-sandbox")

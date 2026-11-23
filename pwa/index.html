@@ -11,6 +11,7 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="preload" href="../static/Inter.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="../static/swiss.css">
+<link rel="stylesheet" href="../static/meetings.css">
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
@@ -60,17 +61,20 @@
     <p class="note" id="pausedNote" data-t="pausedNote" hidden></p>
     <p class="error" id="warn" hidden></p>
     <button class="btn listbtn" id="recsBtn" type="button" hidden>
-      <span><span data-t="recordings"></span><span class="tnum count" id="recsCount"></span></span><span class="busy" id="recsBusy"></span>
+      <span><span data-t="meetings"></span><span class="tnum count" id="recsCount"></span></span><span class="busy" id="recsBusy"></span>
     </button>
     </div>
   </section>
 
-  <section class="view" id="recordings" hidden>
-    <div class="head"><span class="kicker" data-t="onPhone"></span><h1 class="h1" data-t="recordings"></h1></div>
+  <!-- the person's meetings from the box, and one meeting: recorder/static/meetings.js draws both, as in indie-recorder -->
+  <section class="view" id="meetings" hidden>
+    <div class="head"><span class="kicker" data-t="private"></span><h1 class="h1" data-t="meetings"></h1></div>
     <p class="note error" id="net" hidden></p>
-    <div class="rows" id="recs"></div>
-    <p class="note muted" id="noRecs" data-t="noRecs" hidden></p>
+    <div id="mlist"></div>
+    <p class="note muted" id="noRecs" data-t="noMeetings" hidden></p>
   </section>
+
+  <article class="view" id="meeting" hidden></article>
 
   <section class="view" id="settings" hidden>
     <div class="head"><span class="kicker" data-t="thisPhone"></span><h1 class="h1" data-t="settings"></h1></div>
@@ -80,6 +84,13 @@
         <div class="row plain setting"><span id="lVoice" data-t="voice"></span><button class="switch" role="switch" aria-checked="false" id="voiceproc" aria-labelledby="lVoice"></button></div>
       </div>
       <p class="note muted" data-t="voiceNote" style="margin-top: 10px"></p>
+    </div>
+    <div id="gBox" hidden>
+      <h2 class="section" data-t="storage"></h2>
+      <div class="rows">
+        <div class="row plain setting"><span><span data-t="gdrive"></span><span class="gstate" id="gState"></span></span><button class="btn" id="gBtn" type="button"></button></div>
+      </div>
+      <p class="error" id="gErr" hidden></p>
     </div>
     <div>
       <h2 class="section" data-t="connection"></h2>
@@ -95,6 +106,7 @@
     </div>
   </section>
 </main>
+<script src="../static/meetings.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

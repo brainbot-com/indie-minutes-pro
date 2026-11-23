@@ -51,6 +51,8 @@ def main(argv=None):
     c = sub.add_parser("connect", help="a connect code for a person's next phone (once, within 15 minutes)")
     c.add_argument("--user", help="the person (user id); without one, a phone of nobody in particular")
     sub.add_parser("meetings")
+    ac = sub.add_parser("accents", help="accent hints for the speakers of earlier meetings (engines/accent)")
+    ac.add_argument("meeting_ids", nargs="+")
     d = sub.add_parser("delete", help="delete meetings with all their files, e.g. test meetings")
     d.add_argument("meeting_ids", nargs="+")
     r = sub.add_parser("reprocess")
@@ -156,6 +158,11 @@ def main(argv=None):
             else:
                 store.delete(mid)
                 out[mid] = "deleted"
+    elif a.cmd == "accents":
+        from .worker import accents
+        store = Store(s, db)
+        out = {mid: (accents(store, s, mid, log=lambda m: print(m, file=sys.stderr)) or {}).get("speakers", "none: not English, "
+                     "no speech, or no model") if store.meta(mid) else "no such meeting" for mid in a.meeting_ids}
     elif a.cmd == "reprocess":
         kind = "summarize" if a.summary_only else "transcribe"
         db.run("INSERT INTO jobs (meeting_id, kind, engine, created_at) VALUES (?, ?, ?, ?)",

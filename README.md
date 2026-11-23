@@ -142,8 +142,20 @@ records with the screen off.
    the phone (IndexedDB) until the box has them, so a dead network only delays
    the upload. The app keeps the screen on with a Screen Wake Lock while
    recording; recording with the screen off is the main job of the native app
-   (see below). The list shows upload and processing state and links to the
-   summary.
+   (see below).
+5. Meetings (the button under Record) lists all of the person's meetings on
+   the box, from any of their phones, with what this phone has not handed
+   over yet on top. A meeting opens with its summary, speaker names (play a
+   speaker's voice, name them) and the transcript: the same views and words as
+   indie-recorder in brainbot:agent command (see Design). Settings has Google
+   Drive (connect or disconnect).
+
+The phone apps reach those meetings with the same ops as indie-recorder,
+for the person their token belongs to: `POST /api/v1/app {op, args}` with the
+device token (`list_meetings`, `get_meeting` with the transcript,
+`rename_speakers`, `set_storage`, `new_summary`, `status`, the settings, Google
+Drive). Not the agent's ops and not pairing; a phone that belongs to nobody
+gets 403. Only a person names speakers: an agent suggests (`suggest_speakers`).
 
 The phone simulator streams any audio file through the same upload API (Opus
 in 30 s chunks by default): `python3 sim/phone_sim.py --cacert secrets/tls/ca.crt
@@ -328,6 +340,26 @@ APU; the GPU uses GTT). `bench/run.py --cpu-proof` runs the same clip on the
 GPU and on the CPU to prove there is no silent CPU fallback; numbers are in
 BENCHMARK.md.
 
+Accent hints (`engine-accent`, `engines/accent`), to help a person put names to
+"Speaker N": mavleo96/whisper-accent-medium.en (Apache-2.0; Whisper medium.en
+with an accent head, 23 accents of English, 95.7% on its own test set) listens
+to up to 30 s of each speaker's longest turns and gives its three likeliest
+guesses; the speaker cards show those of 10% or more ("Accent, a guess:
+German 71% · Dutch 12%"). On the CPU, so it never takes or waits for the GPU;
+only the encoder runs, nothing is transcribed. English meetings only (the
+model knows accents of English), right after a meeting is transcribed;
+`recorder.cli accents MEETING...` does earlier ones. The guesses are stored
+encrypted with the meeting (`accents.json`), shown only to its owner (and
+their own agent, as a hint for its name suggestions), and never go to Drive
+or into a summary. An accent can hint at someone's origin, which the GDPR
+treats as special: they are hints for naming, nothing else, and `ACCENT=0`
+switches them off for the box. The model is gated on Hugging Face (accepted
+at once): accept its terms with any account, put a read token in
+`secrets/hf_token`, then `deploy/fetch-accent-model.sh` downloads only its own
+files (about 3.4 GB, not the training checkpoints in the same repo) into
+`models/` and starts the engine. Without the model the engine says
+`ready: false` and the cards show no accent.
+
 Recordings longer than 59 minutes (engine A): the windows' speaker labels are
 linked through the 60 s overlap (words both windows heard, matched by time
 and text); labels that cannot be linked get new numbers, and the transcript
@@ -421,7 +453,7 @@ through the phone simulator into the running recorder, end to end.
 ## Android app
 
 `android/`: a native app (Kotlin, Jetpack Compose, Android 8 and later) for
-what the PWA cannot do: record with the screen off. Version 0.4.1 has the
+what the PWA cannot do: record with the screen off. Version 0.5.0 has the
 shared Swiss look (see Design): Connect, Ready, Recording, Paused, a meeting,
 Settings; it connects with a connect code (see "Connecting a phone"), scanned
 (the connect page opens the app) or typed as XXXX-XXXX, asks "Record into
@@ -431,9 +463,12 @@ the box's key comes from `/api/v1/health` and is kept on the phone), and the
 recording's key sits under an Android Keystore key until the box has the
 recording; if the Keystore loses it, a part cut short by a crash is dropped,
 never kept in the clear. The main screen does not scroll: the timer and the
-blocks fit the phone, and the recordings are one button at the bottom (how
-many, and in red how many are uploading or processing) that opens them on a
-screen of their own; the web app does the same. Typed
+blocks fit the phone, and the meetings are one button at the bottom (how
+many, and in red how many are uploading or processing). It opens all of the
+person's meetings on the box, from any of their phones, with this phone's own
+uploads on top; a meeting shows its summary, speaker names (play a voice,
+name them) and the transcript, the same screens and words as the web apps
+(`/api/v1/app`, see the PWA; Design). Settings has Google Drive. Typed
 codes are looked up at `CONNECT_BASE` (set when it is built, default the
 brain-tls address); old token links still work. Disconnect on the phone
 forgets the token; remove the phone in indie-recorder to lock it out.
@@ -506,6 +541,11 @@ sections and 1px rules between numbered rows, square switches and buttons.
   tokens in its Compose theme and the same Inter cuts in `res/font`.
 - Inter 4.1, subset to Latin (`recorder/static/Inter.woff2`, 53 KB), SIL Open
   Font License (`recorder/static/Inter-OFL.txt`, also in the APK).
+- The meeting views, the same in every app: the person's meetings by day, and
+  a meeting with its summary, speaker cards and the transcript as turns.
+  `recorder/static/meetings.js` and `meetings.css` draw them; the PWA loads
+  them from the box, `inline_assets.py` puts them into the indie-recorder app,
+  and the Android app mirrors them in Compose with the same order and words.
 - The waveform, the same in the PWA and the Android app: one bar per 100 ms of
   recorded audio, bar 3 px wide every 5 px, the loudest sample of the window
   mapped from -50 dBFS (2 px) to 0 dBFS (88 px), centred, newest at the right;

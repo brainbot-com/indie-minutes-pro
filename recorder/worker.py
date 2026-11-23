@@ -8,8 +8,10 @@ import time
 import traceback
 
 from . import audio, speakers, vault
+from .engines import remote
+from .engines.base import EngineError
 from .summarize import summarize
-from .util import now_iso, read_text, write_text
+from .util import now_iso, read_text, write_json, write_text
 
 
 class MeetingLog:
@@ -88,6 +90,8 @@ class Worker:
             if job["kind"] in ("process", "transcribe"):
                 self._convert(mid, log)
                 transcribed = self._transcribe(mid, job["engine"] or self.s.engine, job["kind"] == "transcribe", log)
+                if transcribed:
+                    accents(self.store, self.s, mid, log)
             if transcribed or job["kind"] == "summarize" or not self.store.summary(mid):
                 self._summarize(mid, log)
             self.store.set_state(mid, "done", error=None)
@@ -167,3 +171,30 @@ class Worker:
         if named:
             speakers.suggest(self.store.folder(mid), set(self.store.names(mid)), named, by="recorder")   # names only
         log(f"summary v{version} ({self.s.llm_model}, {time.monotonic() - t0:.1f} s)")
+
+
+def accents(store, s, mid, log=print):
+    """Accent hints for naming the speakers: engines/accent (whisper-accent on the
+    CPU) listens to up to 30 s of each speaker. English meetings only, the model
+    knows accents of English. Never fails the meeting: without the engine or its
+    model the speaker cards simply show none. Returns the stored hints or None."""
+    transcript = store.transcript(mid) or {}
+    if not s.accent or (transcript.get("language") or "")[:2] != "en":
+        return None
+    spans = speakers.voice_spans(transcript)
+    if not spans or not remote.health(s.accent_url, timeout=3).get("ready"):    # optional: do not wait long
+        return None
+    t0 = time.monotonic()
+    v = vault.VAULT
+    try:
+        with v.scratch(mid) as tmp:                 # the engine reads plain audio, in RAM
+            wav = tmp / "accent.wav"
+            v.export(store.audio(mid), wav)
+            res = remote.run_job(s.accent_url, {"op": "accent", "audio": str(wav), "speakers": spans}, log=log)
+    except EngineError as e:
+        log(f"accent hints left out: {e}")
+        return None
+    hints = {"model": res.get("model"), "at": now_iso(), "speakers": res.get("speakers") or {}}
+    write_json(store.folder(mid) / "accents.json", hints)
+    log(f"accent hints for {len(hints['speakers'])} speakers ({time.monotonic() - t0:.1f} s)")
+    return hints

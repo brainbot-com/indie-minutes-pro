@@ -2,57 +2,65 @@ package com.brainbot.indierecorder
 
 /** A piece of the box's summary as the meeting screen draws it. */
 sealed interface SummaryPart {
+    /** The short version: the TL;DR section, or a first paragraph before any heading. */
     data class Lead(val text: String) : SummaryPart
-    data class Heading(val text: String) : SummaryPart
+    /** A section's heading; key is one every summary has (decisions, actions, questions), said in the app's language. */
+    data class Heading(val text: String, val key: String? = null) : SummaryPart
     data class Item(val n: Int, val text: String, val side: String?) : SummaryPart
     data class Para(val text: String) : SummaryPart
 }
 
+private val SECTIONS = mapOf("tl;dr" to "tldr", "kurzfassung" to "tldr", "decisions" to "decisions",
+    "entscheidungen" to "decisions", "action items" to "actions", "aufgaben" to "actions",
+    "open questions" to "questions", "offene fragen" to "questions")
+private val SKIP = Regex("^# |^_.*_$|^https?://\\S+$")
+private val HEADING = Regex("^#{2,4}\\s+(.*)")
+private val TABLE_RULE = Regex("^\\|[\\s:|-]+\\|$")
+private val TABLE_HEAD = Regex("^\\|\\s*#\\s*\\|")
+private val TABLE_ROW = Regex("^\\|(.*)\\|$")
+private val BULLET = Regex("^[-*]\\s+(.*)")
+
 /**
- * The box's summary.md in parts: the title, byline and link lines are left
- * out (the screen shows them), the first section (the TL;DR) is the lead, and
- * lists and tables of action items become numbered rows, "owner · due" at
- * the side.
+ * The box's summary.md in parts, as the web apps draw it (recorder/static/meetings.js, summary()):
+ * the title, byline and link lines left out (the screen shows them), the TL;DR or a first paragraph
+ * as the lead, then a section per heading with numbered rows; tables of action items become rows
+ * with "owner · due" at the side (a cell with only a dash says nobody or no date: left out).
+ * **Bold** stays marked for the screen.
  */
 fun summaryParts(md: String): List<SummaryPart> {
-    val lines = md.lines()
-    var i = 0
-    fun skipBlank() { while (i < lines.size && lines[i].isBlank()) i++ }
-    skipBlank(); if (i < lines.size && lines[i].startsWith("# ")) i++
-    skipBlank(); if (i < lines.size && lines[i].startsWith("_") && lines[i].trimEnd().endsWith("_")) i++
-    skipBlank(); if (i < lines.size && lines[i].startsWith("http")) i++
     val out = mutableListOf<SummaryPart>()
-    var headings = 0
-    var lead = false
     var n = 0
-    while (i < lines.size) {
-        val line = lines[i].trimEnd()
-        val next = lines.getOrNull(i + 1)?.trim() ?: ""
+    var tldr = false
+    var first = true
+    for (raw in md.split('\n')) {
+        val line = raw.trim()
+        val heading = HEADING.find(line)
+        val row = TABLE_ROW.find(line)
+        val bullet = BULLET.find(line)
         when {
-            line.startsWith("## ") -> {
-                headings++
+            SKIP.containsMatchIn(line) -> {}
+            heading != null -> {
+                val text = heading.groupValues[1]
+                val key = SECTIONS[text.lowercase()]
+                tldr = key == "tldr"
                 n = 0
-                if (headings == 1) lead = true else out += SummaryPart.Heading(line.removePrefix("## ").trim())
+                if (!tldr) out += SummaryPart.Heading(text, key)
             }
-            line.startsWith("|") && next.matches(Regex("^\\|[-| :]+\\|$")) -> i++      // header row and its rule
-            line.startsWith("|") -> {
-                val cells = line.trim('|').split(" | ").map { it.trim().replace("\\|", "|") }
-                val side = listOfNotNull(cells.getOrNull(2), cells.getOrNull(3)).filter { !empty(it) }.joinToString(" · ")
-                out += SummaryPart.Item(++n, plain(cells.getOrNull(1) ?: line), side.ifBlank { null })
+            TABLE_RULE.matches(line) || TABLE_HEAD.containsMatchIn(line) -> {}
+            row != null -> {
+                val c = row.groupValues[1].split('|').map { it.trim() }
+                val side = listOfNotNull(c.getOrNull(2), c.getOrNull(3)).filter { !empty(it) }.joinToString(" · ")
+                out += SummaryPart.Item(++n, c.getOrNull(1)?.ifEmpty { null } ?: c[0], side.ifEmpty { null })
             }
-            line.startsWith("- ") || line.startsWith("* ") -> out += SummaryPart.Item(++n, plain(line.substring(2)), null)
-            line.isBlank() -> {}
-            else -> {
-                out += if (lead) SummaryPart.Lead(plain(line)) else SummaryPart.Para(plain(line))
-                lead = false
+            bullet != null -> out += SummaryPart.Item(++n, bullet.groupValues[1], null)
+            line.isNotEmpty() -> {
+                out += if (tldr || first) SummaryPart.Lead(line) else SummaryPart.Para(line)
+                first = false
             }
         }
-        i++
     }
     return out
 }
-
-private fun plain(text: String) = text.replace("**", "").replace("`", "")
 
 /** A table cell that says "nobody" or "no date": blank, or only dashes. */
 private fun empty(cell: String) = cell.trim().trim('-', '\u2013', '\u2014').isEmpty()

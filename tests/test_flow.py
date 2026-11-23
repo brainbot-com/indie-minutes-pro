@@ -49,7 +49,7 @@ def app(tmp_path, monkeypatch, executor):
     s = Settings(data_dir=tmp_path / "data", worker="0", engine="fake", secure_cookies="0",
                  public_url="https://box.test", github_token_file=tmp_path / "no-token", followup_on_done="0",
                  followup_executor=executor, drive_api_url="", followup_targets="drive,github",
-                 storage_default="drive", files_base_url="https://box.test/api/v1/files", **make_keys(tmp_path))
+                 storage_default="drive", files_base_url="https://box.test/api/v1/files", accent="0", **make_keys(tmp_path))
     monkeypatch.setattr(wk, "summarize", lambda transcript, settings, log=print: dict(SUMMARY))
     return create_app(s)
 
@@ -634,8 +634,15 @@ def test_hints_for_naming_speakers(app, client, tmp_path, monkeypatch):
     assert "Speaker 1" in hedged["refused"]                                   # refused, and the earlier one stays
     one = next(c for c in call("get_meeting", {"meeting_id": mid, "include_transcript": False})["speakers"] if c["label"] == "Speaker 1")
     assert [(x["name"], x["by"]) for x in one["suggestions"]] == [("Anna", "agent")]
+    agent = {"Authorization": f"Bearer {service}", "X-Indie-User": "ext-cleo", "X-Indie-Caller": "agent"}
+    renamed = client.post("/api/v1/indiechat", json={"op": "rename_speakers", "args": {"meeting_id": mid, "names": {"Speaker 1": "Anna"}}},
+                          headers=agent)
+    assert renamed.status_code == 400 and app.state.store.names(mid).get("Speaker 1") != "Anna"   # an agent suggests, never renames
     clip = client.get(one["clip_url"].replace("https://box.test", ""))
     assert clip.status_code == 200 and clip.headers["content-type"] == "audio/wav"
+    part = client.get(one["clip_url"].replace("https://box.test", ""), headers={"Range": "bytes=0-99"})
+    assert part.status_code == 206 and len(part.content) == 100 and part.content == clip.content[:100]   # what Safari needs
+    assert part.headers["content-range"] == f"bytes 0-99/{len(clip.content)}"
     w = wave.open(io.BytesIO(clip.content))
     assert w.getframerate() == 16000 and 0 < w.getnframes() / 16000 <= 7.01
     plain = wave.open(io.BytesIO(read_bytes(app.state.store.audio(mid))))
@@ -643,6 +650,77 @@ def test_hints_for_naming_speakers(app, client, tmp_path, monkeypatch):
     start = profile(app.state.store.transcript(mid))["Speaker 1"]["clip"]["s"]
     plain.setpos(int(start * 16000))
     assert w.readframes(w.getnframes()) == plain.readframes(w.getnframes())
+
+
+def test_a_phone_sees_all_of_its_persons_meetings(app, client, tmp_path):
+    """The phone apps call the same ops as the app in brainbot:agent command, for
+    their own person: every meeting of theirs, from whichever phone, with its
+    transcript."""
+    service = create_token(app.state.db, "brainbot:agent command", "agent", trusts_identity=True)
+    h = {"Authorization": f"Bearer {service}", "X-Indie-User": "ext-dana", "X-Indie-Caller": "user"}
+
+    def phone():
+        offer = client.post("/api/v1/indiechat", json={"op": "pair_phone", "args": {}}, headers=h).json()["result"]
+        return {"Authorization": "Bearer " + redeem(client, offer["url"]).json()["token"]}
+
+    one, two = phone(), phone()
+    mid, _ = make_meeting(app, client, tmp_path, headers=one)
+    other, _ = make_meeting(app, client, tmp_path)                            # a phone of nobody's
+
+    def op(name, args=None, headers=two):
+        return client.post("/api/v1/app", json={"op": name, "args": args or {}}, headers=headers)
+
+    assert [m["id"] for m in op("list_meetings").json()["result"]] == [mid]     # recorded with the other phone
+    m = op("get_meeting", {"meeting_id": mid, "include_transcript": True}).json()["result"]
+    assert m["transcript_md"] and m["summary_md"] and [c["label"] for c in m["speakers"]]
+    assert op("get_meeting", {"meeting_id": other}).status_code == 400
+    assert op("rename_speakers", {"meeting_id": mid, "names": {"Speaker 1": "Dana"}}).json()["result"]["names"]["Speaker 1"] == "Dana"
+    for name in ("pending_work", "pair_phone", "agent_setup", "suggest_speakers", "ack_outbox_item"):
+        assert op(name).status_code == 400, name
+    nobody = {"Authorization": f"Bearer {create_token(app.state.db, 'old phone', 'device')}"}
+    assert op("list_meetings", headers=nobody).status_code == 403
+
+
+def test_accent_hints_reach_the_speaker_cards(app, client, tmp_path, monkeypatch):
+    """engines/accent listens to up to 30 s of each speaker of an English meeting;
+    its guesses join the speaker cards. Without the model, or for another
+    language, nothing happens, and an engine failure never fails the meeting."""
+    import wave
+    from recorder.engines.base import EngineError
+    from recorder.speakers import voice_spans
+    words = [{"w": "a", "s": 0.0, "e": 15.0, "spk": "Speaker 1"}, {"w": "b", "s": 15.0, "e": 20.0, "spk": "Speaker 2"},
+             {"w": "c", "s": 20.0, "e": 40.0, "spk": "Speaker 1"}, {"w": "d", "s": 40.0, "e": 41.0, "spk": "Speaker 3"}]
+    spans = voice_spans({"words": words})
+    # each speaker's longest stretches first, 30 s at most (Whisper's window); 1 s is too little to go on
+    assert spans == {"Speaker 1": [[20.0, 40.0], [0.0, 10.0]], "Speaker 2": [[15.0, 20.0]]}
+    app.state.settings.accent = True
+    seen, ready = {}, {"ready": False}
+    monkeypatch.setattr(wk.remote, "health", lambda url, timeout=10: dict(ready))
+
+    def run_job(url, params, log=print):
+        assert url.endswith(":8092") and params["op"] == "accent"
+        with wave.open(params["audio"]) as w:                                              # plain audio, in the scratch space
+            seen["rate"] = w.getframerate()
+        seen["speakers"] = sorted(params["speakers"])
+        return {"model": "whisper-accent-medium.en",
+                "speakers": {label: [{"accent": "german", "p": 0.71}, {"accent": "dutch", "p": 0.12}] for label in params["speakers"]}}
+    monkeypatch.setattr(wk.remote, "run_job", run_job)
+    mid, _ = make_meeting(app, client, tmp_path, client_id="client-accent-0")
+    assert not (app.state.store.folder(mid) / "accents.json").exists() and not seen        # no model: nothing asked
+    ready["ready"] = True
+    mid, _ = make_meeting(app, client, tmp_path, client_id="client-accent-1")
+    assert seen["rate"] == 16000 and seen["speakers"]
+    assert not list((tmp_path / "scratch").glob("*/accent.wav"))                          # the plain copy is gone
+    service = create_token(app.state.db, "brainbot:agent command", "agent", trusts_identity=True)
+    h = {"Authorization": f"Bearer {service}", "X-Indie-User": "nobody-in-particular", "X-Indie-Caller": "user"}
+    admin = {"Authorization": f"Bearer {create_token(app.state.db, 'admin', 'admin')}"}
+    call = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "get_meeting", "arguments": {
+        "meeting_id": mid, "include_transcript": False}}}
+    cards = json.loads(client.post("/mcp", json=call, headers=admin).json()["result"]["content"][0]["text"])["speakers"]
+    assert {c["label"]: c["accent"][0]["accent"] for c in cards} == {label: "german" for label in seen["speakers"]}
+    monkeypatch.setattr(wk.remote, "run_job", lambda *a, **k: (_ for _ in ()).throw(EngineError("engine down")))
+    mid, _ = make_meeting(app, client, tmp_path, client_id="client-accent-2")
+    assert app.state.store.meta(mid)["state"] == "done" and not (app.state.store.folder(mid) / "accents.json").exists()
 
 
 def test_a_suggestion_is_a_name():

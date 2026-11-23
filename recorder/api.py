@@ -17,6 +17,7 @@ from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse, PlainTe
                                StreamingResponse)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.concurrency import run_in_threadpool
 from markdown_it import MarkdownIt
 from pydantic import BaseModel, Field
 
@@ -189,6 +190,13 @@ def create_app(settings=None):
             raise HTTPException(401 if not row else 403, "valid token required" if not row else "not allowed")
         return dep
 
+    def is_agent(who):
+        """An agent, not a person: one of brainbot:agent command's (through the
+        connector) or one with an agent token of its own."""
+        if who.token.get("trusts_identity"):
+            return who.caller != "user"
+        return who.token["role"] == "agent"
+
     def page(request, name, who, **ctx):
         tok = who.token if hasattr(who, "token") else who
         return templates.TemplateResponse(request, name, {"tok": tok, "who": who, "s": s, **ctx})
@@ -342,6 +350,8 @@ def create_app(settings=None):
     @app.put("/api/v1/meetings/{mid}/speakers")
     def put_speakers(mid: str, body: SpeakersIn, who=Depends(person(*READERS))):
         meeting_or_404(mid, who)
+        if is_agent(who):
+            raise HTTPException(403, "an agent suggests names (suggest_speakers); the person names speakers")
         return {"names": store.set_names(mid, body.names)}
 
     @app.post("/api/v1/meetings/{mid}/summary")
@@ -392,7 +402,7 @@ def create_app(settings=None):
             threading.Thread(target=followup.run, kwargs={"meeting_ids": [mid]}, daemon=True).start()
 
     @app.get("/api/v1/files/{token:path}")
-    def signed_file(token: str):
+    def signed_file(token: str, request: Request):
         """A file of a meeting, by a signed link from drive_files (no other auth)."""
         from .signing import verify
         found = verify(s, token)
@@ -403,8 +413,14 @@ def create_app(settings=None):
             card = speakers.profile(store.transcript(mid) or {}).get(name[5:])
             if not card or not card["clip"] or not store.audio(mid).exists():
                 raise HTTPException(404)
-            return Response(speakers.clip_wav(store.audio(mid), card["clip"]["s"], card["clip"]["e"]),
-                            media_type="audio/wav", headers={"Cache-Control": "private, max-age=600"})
+            wav = speakers.clip_wav(store.audio(mid), card["clip"]["s"], card["clip"]["e"])
+            got = span(request, len(wav))
+            if got is None:
+                return Response(status_code=416, headers={"Content-Range": f"bytes */{len(wav)}"})
+            start, end, partial = got
+            headers = {"Cache-Control": "private, max-age=600", "Accept-Ranges": "bytes",
+                       **({"Content-Range": f"bytes {start}-{end - 1}/{len(wav)}"} if partial else {})}
+            return Response(wav[start:end], status_code=206 if partial else 200, media_type="audio/wav", headers=headers)
         files = dict(store.drive_files(mid))
         if name not in files:
             raise HTTPException(404)
@@ -522,23 +538,32 @@ def create_app(settings=None):
         worker.enqueue(mid, kind=kind, engine=engine or None)
         return RedirectResponse(f"/m/{mid}", status_code=303)
 
+    def span(request, size):
+        """The bytes a request asks for (its first range): (start, end, partial),
+        or None when none of them exist. Audio players ask for ranges, and Safari
+        plays nothing from a server that does not answer them."""
+        rng = request.headers.get("range", "") if request else ""
+        if not rng.startswith("bytes="):
+            return 0, size, False
+        a, _, b = rng[6:].split(",")[0].strip().partition("-")
+        try:
+            start, end = (int(a), int(b) + 1 if b else size) if a else (max(0, size - int(b)), size)
+        except ValueError:
+            return 0, size, False
+        end = min(end, size)
+        return (start, end, True) if start < end else None
+
     def plain_file(path, request=None, media_type=None, filename=None):
         """A meeting's file, decrypted on the way out, with byte ranges for the audio player."""
         v = vault.VAULT
         size = v.size(path)
-        start, end, status = 0, size, 200
+        got = span(request, size)
+        if got is None:
+            return Response(status_code=416, headers={"Content-Range": f"bytes */{size}"})
+        start, end, partial = got
+        status = 206 if partial else 200
         headers = {"Accept-Ranges": "bytes"}
-        rng = request.headers.get("range", "") if request else ""
-        if rng.startswith("bytes="):
-            a, _, b = rng[6:].split(",")[0].strip().partition("-")
-            try:
-                start, end = (int(a), int(b) + 1 if b else size) if a else (max(0, size - int(b)), size)
-            except ValueError:
-                start, end = 0, size
-            end = min(end, size)
-            if start >= end:
-                return Response(status_code=416, headers={"Content-Range": f"bytes */{size}"})
-            status = 206
+        if partial:
             headers["Content-Range"] = f"bytes {start}-{end - 1}/{size}"
         headers["Content-Length"] = str(end - start)
         if filename:
@@ -742,6 +767,23 @@ def create_app(settings=None):
         who = resolve(db, row, request.headers)
         if not who:
             return JSONResponse({"ok": False, "error": "no person named (X-Indie-User)"}, status_code=401)
+        return await answer(request, who)
+
+    # The phone apps: the same ops as the app in brainbot:agent command, for the
+    # person the phone belongs to, so every app shows the same meetings the same
+    # way. Not the agent's ops (pending work, Drive outbox, the skill) and not
+    # pairing: a phone does not pair phones.
+    PHONE_OPS = {"status", "whoami", "set_name", "list_meetings", "get_meeting", "rename_speakers", "set_storage",
+                 "new_summary", "get_settings", "update_settings", "drive_connect", "drive_disconnect"}
+
+    @app.post("/api/v1/app")
+    async def phone_app(request: Request, who=Depends(person("device"))):
+        if not who.user_id:
+            return JSONResponse({"ok": False, "error": "this phone belongs to nobody: connect it again with a code"},
+                                status_code=403)
+        return await answer(request, who, PHONE_OPS)
+
+    async def answer(request, who, allowed=None):
         try:
             body = await request.json()
         except ValueError:
@@ -749,43 +791,48 @@ def create_app(settings=None):
         if not isinstance(body, dict) or not isinstance(body.get("op"), str):
             return JSONResponse({"ok": False, "error": "send {op, args}"}, status_code=400)
         op, args = body["op"], body.get("args") if isinstance(body.get("args"), dict) else {}
+        if allowed is not None and op not in allowed:
+            return JSONResponse({"ok": False, "error": f"unknown op {op!r}"}, status_code=400)
         try:
-            if op in ("pair_phone", "phones", "remove_phone", "set_name", "drive_connect", "drive_disconnect") \
-                    and who.caller != "user":
-                raise ToolError("only a person can pair or remove phones, set their name or connect Google Drive, not an agent")
-            if op == "whoami":
-                me = db.one("SELECT name FROM users WHERE id = ?", who.user_id)
-                result = {"meetings": len(store.list(limit=10000, who=who)), "caller": who.caller,
-                          "phones": len(phones(who)), "name": me["name"]}
-            elif op == "set_name":
-                # brainbot:agent command names people only by id; the person picks the name their phones show
-                name = str(args.get("name") or "").strip()[:80] or None
-                db.run("UPDATE users SET name = ? WHERE id = ?", name, who.user_id)
-                result = {"name": name}
-            elif op == "phones":
-                result = phones(who)
-            elif op == "drive_connect":
-                try:
-                    result = {"url": google.start_link(who.user_id)}
-                except GoogleError:
-                    raise ToolError("this box has no Google sign-in set up")
-            elif op == "drive_disconnect":
-                result = google.disconnect(who.user_id)
-            elif op == "pair_phone":
-                if len(phones(who)) >= MAX_PHONES:
-                    raise ToolError(f"at most {MAX_PHONES} phones: remove one first")
-                result = connect_offer(who.user_id)
-            elif op == "remove_phone":
-                n = db.run("UPDATE tokens SET revoked_at = ? WHERE id = ? AND user_id = ? AND role = 'device'"
-                           " AND revoked_at IS NULL", now_iso(), str(args.get("id", "")), who.user_id)
-                if not n:
-                    raise ToolError("no such phone")
-                result = {"removed": args.get("id")}
-            else:
-                result = mcp_call(op, args, who)
+            # off the event loop: an op may wait on an engine or on Google, and the
+            # server must go on answering everyone else meanwhile
+            return {"ok": True, "result": await run_in_threadpool(person_op, op, args, who)}
         except ToolError as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
-        return {"ok": True, "result": result}
+
+    def person_op(op, args, who):
+        if op in ("pair_phone", "phones", "remove_phone", "set_name", "drive_connect", "drive_disconnect") \
+                and who.caller != "user":
+            raise ToolError("only a person can pair or remove phones, set their name or connect Google Drive, not an agent")
+        if op == "whoami":
+            me = db.one("SELECT name FROM users WHERE id = ?", who.user_id)
+            return {"meetings": len(store.list(limit=10000, who=who)), "caller": who.caller,
+                    "phones": len(phones(who)), "name": me["name"]}
+        if op == "set_name":
+            # brainbot:agent command names people only by id; the person picks the name their phones show
+            name = str(args.get("name") or "").strip()[:80] or None
+            db.run("UPDATE users SET name = ? WHERE id = ?", name, who.user_id)
+            return {"name": name}
+        if op == "phones":
+            return phones(who)
+        if op == "drive_connect":
+            try:
+                return {"url": google.start_link(who.user_id)}
+            except GoogleError:
+                raise ToolError("this box has no Google sign-in set up")
+        if op == "drive_disconnect":
+            return google.disconnect(who.user_id)
+        if op == "pair_phone":
+            if len(phones(who)) >= MAX_PHONES:
+                raise ToolError(f"at most {MAX_PHONES} phones: remove one first")
+            return connect_offer(who.user_id)
+        if op == "remove_phone":
+            n = db.run("UPDATE tokens SET revoked_at = ? WHERE id = ? AND user_id = ? AND role = 'device'"
+                       " AND revoked_at IS NULL", now_iso(), str(args.get("id", "")), who.user_id)
+            if not n:
+                raise ToolError("no such phone")
+            return {"removed": args.get("id")}
+        return mcp_call(op, args, who)
 
     def phones(who):
         return [{"id": r["id"], "name": r["name"], "created_at": r["created_at"], "last_used_at": r["last_used_at"]}
@@ -815,7 +862,12 @@ def _read(path):
 
 def main():
     """`python -m recorder.api` runs the service (uvicorn)."""
+    import faulthandler
+    import signal
     import uvicorn
+    # where a stuck server stands: `docker kill -s USR1 indie-recorder-recorder-1`
+    # writes every thread's stack to the log (the host allows no debugger to attach)
+    faulthandler.register(signal.SIGUSR1, all_threads=True)
     uvicorn.run(create_app(), host="0.0.0.0", port=8000, proxy_headers=True,
                 forwarded_allow_ips="127.0.0.1,172.16.0.0/12", log_level="info")
 

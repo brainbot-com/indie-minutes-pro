@@ -39,8 +39,8 @@ def run_job(url, params, log=print, poll=3.0):
             raise EngineError(job.get("error") or "engine job failed")
 
 
-def health(url):
+def health(url, timeout=10):
     try:
-        return httpx.get(f"{url}/v1/health", timeout=10).json()
+        return httpx.get(f"{url}/v1/health", timeout=timeout).json()
     except (httpx.HTTPError, ValueError):
         return {}

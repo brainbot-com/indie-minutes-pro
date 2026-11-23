@@ -23,6 +23,10 @@ const STR = {
     forWhom: 'Recording for', forShort: 'For', phone: 'Phone', record: 'Record', pause: 'Pause', resume: 'Resume', stop: 'Stop',
     pausedNote: 'Paused. The microphone is off; nothing is recorded until you resume.',
     recordings: 'Recordings', onPhone: 'On this phone', noRecs: 'Nothing recorded yet.',
+    meetings: 'Meetings', private: 'Only you see your meetings', noMeetings: 'No meetings yet.',
+    gdrive: 'Google Drive', gConnected: e => `Connected: ${e}`, gNot: 'Not connected: meetings set to Drive wait.',
+    gExpired: 'Access ended: connect again.', gConnect: 'Connect Google Drive', gDisconnect: 'Disconnect',
+    gFinish: 'Finish the sign-in in the new tab.', gDisconnectAsk: 'Disconnect Google Drive? Meetings set to Drive then wait until you connect again.',
     nUploading: n => `${n} uploading`, nWorking: n => `${n} processing`, settings: 'Settings', thisPhone: 'This phone', thisPhoneIs: 'This phone',
     voice: 'Voice processing (echo and noise suppression)', voiceNote: 'Off is better for a phone lying on the table.',
     connection: 'Connection', webView: 'Meetings on the box', webViewCommand: 'Meetings in brainbot:agent command', unpair: 'Disconnect this phone',
@@ -50,6 +54,10 @@ const STR = {
     forWhom: 'Aufnahme für', forShort: 'Für', phone: 'Telefon', record: 'Aufnehmen', pause: 'Pause', resume: 'Weiter', stop: 'Stopp',
     pausedNote: 'Pausiert. Das Mikrofon ist aus; bis Sie fortsetzen, wird nichts aufgenommen.',
     recordings: 'Aufnahmen', onPhone: 'Auf diesem Telefon', noRecs: 'Noch nichts aufgenommen.',
+    meetings: 'Meetings', private: 'Ihre Meetings sehen nur Sie', noMeetings: 'Noch keine Meetings.',
+    gdrive: 'Google Drive', gConnected: e => `Verbunden: ${e}`, gNot: 'Nicht verbunden: Meetings für Drive warten.',
+    gExpired: 'Zugriff abgelaufen: bitte neu verbinden.', gConnect: 'Google Drive verbinden', gDisconnect: 'Trennen',
+    gFinish: 'Melden Sie sich im neuen Tab bei Google an.', gDisconnectAsk: 'Google Drive trennen? Meetings für Drive warten dann, bis Sie wieder verbinden.',
     nUploading: n => `${n} ${n === 1 ? 'lädt' : 'laden'} hoch`, nWorking: n => `${n} in Arbeit`, settings: 'Einstellungen', thisPhone: 'Dieses Telefon', thisPhoneIs: 'Dieses Telefon',
     voice: 'Sprachverarbeitung (Echo- und Rauschunterdrückung)', voiceNote: 'Aus ist besser, wenn das Telefon auf dem Tisch liegt.',
     connection: 'Verbindung', webView: 'Meetings auf der Box', webViewCommand: 'Meetings in brainbot:agent command', unpair: 'Dieses Telefon trennen',
@@ -326,7 +334,7 @@ async function lockScreen() {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   if (mr && mr.state === 'recording' && !wakeLock) lockScreen();
-  if (token()) whoAmI();
+  if (token()) { whoAmI(); loadMeetings(); }
 });
 window.addEventListener('beforeunload', e => { if (mr) { e.preventDefault(); e.returnValue = ''; } });
 window.addEventListener('resize', drawWave);
@@ -399,6 +407,7 @@ async function uploadRec(r) {
   await put('recs', fresh);
   // The box has the whole recording now: free the phone's storage.
   for (const c of await chunksOf(fresh.client_id)) await del('chunks', [fresh.client_id, c.idx]);
+  loadMeetings();          // it is one of the person's meetings on the box now
 }
 
 // A recording that was running when the app died: keep what was stored and send it.
@@ -416,19 +425,21 @@ async function recoverInterrupted() {
 
 async function pollMeetings() {
   if (document.visibilityState !== 'visible') return;
+  let changed = false;
   for (const r of await all('recs')) {
     if (r.state !== 'finalized' || ['done', 'failed'].includes(r.meeting_state)) continue;
     try {
       const res = await api(`/api/v1/recordings/${r.recording_id}`);
       if (res.ok) {
         const j = await res.json();
+        changed = changed || j.meeting_state !== r.meeting_state;
         r.meeting_state = j.meeting_state;
         r.meeting_url = j.meeting_url;
         await put('recs', r);
       }
     } catch (e) { /* offline: try again later */ }
   }
-  render();
+  if (changed) loadMeetings(); else render();
 }
 
 // ---- UI ----
@@ -439,8 +450,8 @@ function warn(msg) { $('warn').hidden = false; $('warn').textContent = msg; }
 
 function show(name, error) {
   view = name;
-  for (const v of ['pair', 'ready', 'recordings', 'settings']) $(v).hidden = v !== name;
-  const sub = name === 'settings' || name === 'recordings';
+  for (const v of ['pair', 'ready', 'meetings', 'meeting', 'settings']) $(v).hidden = v !== name;
+  const sub = name !== 'ready' && name !== 'pair';
   $('back').hidden = !sub;
   $('barLeft').firstElementChild.hidden = sub;
   // like the Android app: Settings in the bar on the recorder, the box's state everywhere else
@@ -525,33 +536,67 @@ async function render() {
   // on the recorder: one button with how many and what is under way; the list is its own screen
   const busy = recs.filter(r => r.state === 'recording' || r.state === 'stopped').length;
   const working = recs.filter(r => r.state === 'finalized' && !['done', 'failed'].includes(r.meeting_state)).length;
-  $('recsBtn').hidden = !recs.length;
-  $('recsCount').textContent = String(recs.length);
+  // the person's meetings on the box (all their phones), at least what this phone recorded
+  const n = Math.max(boxMeetings ? boxMeetings.length : 0, recs.length);
+  $('recsBtn').hidden = !n && !busy;
+  $('recsCount').textContent = String(n);
   $('recsBusy').textContent = busy ? t('nUploading')(busy) : working ? t('nWorking')(working) : '';
-  $('noRecs').hidden = recs.length > 0;
-  const list = $('recs');
-  list.textContent = '';
-  recs.forEach((r, i) => {
-    // the box's own page only where this phone reaches it (the app runs on the box itself)
-    const link = r.meeting_url && onBox ? r.meeting_url : null;
-    const row = document.createElement(link ? 'a' : 'div');
-    row.className = 'row rec';
-    if (link) row.href = link;
-    let state = t('onBox'), busy = false;
-    if (r.state === 'recording' || r.state === 'stopped') { state = t('uploading'); busy = true; }
-    else if (r.meeting_state === 'done') state = t('summary');
-    else if (r.meeting_state === 'failed') { state = t('failed'); busy = true; }
-    else if (r.state === 'finalized') state = t('working');
-    const title = (r.title || t('untitled')) + (r.interrupted ? ` (${t('interrupted')})` : '');
-    const cells = [['num', pad(i + 1)], ['t', title], ['tnum', r.duration_ms ? length(r.duration_ms) : ''], ['st' + (busy ? ' busy' : ''), state]];
-    for (const [cls, text] of cells) {
-      const s = document.createElement('span');
-      s.className = cls;
-      s.textContent = text;
-      row.appendChild(s);
-    }
-    list.appendChild(row);
-  });
+  if (view === 'meetings') renderMeetings(recs);
+}
+
+/* The person's meetings: what this phone has not handed to the box yet on top,
+   then all of their meetings on the box, from any phone, by day; a meeting
+   opens with its summary, speakers and transcript. The same views and words as
+   indie-recorder in brainbot:agent command (recorder/static/meetings.js). */
+let boxMeetings = null;
+const M = IRMeetings.create({ lang: LANG, call: appCall, fail: e => netNote(e) });
+
+async function appCall(op, args) {
+  const r = await api('/api/v1/app', json({ op, args: args || {} }));
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || d.ok === false) throw new Error(d.error || 'HTTP ' + r.status);
+  return d.result;
+}
+
+function netNote(e) {
+  $('net').hidden = false;
+  $('net').textContent = e instanceof AuthError ? t('pairAgain') : navigator.onLine ? t('netBox') : t('netOffline');
+}
+
+async function loadMeetings() {
+  if (!token()) return;
+  try {
+    boxMeetings = await appCall('list_meetings');
+    $('net').hidden = true;
+  } catch (e) { netNote(e); }
+  render();
+}
+
+function renderMeetings(recs) {
+  const inflight = recs.filter(r => r.state === 'recording' || r.state === 'stopped').map(r => ({
+    title: (r.title || t('untitled')) + (r.interrupted ? ` (${t('interrupted')})` : ''), started_at: r.started_at,
+    duration_s: (r.duration_ms || 0) / 1000, state: 'uploading' }));
+  M.list($('mlist'), boxMeetings || [], openMeeting, { head: t('onPhone'), rows: inflight });
+  $('noRecs').hidden = !!((boxMeetings && boxMeetings.length) || inflight.length);
+}
+
+async function openMeeting(id) {
+  try { await M.meeting($('meeting'), id); show('meeting'); } catch (e) { netNote(e); }
+}
+
+/* Google Drive, as in indie-recorder: the person connects their own once,
+   Google's sign-in in a tab of its own; the recorder then uploads by itself. */
+let google = null;
+async function loadGoogle() {
+  try { renderGoogle((await appCall('status')).google); } catch (e) { $('gBox').hidden = true; }
+}
+function renderGoogle(g) {
+  google = g || null;
+  $('gBox').hidden = !(g && g.available);
+  if (!g || !g.available) return;
+  $('gState').textContent = g.connected ? t('gConnected')(g.email || '') : g.problem === 'expired' ? t('gExpired') : t('gNot');
+  $('gBtn').textContent = g.connected ? t('gDisconnect') : t('gConnect');
+  $('gBtn').classList.toggle('go', !g.connected);
 }
 
 // A link from an older pairing (".../app/#pair=TOKEN") or a bare token.
@@ -609,9 +654,26 @@ function wire() {
     setOn($('voiceproc'), !on($('voiceproc')));
     localStorage.setItem('ir_voice', on($('voiceproc')) ? '1' : '0');
   });
-  $('gear').addEventListener('click', () => show('settings'));
-  $('back').addEventListener('click', () => show('ready'));
-  $('recsBtn').addEventListener('click', () => { show('recordings'); render(); });
+  $('gear').addEventListener('click', () => { show('settings'); loadGoogle(); });
+  $('back').addEventListener('click', () => {
+    if (view === 'meeting') { M.stop(); show('meetings'); loadMeetings(); } else show('ready');
+  });
+  $('recsBtn').addEventListener('click', () => { show('meetings'); render(); loadMeetings(); });
+  $('gBtn').addEventListener('click', async () => {
+    $('gErr').hidden = true;
+    try {
+      if (google && google.connected) {
+        if (!confirm(t('gDisconnectAsk'))) return;
+        renderGoogle(await appCall('drive_disconnect'));
+        return;
+      }
+      window.open((await appCall('drive_connect')).url, '_blank', 'noopener');
+      $('gState').textContent = t('gFinish');
+    } catch (e) { $('gErr').textContent = e.message; $('gErr').hidden = false; }
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && view === 'settings') loadGoogle();
+  });
   $('unpair').addEventListener('click', () => {
     if (!confirm(t('unpairAsk'))) return;
     if (mr) stop();
@@ -656,6 +718,7 @@ async function boot() {
   await recoverInterrupted();
   render();
   kick();
+  loadMeetings();          // how many meetings the person has on the box, for the button
 }
 
 boot();
