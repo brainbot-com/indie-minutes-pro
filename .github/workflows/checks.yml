@@ -5,9 +5,7 @@
 name: Checks
 
 on:
-  pull_request:
-  push:
-    branches-ignore: [main]     # main runs them in publish-images.yml
+  pull_request:                 # main runs the tests in publish-images.yml
 
 permissions:
   contents: read
