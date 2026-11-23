@@ -223,6 +223,11 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 24px 48px; display: flex;
 .setting .line { width: 260px; max-width: 45vw; text-align: right; }
 .setting .gstate { display: block; margin-top: 2px; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
 .phone { grid-template-columns: 40px minmax(0, 1fr) auto auto; gap: 14px; }
+/* a new agent token: where the MCP server is, the token (shown once), the skill */
+.agentNew { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; padding: 14px 0; border-top: 3px solid var(--ink); border-bottom: 1px solid var(--ink); }
+.agentNew .kv { display: grid; grid-template-columns: 110px minmax(0, 1fr) auto; gap: 12px; align-items: baseline; }
+.agentNew code { overflow-wrap: anywhere; font-size: 14px; }
+.note.red { color: var(--red); font-weight: 700; margin: 0; }
 /* connect: the code to scan, the code to type, and what the phone did */
 .connect { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 24px 28px; align-items: start; }
 .connect .qr { width: 248px; }
@@ -245,6 +250,8 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 24px 48px; display: flex;
   .hero .add { justify-self: start; }
   .setting .line { width: 160px; }
   .connect { grid-template-columns: minmax(0, 1fr); }
+  .agentNew .kv { grid-template-columns: minmax(0, 1fr) auto; }
+  .agentNew .kv .label { grid-column: 1 / -1; }
 }
 </style>
 </head>
@@ -284,7 +291,7 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 24px 48px; display: flex;
       <div class="qr" id="qr"></div>
       <div>
         <div class="rows steps">
-          <div class="row"><span class="num">01</span><span data-t="step1"></span></div>
+          <div class="row"><span class="num">01</span><span id="step1" data-t="step1"></span></div>
           <div class="row"><span class="num">02</span><span data-t="step2"></span></div>
           <div class="row"><span class="num">03</span><span data-t="step3"></span></div>
         </div>
@@ -295,6 +302,7 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 24px 48px; display: flex;
         </div>
       </div>
     </div>
+    <p class="note" id="httpNote" data-t="httpNote" hidden></p>
     <p class="wait" id="wait"></p>
     <div class="more"><button class="btn" id="newCode" data-t="newCode" hidden></button><button class="btn" id="connectDone" data-t="done"></button></div>
   </section>
@@ -326,7 +334,26 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 24px 48px; display: flex;
       <p class="error" id="agentErr" hidden></p>
       <p class="note" id="agentSent" hidden></p>
     </div>
-    <div>
+    <div id="agentWeb" hidden>
+      <h2 class="section" data-t="agentHead"></h2>
+      <p class="note" data-t="agentWebWhat" style="margin: 12px 0"></p>
+      <p class="note muted" data-t="agentPrivacy" style="margin: 0 0 12px"></p>
+      <div class="rows" id="agents"></div>
+      <p class="note muted" id="noAgents" data-t="agentNoTokens" style="margin-top: 10px" hidden></p>
+      <div class="rows" style="margin-top: 16px">
+        <label class="row plain setting"><span data-t="agentName"></span><input class="line" id="agentName" maxlength="60" placeholder="Claude"></label>
+      </div>
+      <p style="margin-top: 16px"><button class="btn go" id="agentMake" data-t="agentMake"></button></p>
+      <div class="agentNew" id="agentNew" hidden>
+        <p class="note red" data-t="agentOnce"></p>
+        <div class="kv"><span class="label" data-t="agentUrl"></span><code id="agentUrl"></code><button class="textbtn" data-copy="agentUrl" data-t="copy"></button></div>
+        <div class="kv"><span class="label" data-t="agentToken"></span><code id="agentToken"></code><button class="textbtn" data-copy="agentToken" data-t="copy"></button></div>
+        <div class="kv"><span class="label" data-t="agentSkill"></span><a id="agentSkill" target="_blank" rel="noopener"></a><span></span></div>
+      </div>
+      <p class="note" style="margin-top: 12px"><span data-t="agentHow"></span> <a href="/agent/" target="_blank" rel="noopener" data-t="agentDocs"></a></p>
+      <p class="error" id="agentWebErr" hidden></p>
+    </div>
+    <div id="storageBox">
       <h2 class="section" data-t="storage"></h2>
       <div class="rows">
         <div class="row plain setting" id="gRow" hidden><span><span data-t="gdrive"></span><span class="gstate" id="gState"></span></span><button class="btn" id="gBtn"></button></div>
@@ -337,6 +364,7 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 24px 48px; display: flex;
       <p class="error" id="gErr" hidden></p>
       <p class="note muted" data-t="storageNote" style="margin-top: 10px"></p>
     </div>
+    <div id="webBox" hidden><a class="btn" href="/logout" data-t="signOut"></a></div>
   </section>
 
   <article class="view irm" id="detail" hidden></article>
@@ -349,14 +377,16 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 24px 48px; display: flex;
    words. A person's meetings by day, and one meeting: its summary, its
    speakers and their names, its transcript. Plain DOM. The host says how to
    reach the box, call(op, args) with the ops of the "indie-recorder"
-   connector, and in which language. */
+   connector, in which language, what the box is called (box), whether
+   meetings can go to Google Drive there (drive) and whether to link to the
+   box's own meeting page (boxLink). */
 (function () {
   'use strict';
   const STR = {
     en: {
       today: 'Today', yesterday: 'Yesterday', local: 'Local', processing: 'Processing', failed: 'Failed', uploading: 'Uploading',
       notYet: 'Not yet', length: 'Length', speakers: 'Speakers', drive: 'Google Drive', openFolder: 'Open folder',
-      noteLocal: 'Stays on aibox1.', noteWaiting: 'Waiting for the Drive upload.', noteDone: 'Stored in Drive.',
+      noteLocal: 'Stays on {box}.', noteWaiting: 'Waiting for the Drive upload.', noteDone: 'Stored in Drive.',
       queued: 'A new summary is on its way.', saved: 'Saved.',
       speakerNames: 'Speaker names', saveNames: 'Save names', unnamed: (n) => ` · ${n} without a name`,
       talk: (share, turns, first) => `${share}% of the talk · ${turns} turns · first at ${first}`,
@@ -367,13 +397,13 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 24px 48px; display: flex;
         northernirish: 'Northern Irish', indian: 'Indian', spanish: 'Spanish', dutch: 'Dutch', german: 'German', czech: 'Czech',
         polish: 'Polish', french: 'French', italian: 'Italian', hungarian: 'Hungarian', finnish: 'Finnish', vietnamese: 'Vietnamese',
         romanian: 'Romanian', slovak: 'Slovak', estonian: 'Estonian', lithuanian: 'Lithuanian', croatian: 'Croatian', slovene: 'Slovene' },
-      transcript: 'Transcript', more: 'More', newSummary: 'Write a new summary', openBox: 'Open on aibox1 (VPN)',
+      transcript: 'Transcript', more: 'More', newSummary: 'Write a new summary', openBox: 'Open on {box}',
       tldr: 'Summary', decisions: 'Decisions', actions: 'Action items', questions: 'Open questions',
     },
     de: {
       today: 'Heute', yesterday: 'Gestern', local: 'Lokal', processing: 'In Arbeit', failed: 'Fehler', uploading: 'Lädt hoch',
       notYet: 'Noch nicht', length: 'Länge', speakers: 'Sprecher', drive: 'Google Drive', openFolder: 'Ordner öffnen',
-      noteLocal: 'Bleibt auf aibox1.', noteWaiting: 'Wartet auf das Hochladen nach Drive.', noteDone: 'In Drive abgelegt.',
+      noteLocal: 'Bleibt auf {box}.', noteWaiting: 'Wartet auf das Hochladen nach Drive.', noteDone: 'In Drive abgelegt.',
       queued: 'Eine neue Zusammenfassung ist unterwegs.', saved: 'Gespeichert.',
       speakerNames: 'Namen der Sprecher', saveNames: 'Namen speichern', unnamed: (n) => ` · ${n} ohne Namen`,
       talk: (share, turns, first) => `${share} % der Redezeit · ${turns} Beiträge · zuerst bei ${first}`,
@@ -384,16 +414,19 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 24px 48px; display: flex;
         northernirish: 'Nordirisch', indian: 'Indisch', spanish: 'Spanisch', dutch: 'Niederländisch', german: 'Deutsch', czech: 'Tschechisch',
         polish: 'Polnisch', french: 'Französisch', italian: 'Italienisch', hungarian: 'Ungarisch', finnish: 'Finnisch', vietnamese: 'Vietnamesisch',
         romanian: 'Rumänisch', slovak: 'Slowakisch', estonian: 'Estnisch', lithuanian: 'Litauisch', croatian: 'Kroatisch', slovene: 'Slowenisch' },
-      transcript: 'Transkript', more: 'Mehr', newSummary: 'Neue Zusammenfassung schreiben', openBox: 'Auf aibox1 öffnen (VPN)',
+      transcript: 'Transkript', more: 'Mehr', newSummary: 'Neue Zusammenfassung schreiben', openBox: 'Auf {box} öffnen',
       tldr: 'Zusammenfassung', decisions: 'Entscheidungen', actions: 'Aufgaben', questions: 'Offene Fragen',
     },
   };
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const pad = (n) => String(n).padStart(2, '0');
 
-  function create({ lang, call, fail = () => {}, onChange = () => {} }) {
+  function create({ lang, call, fail = () => {}, onChange = () => {}, box = () => 'aibox1', drive = () => true, boxLink = true }) {
     const L = lang === 'de' ? 'de' : 'en';
-    const t = (k) => (STR[L][k] !== undefined ? STR[L][k] : STR.en[k]);
+    const t = (k) => {
+      const v = STR[L][k] !== undefined ? STR[L][k] : STR.en[k];
+      return typeof v === 'string' ? v.replace(/\{box\}/g, box()) : v;
+    };
     const dayKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;   // the local day
     function dayLabel(d) {
       if (dayKey(d) === dayKey(new Date())) return t('today');
@@ -539,6 +572,7 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 24px 48px; display: flex;
         ({ label, name, suggestions: [], lines: [], share: 0, turns: 0, first: 0 }));
       const nSpk = Array.isArray(m.speakers) ? m.speakers.length : m.speakers;
       const unnamed = cards.filter((c) => !c.name).length;
+      const withDrive = drive() || m.storage === 'drive';
       const note = m.storage !== 'drive' ? t('noteLocal') : (m.drive_url ? t('noteDone') : t('noteWaiting'));
       el.innerHTML = `<div class="head"><span class="kicker" id="dWhen">${esc(d.toLocaleDateString(L, { day: 'numeric', month: 'short', year: 'numeric' }))} · ${esc(time(d))}</span>` +
         `<h1 class="h2" id="dTitle">${esc(m.title || m.id)}</h1></div>
@@ -546,7 +580,7 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 24px 48px; display: flex;
           <div class="cells">
             <div class="cell"><span class="label">${esc(t('length'))}</span><span class="v tnum" id="dLen">${esc(length(m.duration_s))}</span></div>
             <div class="cell"><span class="label">${esc(t('speakers'))}</span><span class="v" id="dSpkN">${esc(nSpk ? String(nSpk) : t('notYet'))}</span></div>
-            <div class="cell"><span class="label" id="dLDrive">${esc(t('drive'))}</span><button type="button" class="switch" role="switch" aria-checked="${m.storage === 'drive'}" id="dDrive" aria-labelledby="dLDrive"></button></div>
+            ${withDrive ? `<div class="cell"><span class="label" id="dLDrive">${esc(t('drive'))}</span><button type="button" class="switch" role="switch" aria-checked="${m.storage === 'drive'}" id="dDrive" aria-labelledby="dLDrive"></button></div>` : ''}
           </div>
           <p class="note" style="margin-top: 12px"><span id="dNote">${esc(note)}</span> ${m.drive_url ? `<a id="dLink" target="_blank" rel="noopener" href="${esc(m.drive_url)}">${esc(t('openFolder'))}</a>` : ''}</p>
         </div>
@@ -558,11 +592,11 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 24px 48px; display: flex;
           </details>
           <details class="fold" id="dTrBox"><summary>${esc(t('transcript'))}</summary><div class="inner"><div class="tr" id="dTr"></div></div></details>
           <details class="fold"><summary>${esc(t('more'))}</summary>
-            <div class="inner more"><button type="button" class="btn" id="dRedo">${esc(t('newSummary'))}</button>${m.url ? `<a id="dBox" target="_blank" rel="noopener" href="${esc(m.url)}">${esc(t('openBox'))}</a>` : ''}</div>
+            <div class="inner more"><button type="button" class="btn" id="dRedo">${esc(t('newSummary'))}</button>${m.url && boxLink ? `<a id="dBox" target="_blank" rel="noopener" href="${esc(m.url)}">${esc(t('openBox'))}</a>` : ''}</div>
           </details>
         </div>`;
       const $ = (s) => el.querySelector(s);
-      $('#dDrive').addEventListener('click', async () => {
+      if ($('#dDrive')) $('#dDrive').addEventListener('click', async () => {
         const drive = $('#dDrive').getAttribute('aria-checked') !== 'true';
         $('#dDrive').setAttribute('aria-checked', String(drive));
         try {
@@ -618,28 +652,33 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 24px 48px; display: flex;
 <script>
 'use strict';
 const LANG = document.documentElement.lang === 'de' ? 'de' : 'en';
+/* In a browser on the recorder itself (an Indie Box, a Mac) rather than in
+   brainbot:agent command: the recorder serves this page with an IndieApp that
+   talks to /api/v1/web for the person signed in. */
+const WEB = !!(window.IndieApp && window.IndieApp.web);
+let BOX = WEB ? location.hostname : 'aibox1', REACH = 'vpn', DRIVE = true;   // the status op says
 const STR = {
   en: {
     brand: 'Indie recorder', title: 'Meetings', back: 'Back', settings: 'Settings', private: 'Only you see your meetings',
     countN: (n) => (n === 1 ? '1 meeting' : `${n} meetings`),
     defaultDrive: 'Store new recordings in Google Drive', folder: 'Drive folder', audio: 'Include the audio',
-    storage: 'Storage', storageNote: 'Off: recordings, transcripts and summaries stay on aibox1. You can change it for each meeting.',
-    settingsKick: 'Your recorder on aibox1', drive: 'Google Drive', openFolder: 'Open folder', length: 'Length', speakers: 'Speakers',
+    storage: 'Storage', storageNote: 'Off: recordings, transcripts and summaries stay on {box}. You can change it for each meeting.',
+    settingsKick: 'Your recorder on {box}', drive: 'Google Drive', openFolder: 'Open folder', length: 'Length', speakers: 'Speakers',
     speakerNames: 'Speaker names', saveNames: 'Save names', unnamed: (n) => ` · ${n} without a name`,
     talk: (share, turns, first) => `${share}% of the talk · ${turns} turns · first at ${first}`,
     play: 'Play', stopPlay: 'Stop', use: (n) => `Use "${n}"`, nameLabel: 'Name',
     by: { recorder: 'In the meeting', agent: 'Your agent', person: 'You' }, transcript: 'Transcript', more: 'More', newSummary: 'Write a new summary',
-    openBox: 'Open on aibox1 (VPN)', noneHead: 'No meetings yet', none1: 'Connect your phone.', none2: 'Record a meeting with it. Its summary shows up here.',
+    openBox: 'Open on {box}', noneHead: 'No meetings yet', none1: 'Connect your phone.', none2: 'Record a meeting with it. Its summary shows up here.',
     connected: (n) => `Done: ${n}`,
     today: 'Today', yesterday: 'Yesterday', local: 'Local', processing: 'Processing', failed: 'Failed', notYet: 'Not yet',
-    noteLocal: 'Stays on aibox1.', noteWaiting: 'Waiting for the Drive upload.', noteDone: 'Stored in Drive.',
+    noteLocal: 'Stays on {box}.', noteWaiting: 'Waiting for the Drive upload.', noteDone: 'Stored in Drive.',
     queued: 'A new summary is on its way.', saved: 'Saved.',
     tldr: 'Summary', decisions: 'Decisions', actions: 'Action items', questions: 'Open questions',
     setupKick: 'Set up', setupTitle: 'Connect the recorder',
-    setupText: 'This app needs the meeting recorder on aibox1, and it is not connected here yet:',
+    setupText: 'This app needs the meeting recorder on {box}, and it is not connected here yet:',
     setup1: 'An admin adds the "indie-recorder" connector (indie-recorder/integrations/indie-chat).',
     setup2: 'Or add your own MCP server for the recorder in Settings.',
-    status: (s) => 'aibox1 · ' + (s.worker ? (s.current_job ? 'Working' : 'Ready') : 'Offline'), forDrive: (n) => ` · ${n} for Drive`,
+    status: (s) => (s.box || BOX) + ' · ' + (s.worker ? (s.current_job ? 'Working' : s.engine_wait ? 'Getting ready' : 'Ready') : 'Offline'), forDrive: (n) => ` · ${n} for Drive`,
     you: 'You', yourName: 'Your name', yourNameNote: 'Your phones show it, so you can see whose account they record into.',
     phones: 'Phones', noPhones: 'No phone connected yet.', connectPhone: 'Connect a phone', remove: 'Remove',
     lastUsed: (d) => `Last used ${d}`, unused: 'Not used yet',
@@ -650,7 +689,7 @@ const STR = {
     waiting: 'Waiting for your phone', connectedNow: (n) => `Connected: ${n}`, expired: 'This code has expired.',
     newCode: 'Make a new code', done: 'Done',
     agentHead: 'Meeting agent',
-    agentWhat: 'Your own agent in brainbot:agent command writes better summaries with what it knows about your work and suggests who the speakers are, once an hour, on aibox1.',
+    agentWhat: 'Your own agent in brainbot:agent command writes better summaries with what it knows about your work and suggests who the speakers are, once an hour, on {box}.',
     agent1: 'Give this app an agent: on the right, New agent for this app.',
     agent2: "In that agent's settings, set the engine to aibox1 Ollama (64k): transcripts stay on aibox1.",
     agent3: 'Press the button. The agent asks you to confirm its hourly routine.',
@@ -665,28 +704,37 @@ const STR = {
     gExpired: 'Access ended: connect again.', gConnect: 'Connect Google Drive', gDisconnect: 'Disconnect',
     gFinish: 'Finish the sign-in in the new tab.',
     gDisconnectAsk: 'Disconnect Google Drive? Meetings set to Drive then wait until you connect again.',
+    step1lan: 'Put the phone on the same network as {box}.',
+    httpNote: 'Phones record only over HTTPS. On an Indie Box: Admin, HTTPS, then Internal certificate (install the box\'s certificate authority on the phone once) or Automatic HTTPS.',
+    signOut: 'Sign out', copy: 'Copy', copied: 'Copied',
+    agentWebWhat: 'Your own agent can write better summaries with what it knows about your work, and suggest who the speakers are, once an hour. Any agent with MCP will do: Claude, OpenClaw, Hermes. Give each agent a token of its own.',
+    agentPrivacy: 'It reads whole transcripts: with a model on your own hardware (Ollama, for example) they stay with you, while a cloud model\'s provider gets what the agent reads.',
+    agentNoTokens: 'No agent has a token yet.', agentName: 'Name of the agent', agentMake: 'Make a token',
+    agentOnce: 'Copy the token now: it is shown only once.', agentUrl: 'MCP server', agentToken: 'Token', agentSkill: 'Skill',
+    agentHow: 'Add the MCP server with the token as the header Authorization: Bearer <token>, give the agent the skill, and let it run once an hour.',
+    agentDocs: 'Step by step for Claude, OpenClaw and Hermes',
   },
   de: {
     brand: 'Indie recorder', title: 'Meetings', back: 'Zurück', settings: 'Einstellungen', private: 'Ihre Meetings sehen nur Sie',
     countN: (n) => (n === 1 ? '1 Meeting' : `${n} Meetings`),
     defaultDrive: 'Neue Aufnahmen in Google Drive ablegen', folder: 'Drive-Ordner', audio: 'Audio mit ablegen',
-    storage: 'Ablage', storageNote: 'Aus: Aufnahmen, Transkripte und Zusammenfassungen bleiben auf aibox1. Sie können das für jedes Meeting ändern.',
-    settingsKick: 'Ihr Recorder auf aibox1', drive: 'Google Drive', openFolder: 'Ordner öffnen', length: 'Länge', speakers: 'Sprecher',
+    storage: 'Ablage', storageNote: 'Aus: Aufnahmen, Transkripte und Zusammenfassungen bleiben auf {box}. Sie können das für jedes Meeting ändern.',
+    settingsKick: 'Ihr Recorder auf {box}', drive: 'Google Drive', openFolder: 'Ordner öffnen', length: 'Länge', speakers: 'Sprecher',
     speakerNames: 'Namen der Sprecher', saveNames: 'Namen speichern', unnamed: (n) => ` · ${n} ohne Namen`,
     talk: (share, turns, first) => `${share} % der Redezeit · ${turns} Beiträge · zuerst bei ${first}`,
     play: 'Anhören', stopPlay: 'Stopp', use: (n) => `"${n}" übernehmen`, nameLabel: 'Name',
     by: { recorder: 'Im Meeting', agent: 'Ihr Agent', person: 'Sie' }, transcript: 'Transkript', more: 'Mehr', newSummary: 'Neue Zusammenfassung schreiben',
-    openBox: 'Auf aibox1 öffnen (VPN)', noneHead: 'Noch keine Meetings', none1: 'Verbinden Sie Ihr Telefon.', none2: 'Nehmen Sie damit ein Meeting auf. Die Zusammenfassung erscheint hier.',
+    openBox: 'Auf {box} öffnen', noneHead: 'Noch keine Meetings', none1: 'Verbinden Sie Ihr Telefon.', none2: 'Nehmen Sie damit ein Meeting auf. Die Zusammenfassung erscheint hier.',
     connected: (n) => `Erledigt: ${n}`,
     today: 'Heute', yesterday: 'Gestern', local: 'Lokal', processing: 'In Arbeit', failed: 'Fehler', notYet: 'Noch nicht',
-    noteLocal: 'Bleibt auf aibox1.', noteWaiting: 'Wartet auf das Hochladen nach Drive.', noteDone: 'In Drive abgelegt.',
+    noteLocal: 'Bleibt auf {box}.', noteWaiting: 'Wartet auf das Hochladen nach Drive.', noteDone: 'In Drive abgelegt.',
     queued: 'Eine neue Zusammenfassung ist unterwegs.', saved: 'Gespeichert.',
     tldr: 'Zusammenfassung', decisions: 'Entscheidungen', actions: 'Aufgaben', questions: 'Offene Fragen',
     setupKick: 'Einrichten', setupTitle: 'Recorder verbinden',
-    setupText: 'Diese App braucht den Meeting-Recorder auf aibox1, der hier noch nicht verbunden ist:',
+    setupText: 'Diese App braucht den Meeting-Recorder auf {box}, der hier noch nicht verbunden ist:',
     setup1: 'Ein Admin richtet den Connector "indie-recorder" ein (indie-recorder/integrations/indie-chat).',
     setup2: 'Oder fügen Sie in den Einstellungen einen eigenen MCP-Server für den Recorder hinzu.',
-    status: (s) => 'aibox1 · ' + (s.worker ? (s.current_job ? 'Arbeitet' : 'Bereit') : 'Nicht erreichbar'), forDrive: (n) => ` · ${n} für Drive`,
+    status: (s) => (s.box || BOX) + ' · ' + (s.worker ? (s.current_job ? 'Arbeitet' : s.engine_wait ? 'Wird vorbereitet' : 'Bereit') : 'Nicht erreichbar'), forDrive: (n) => ` · ${n} für Drive`,
     you: 'Sie', yourName: 'Ihr Name', yourNameNote: 'Ihre Telefone zeigen ihn an, damit Sie sehen, in welches Konto sie aufnehmen.',
     phones: 'Telefone', noPhones: 'Noch kein Telefon verbunden.', connectPhone: 'Telefon verbinden', remove: 'Entfernen',
     lastUsed: (d) => `Zuletzt ${d}`, unused: 'Noch nicht benutzt',
@@ -697,7 +745,7 @@ const STR = {
     waiting: 'Warte auf Ihr Telefon', connectedNow: (n) => `Verbunden: ${n}`, expired: 'Dieser Code ist abgelaufen.',
     newCode: 'Neuen Code erstellen', done: 'Fertig',
     agentHead: 'Meeting-Agent',
-    agentWhat: 'Ihr eigener Agent in brainbot:agent command schreibt mit dem, was er über Ihre Arbeit weiß, bessere Zusammenfassungen und schlägt vor, wer die Sprecher sind, einmal pro Stunde, auf aibox1.',
+    agentWhat: 'Ihr eigener Agent in brainbot:agent command schreibt mit dem, was er über Ihre Arbeit weiß, bessere Zusammenfassungen und schlägt vor, wer die Sprecher sind, einmal pro Stunde, auf {box}.',
     agent1: 'Geben Sie dieser App einen Agenten: rechts, Neuer Agent für diese App.',
     agent2: 'Stellen Sie in den Einstellungen dieses Agenten das Modell auf aibox1 Ollama (64k): Transkripte bleiben auf aibox1.',
     agent3: 'Drücken Sie den Knopf. Der Agent bittet Sie, seine stündliche Routine zu bestätigen.',
@@ -712,13 +760,29 @@ const STR = {
     gExpired: 'Zugriff abgelaufen: bitte neu verbinden.', gConnect: 'Google Drive verbinden', gDisconnect: 'Trennen',
     gFinish: 'Melden Sie sich im neuen Tab bei Google an.',
     gDisconnectAsk: 'Google Drive trennen? Meetings für Drive warten dann, bis Sie wieder verbinden.',
+    step1lan: 'Das Telefon ins selbe Netz wie {box} bringen.',
+    httpNote: 'Telefone nehmen nur über HTTPS auf. Auf einer Indie Box: Admin, HTTPS, dann Internes Zertifikat (die Zertifizierungsstelle der Box einmal auf dem Telefon installieren) oder Automatisches HTTPS.',
+    signOut: 'Abmelden', copy: 'Kopieren', copied: 'Kopiert',
+    agentWebWhat: 'Ihr eigener Agent kann mit dem, was er über Ihre Arbeit weiß, bessere Zusammenfassungen schreiben und vorschlagen, wer die Sprecher sind, einmal pro Stunde. Jeder Agent mit MCP geht: Claude, OpenClaw, Hermes. Geben Sie jedem Agenten ein eigenes Token.',
+    agentPrivacy: 'Er liest ganze Transkripte: mit einem Modell auf Ihrer eigenen Hardware (zum Beispiel Ollama) bleiben sie bei Ihnen, ein Cloud-Modell bekommt sein Anbieter, was der Agent liest.',
+    agentNoTokens: 'Noch kein Agent hat ein Token.', agentName: 'Name des Agenten', agentMake: 'Token erstellen',
+    agentOnce: 'Kopieren Sie das Token jetzt: es wird nur einmal angezeigt.', agentUrl: 'MCP-Server', agentToken: 'Token', agentSkill: 'Skill',
+    agentHow: 'Fügen Sie den MCP-Server mit dem Token als Header Authorization: Bearer <Token> hinzu, geben Sie dem Agenten den Skill und lassen Sie ihn einmal pro Stunde laufen.',
+    agentDocs: 'Schritt für Schritt für Claude, OpenClaw und Hermes',
   },
 };
-const t = (k) => (STR[LANG][k] !== undefined ? STR[LANG][k] : STR.en[k]);
+const t = (k) => {
+  const v = STR[LANG][k] !== undefined ? STR[LANG][k] : STR.en[k];
+  return typeof v === 'string' ? v.replace(/\{box\}/g, BOX) : v;
+};
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const pad = (n) => String(n).padStart(2, '0');
-document.querySelectorAll('[data-t]').forEach((el) => { el.textContent = t(el.dataset.t); });
+function fillTexts() {
+  document.querySelectorAll('[data-t]').forEach((el) => { const v = t(el.dataset.t); if (typeof v === 'string') el.textContent = v; });
+  $('step1').textContent = t(REACH === 'lan' ? 'step1lan' : 'step1');
+}
+fillTexts();
 
 let SERVER = null, VIA = null, meetings = [], current = null, settings = null, view = 'home', backTo = 'home', phoneList = null;
 let google = null, googleWait = null;
@@ -770,7 +834,7 @@ const on = (el) => el.getAttribute('aria-checked') === 'true';
 const setOn = (el, v) => el.setAttribute('aria-checked', v ? 'true' : 'false');
 
 /* The meeting views every indie-recorder app shares (recorder/static/meetings.js). */
-const M = IRMeetings.create({ lang: LANG, call, fail });
+const M = IRMeetings.create({ lang: LANG, call, fail, box: () => BOX, drive: () => DRIVE, boxLink: !WEB });
 const time = M.time;
 
 function renderHome() {
@@ -804,6 +868,10 @@ async function load() {
     $('error').hidden = true;
     if (view === 'setup') show('home');
     settings = st.settings; meetings = list || [];
+    const was = [BOX, REACH];
+    BOX = st.box || BOX; REACH = st.reach || REACH; DRIVE = st.drive !== false;
+    if (was[0] !== BOX || was[1] !== REACH) fillTexts();
+    $('storageBox').hidden = !DRIVE;
     if (!meetings.length && VIA === 'connector' && phoneList === null) phoneList = await call('phones').catch(() => []);
     $('status').textContent = t('status')(st);
     $('statusExtra').textContent = st.pending_drive ? t('forDrive')(st.pending_drive) : '';
@@ -840,6 +908,7 @@ function switchTo(el, apply) {
 
 async function loadPhones() {
   if (VIA === 'mcp') { $('phonesBox').hidden = true; $('youBox').hidden = true; $('agentBox').hidden = true; return; }   // they need the connector (it knows the person)
+  if (WEB) { $('agentBox').hidden = true; $('agentWeb').hidden = false; $('webBox').hidden = false; loadAgents(); }
   try {
     const me = await call('whoami');
     if (document.activeElement !== $('myName')) $('myName').value = me.name || '';
@@ -856,6 +925,38 @@ async function loadPhones() {
   } catch (e) { fail(e); }
 }
 
+/* The person's own agents (web mode): each gets a token for the MCP server. */
+function renderAgents(list) {
+  $('noAgents').hidden = list.length > 0;
+  $('agents').innerHTML = list.map((a, i) => {
+    const last = a.last_used_at ? t('lastUsed')(new Date(a.last_used_at).toLocaleDateString(LANG)) : t('unused');
+    return `<div class="row phone"><span class="num">${pad(i + 1)}</span><span>${esc(a.name)}</span>` +
+      `<span class="side">${esc(last)}</span><button class="textbtn" data-id="${esc(a.id)}">${esc(t('remove'))}</button></div>`;
+  }).join('');
+  $('agents').querySelectorAll('button').forEach((b) => b.addEventListener('click', async () => {
+    try { $('agentNew').hidden = true; renderAgents((await call('revoke_agent_token', { id: b.dataset.id })).agents); }
+    catch (e) { $('agentWebErr').textContent = e.message || String(e); $('agentWebErr').hidden = false; }
+  }));
+}
+async function loadAgents() {
+  try { renderAgents((await call('agent_tokens')).agents || []); } catch (e) { fail(e); }
+}
+$('agentMake').addEventListener('click', async () => {
+  $('agentWebErr').hidden = true;
+  try {
+    const r = await call('new_agent_token', { name: $('agentName').value });
+    $('agentUrl').textContent = r.mcp_url; $('agentToken').textContent = r.token;
+    $('agentSkill').textContent = r.skill_url; $('agentSkill').href = r.skill_url;
+    $('agentNew').hidden = false; $('agentName').value = '';
+    renderAgents(r.agents || []);
+  } catch (e) { $('agentWebErr').textContent = e.message || String(e); $('agentWebErr').hidden = false; }
+});
+document.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText($(b.dataset.copy).textContent); b.textContent = t('copied'); }
+  catch (e) { getSelection().selectAllChildren($(b.dataset.copy)); }   // no clipboard over plain HTTP: select it instead
+  setTimeout(() => { b.textContent = t('copy'); }, 2000);
+}));
+
 /* Connect a phone: one code, to scan or to type. It works once, for a quarter
    of an hour; the box tells us when a phone has used it. */
 let waiting = null, expiry = null;
@@ -866,6 +967,7 @@ async function openConnect(from) {
   backTo = from || view;
   show('connect');
   $('wait').className = 'wait'; $('wait').textContent = t('waiting');
+  $('httpNote').hidden = !(WEB && location.protocol === 'http:');
   $('newCode').hidden = true;
   try {
     const before = new Set((await call('phones') || []).map((p) => p.id));
@@ -918,7 +1020,7 @@ $('agentBtn').addEventListener('click', async () => {
 $('nudgeBtn').addEventListener('click', () => {
   if (google && google.available && !google.connected) { connectGoogle(); return; }
   show('settings'); loadPhones();
-  $('agentBox').scrollIntoView({ block: 'start' });
+  $(WEB ? 'agentWeb' : 'agentBox').scrollIntoView({ block: 'start' });
 });
 
 /* Google Drive: each person connects their own once, in a tab of its own
@@ -977,6 +1079,9 @@ if (navigator.modelContext && navigator.modelContext.provideContext) {
 (async () => {
   show('home');
   await load();
+  // a meeting's link (/m/<id>) leads here as /#m=<id> in a browser on the recorder
+  const asked = WEB && (/^#m=([\w.-]+)$/.exec(location.hash) || [])[1];
+  if (asked) { history.replaceState(null, '', location.pathname); await openMeeting(asked); }
   setInterval(() => { if (document.visibilityState === 'visible' && view === 'home') load(); }, 30000);
 })();
 </script>

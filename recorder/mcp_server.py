@@ -1,16 +1,19 @@
-"""MCP endpoint (/mcp) for the Agent Command Center agent: streamable HTTP with
-plain JSON responses and no sessions, which MCP clients accept.
+"""MCP endpoint (/mcp) for a person's own agent (brainbot:agent command's, or any
+agent with an agent token: Claude, OpenClaw, Hermes): streamable HTTP with plain
+JSON responses and no sessions, which MCP clients accept.
 
 The tools mirror the JSON API: list meetings, read one with its full
 transcript, store a better summary, choose local or Drive storage, sync the
 repo's issues, and work the outbox of Drive and GitHub follow-ups. Agents that
-read transcripts must use aibox1's own LLM, never another model host."""
+read transcripts should use a model on the person's own hardware: a cloud model
+gets the transcripts it reads."""
 import json
 import time
 from pathlib import Path
 
 from fastapi import Request
 from fastapi.responses import JSONResponse, Response
+from starlette.concurrency import run_in_threadpool
 
 from . import __version__, speakers, vault
 from .people import resolve
@@ -20,7 +23,7 @@ SKILL = Path(__file__).parent / "skills" / "meeting-follow-up" / "SKILL.md"
 
 VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 
-INSTRUCTIONS = """Meetings recorded on aibox1. Each meeting is stored either locally (nothing leaves the box) or in
+INSTRUCTIONS = """Meetings recorded on {box}. Each meeting is stored either locally (nothing leaves the box) or in
 Google Drive (summary, action items and transcript go to a Drive folder). The person chooses with set_storage;
 update_settings sets the default for new recordings. Each meeting has a transcript with speaker labels
 ("Speaker 1".."Speaker N", or the names people set), a first summary written by the recorder,
@@ -39,7 +42,7 @@ TOOLS = [
                     "is nothing to do, so a routine can use it as its precheck.",
      "inputSchema": {"type": "object", "properties": {}}},
     {"name": "list_meetings",
-     "description": "Meetings on aibox1, newest first: id, title, start time, duration, language, state, "
+     "description": "The person's meetings, newest first: id, title, start time, duration, language, state, "
                     "number of speakers, current summary version and author, and the link.",
      "inputSchema": {"type": "object", "properties": {
          "since": {"type": "string", "description": "ISO 8601 time; only meetings created or updated after it"},
@@ -221,8 +224,10 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
             for m in rows:
                 states[m["state"]] = states.get(m["state"], 0) + 1
             box = outbox(who)
-            return {"worker": bool(worker and worker.thread and worker.thread.is_alive()),
+            return {"box": s.box_name, "reach": s.phone_reach, "drive": s.drive or followup.google.available(),
+                    "worker": bool(worker and worker.thread and worker.thread.is_alive()),
                     "current_job": worker.current if worker else None,
+                    "engine_wait": worker.waiting if worker else None,
                     "queued_jobs": len(worker.queue()) if worker else None,
                     "engine": s.engine, "llm": s.llm_model, "engines": engines_health() if engines_health else {},
                     "meetings": len(rows), "by_state": states,
@@ -343,7 +348,7 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
                 result = {"protocolVersion": asked if asked in VERSIONS else VERSIONS[0],
                           "capabilities": {"tools": {"listChanged": False}},
                           "serverInfo": {"name": "indie-recorder", "version": __version__},
-                          "instructions": INSTRUCTIONS}
+                          "instructions": INSTRUCTIONS.replace("{box}", s.box_name)}
             elif method == "ping":
                 result = {}
             elif method == "tools/list":
@@ -371,7 +376,9 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
             return JSONResponse({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "parse error"}},
                                 status_code=400)
         batch = isinstance(msg, list)
-        replies = [r for r in (handle(m, who) for m in (msg if batch else [msg])) if r is not None]
+        # off the event loop: a tool may wait on an engine or on Google
+        replies = await run_in_threadpool(lambda: [r for r in (handle(m, who) for m in (msg if batch else [msg]))
+                                                   if r is not None])
         if not replies:
             return Response(status_code=202)
         return JSONResponse(replies if batch else replies[0])

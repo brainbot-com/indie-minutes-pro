@@ -1,0 +1,133 @@
+# Indie Recorder as an Indie Box app (brainbot-com/indie-box,
+# docs/app-integration.md): phones record meetings, the box transcribes them
+# with its own GPU, writes the summary with its own model, and keeps it all,
+# encrypted. Nothing about a meeting leaves the box.
+#
+# The box reads this file as it is: the labelled service below is the app (its
+# landing card, its port from 9200-9249 and the gateway route come from the
+# labels), the variables are the install form. Updating is installing a newer
+# version of this file from the catalog; the data stays.
+#
+# Two values come from the install form, both with a Generate button:
+#   INDIE_RECORDER_PASSWORD  signs the owner in to the recorder in a browser
+#   INDIE_RECORDER_DATA_KEY  encrypts the meetings at rest; the phones' sealing
+#                            key is made from it too, so it is the one secret
+#                            to keep a copy of
+#
+# First start: the speech engine downloads its model (about 21 GB) from
+# Hugging Face and checks it; recordings wait until it is there, and the app's
+# status line says "Getting ready" meanwhile.
+#
+# Phones record only over HTTPS (browsers allow the microphone in a secure
+# context only): turn it on in the box's Admin > HTTPS, as "Internal
+# certificate" (then install the box's certificate authority on each phone
+# once) or "Automatic HTTPS".
+
+services:
+
+  # ---- the app: the one labelled service, so the one gateway route ---------
+  indie-recorder:
+    image: ghcr.io/brainbot-com/indie-recorder:${INDIE_RECORDER_TAG:-0.0.0}
+    # Recordings, transcripts and summaries are people's words: on boxes with
+    # encrypted storage the recorder waits for the unlock.
+    profiles:
+      - ${SECURE_STORAGE_PROFILE:-stable}
+    restart: always
+    labels:
+      indiebox.app.name: "Indie Recorder"
+      indiebox.app.icon: "microphone"
+      indiebox.app.http-port: "8000"
+      # The release, written by indiebox/pin-images.sh together with the image
+      # defaults above and below; a literal, so the box reports what it runs.
+      indiebox.app.version: "0.0.0"
+      indiebox.app.description: "Meetings mit dem Telefon aufnehmen, auf der Box transkribieren und zusammenfassen. Nichts davon verlässt die Box."
+
+      # ---- the install form (docs/app-integration.md, "Required variables")
+      indiebox.app.var.INDIE_RECORDER_PASSWORD.label: "Password"
+      indiebox.app.var.INDIE_RECORDER_PASSWORD.description: "Signs you in to the recorder in a browser (the app's card). Press Generate and note it, or type your own of at least 12 characters. Changing it later signs in with the new one; meetings stay."
+      indiebox.app.var.INDIE_RECORDER_PASSWORD.required: "true"
+      indiebox.app.var.INDIE_RECORDER_PASSWORD.secret: "true"
+      indiebox.app.var.INDIE_RECORDER_PASSWORD.generate: "alnum:20"
+      indiebox.app.var.INDIE_RECORDER_DATA_KEY.label: "Encryption key"
+      indiebox.app.var.INDIE_RECORDER_DATA_KEY.description: "Encrypts every recording, transcript and summary on the box. Press Generate, then keep a copy somewhere safe: without this key the meetings cannot be read, and changing it makes the stored meetings unreadable."
+      indiebox.app.var.INDIE_RECORDER_DATA_KEY.required: "true"
+      indiebox.app.var.INDIE_RECORDER_DATA_KEY.secret: "true"
+      indiebox.app.var.INDIE_RECORDER_DATA_KEY.generate: "base64url:32"
+      # Optional ones carry no default on purpose: a declared default is written
+      # to the box's .env at install and would then outrank the fallback below
+      # for good, so a later release could never move it.
+      indiebox.app.var.INDIE_RECORDER_NAME.label: "Your name"
+      indiebox.app.var.INDIE_RECORDER_NAME.description: "Shown on your phones, so you can see whose account they record into. You can change it in the recorder too."
+      indiebox.app.var.INDIE_RECORDER_NAME.required: "false"
+      indiebox.app.var.INDIE_RECORDER_MODEL.label: "Model for summaries"
+      indiebox.app.var.INDIE_RECORDER_MODEL.description: "Leave empty to follow the box's default model (Admin > AI > Model connections). Only a model of this box is used: one of a remote provider gets no transcript."
+      indiebox.app.var.INDIE_RECORDER_MODEL.required: "false"
+    environment:
+      # ${VAR:?}: without the install form's values the app file does not resolve,
+      # so it cannot start without its key and store meetings it cannot read later
+      OWNER_PASSWORD: ${INDIE_RECORDER_PASSWORD:?set the password in the install form}
+      OWNER_NAME: ${INDIE_RECORDER_NAME:-}
+      DATA_KEY: ${INDIE_RECORDER_DATA_KEY:?set the encryption key in the install form}
+      # links follow whatever address and scheme the box's gateway serves
+      PUBLIC_URL: auto
+      # only the box's own containers reach this one, the gateway among them
+      FORWARDED_ALLOW_IPS: "*"
+      BOX_NAME: ${INDIEBOX_INSTALL_HOSTNAME:-Indie Box}
+      PHONE_REACH: lan
+      # the box's own models, on the shared llm network
+      OLLAMA_URL: http://ollama:11434
+      LLM_MODEL: ${INDIE_RECORDER_MODEL:-${INDIEBOX_LLM_DEFAULT_MODEL:-qwen3.8:27b}}
+      ENGINE: A-iq4
+      NEMO_URL: http://indie-recorder-engine:8090
+      QWEN_URL: "off"
+      ACCENT: "0"
+      # no Google sign-in on a box: meetings stay on it
+      DRIVE: "0"
+      STORAGE_DEFAULT: local
+      SCRATCH_DIR: /data/scratch
+      GPU_LOCK: /data/scratch/.gpu.lock
+    volumes:
+      - ${SECURE_STORAGE_DIR:-${DATA_DIR:-/data}}/indie-recorder/data:/data
+      # plain audio of a running job: RAM, shared with the engine, never on disk
+      - indie-recorder-scratch:/data/scratch
+    networks:
+      - default
+      - llm
+    depends_on:
+      secure-gate:
+        condition: service_completed_successfully
+
+  # ---- speech: NVIDIA NeMo-Speech.cpp on the GPU (Vulkan) ---------------------
+  # Nemotron 3.5 Transcribe 30B-A4B, the words with who said them. Started per
+  # meeting, so nothing stays in GPU memory between meetings.
+  indie-recorder-engine:
+    image: ghcr.io/brainbot-com/indie-recorder-engine:${INDIE_RECORDER_TAG:-0.0.0}
+    profiles:
+      - ${SECURE_STORAGE_PROFILE:-stable}
+    restart: always
+    devices:
+      - /dev/dri:/dev/dri
+    environment:
+      # the encoder and the IQ4_NL decoder, from Hugging Face at a pinned
+      # revision, each file checked against its SHA-256
+      FETCH_MODELS: iq4
+      GPU_LOCK: /data/scratch/.gpu.lock
+      XDG_CACHE_HOME: /models/.cache
+    volumes:
+      # the model is no secret and large: the box's plain data disk
+      - ${DATA_DIR:-/data}/indie-recorder/models:/models
+      - indie-recorder-scratch:/data/scratch
+
+volumes:
+  indie-recorder-scratch:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=8g,mode=0700"
+
+networks:
+  default:
+  # the box's shared network (app-integration.md, "Platform contract"): its models
+  llm:
+    name: llm

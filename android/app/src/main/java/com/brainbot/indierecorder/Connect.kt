@@ -35,7 +35,11 @@ object ConnectCode {
 
 /** What a link opens the app with. */
 sealed interface PairLink {
-    /** From the connect page: indierecorder://pair?c=<code>&u=<the box's https address>&ca=<its CA, base64url DER>. */
+    /**
+     * From the connect page: indierecorder://pair?c=<code>&u=<the box's https address>[&ca=<its CA, base64url DER>].
+     * Without ca (an Indie Box: a public certificate, or its own CA installed on the phone) the
+     * phone's trust store decides; a ca that does not decode is refused.
+     */
     class Code(val code: String, val url: String, val caDer: ByteArray) : PairLink
 
     /** The older link with the phone's token in it (Devices page before connect codes). */
@@ -52,7 +56,7 @@ sealed interface PairLink {
             val c = q["c"] ?: return BoxConfig.parse(text)?.let(::Token)
             val code = ConnectCode.normalize(c)
             val url = q["u"]?.trimEnd('/') ?: return null
-            val der = q["ca"]?.let { decodeCa(it) } ?: return null
+            val der = q["ca"]?.let { decodeCa(it) ?: return null } ?: ByteArray(0)
             if (code.length != ConnectCode.LENGTH || !url.startsWith("https://")) return null
             return Code(code, url, der)
         }

@@ -1,0 +1,76 @@
+# Indie Recorder on a computer of your own, without an Indie Box (standalone/README.md):
+#
+#   Linux with an AMD or Intel GPU: everything here, the engine included
+#     (COMPOSE_PROFILES=engine in .env). Without a GPU: NEMO_DEVICE=cpu (slow).
+#   A Mac with Apple silicon: the recorder and Caddy here; the speech engine runs
+#     natively with Metal (mac/engine.sh), since Docker on a Mac has no GPU.
+#
+# Phones record over HTTPS only: Caddy serves https://<this computer>:8443 with a
+# certificate from your own CA (../deploy/make-ca.sh secrets/tls), and the CA
+# itself at http://<this computer>:8480/ca.crt for the phones.
+name: indie-recorder
+
+services:
+  recorder:
+    image: ghcr.io/brainbot-com/indie-recorder:${RECORDER_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      OWNER_PASSWORD: ${RECORDER_PASSWORD:?set RECORDER_PASSWORD in .env}
+      OWNER_NAME: ${RECORDER_OWNER:-}
+      DATA_KEY: ${RECORDER_DATA_KEY:?set RECORDER_DATA_KEY in .env}
+      PUBLIC_URL: auto
+      FORWARDED_ALLOW_IPS: "*"
+      BOX_NAME: ${RECORDER_BOX_NAME:-this computer}
+      PHONE_REACH: lan
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      LLM_MODEL: ${LLM_MODEL:-qwen3:14b}
+      LLM_CONTEXT: ${LLM_CONTEXT:-32768}
+      LLM_SEND_CONTEXT: "1"
+      NEMO_URL: ${NEMO_URL:-http://engine:8090}
+      QWEN_URL: "off"
+      ACCENT: "0"
+      DRIVE: "0"
+      STORAGE_DEFAULT: local
+      SCRATCH_DIR: /data/scratch
+      GPU_LOCK: /data/scratch/.gpu.lock
+      # the CA the Android app pins when it connects (no CA installed on the phone needed)
+      CA_CERT_FILE: /secrets/tls/ca.crt
+      APK_FILE: /secrets/tls/public/indie-recorder.apk
+    volumes:
+      - ./data:/data
+      # Linux: RAM (tmpfs). A Mac: a folder the native engine reads too (SCRATCH=./scratch).
+      - ${SCRATCH:-scratch}:/data/scratch
+      - ./secrets/tls:/secrets/tls:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  engine:
+    profiles: [engine]
+    image: ghcr.io/brainbot-com/indie-recorder-engine:${RECORDER_TAG:-latest}
+    restart: unless-stopped
+    devices:
+      - /dev/dri:/dev/dri
+    environment:
+      FETCH_MODELS: iq4
+      NEMO_DEVICE: ${NEMO_DEVICE:-vulkan:0}
+      GPU_LOCK: /data/scratch/.gpu.lock
+      XDG_CACHE_HOME: /models/.cache
+    volumes:
+      - ./models:/models
+      - ${SCRATCH:-scratch}:/data/scratch
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "${HTTPS_PORT:-8443}:8443"
+      - "${CA_PORT:-8480}:8480"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./secrets/tls:/certs:ro
+    depends_on: [recorder]
+
+volumes:
+  scratch:
+    driver: local
+    driver_opts: {type: tmpfs, device: tmpfs, o: "size=8g,mode=0700"}

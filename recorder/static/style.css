@@ -85,3 +85,9 @@ code.token { word-break: break-all; display: inline-block; padding: 6px 8px; }
 }
 .connect { display: flex; flex-wrap: wrap; gap: 20px 28px; align-items: flex-start; }
 .connect h2 { flex-basis: 100%; }
+/* a page of documentation (the agent guide at /agent/) */
+.doc { max-width: 760px; display: flex; flex-direction: column; gap: 14px; }
+.doc h1 { margin: 0; }
+.doc h2 { margin: 18px 0 0; }
+.doc p, .doc ol, .doc ul { margin: 0; line-height: 1.55; }
+.doc pre { overflow-x: auto; white-space: pre; }

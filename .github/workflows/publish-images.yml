@@ -1,0 +1,109 @@
+# Build, test and publish the images an Indie Box (or anyone) runs:
+#
+#   ghcr.io/brainbot-com/indie-recorder         the recorder (amd64 and arm64: a Mac too)
+#   ghcr.io/brainbot-com/indie-recorder-engine  speech: NeMo-Speech.cpp on Vulkan (amd64)
+#
+# Every image gets sha-<commit>, and latest from the default branch. Neither is
+# a version: a release (release.yml) runs this workflow as its build job and
+# promotes exactly the sha-<commit> tag it pushed, so a released image is the
+# one that was tested here.
+name: Publish images
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "android/**"
+      - "bench/**"
+      - "deploy/**"
+  workflow_dispatch:
+  workflow_call:
+    outputs:
+      sha_tag:
+        description: "The sha-<commit> tag every image of this run carries"
+        value: ${{ jobs.images.outputs.sha_tag }}
+
+# A push to main never cancels a release's build (their groups differ).
+concurrency:
+  group: publish-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the recorder for the tests
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: indie-recorder:test
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/indie-recorder:buildcache
+      - name: Tests
+        run: docker run --rm -e PYTHONDONTWRITEBYTECODE=1 indie-recorder:test python -m pytest -q -p no:cacheprovider tests
+      - name: The engine's own code compiles
+        run: python3 -m py_compile engines/jobserver.py engines/nemo/server.py
+      - name: The box app file can be pinned
+        run: indiebox/pin-images.sh --check
+
+  images:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - image: indie-recorder
+            context: .
+            file: Dockerfile
+            platforms: linux/amd64,linux/arm64
+          - image: indie-recorder-engine
+            context: engines
+            file: engines/nemo/Dockerfile
+            platforms: linux/amd64
+    outputs:
+      sha_tag: ${{ steps.sha.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha
+      # The release promotes this tag: read it off the list that was pushed,
+      # never assume its shape.
+      - id: sha
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          tag=$(printf '%s\n' "$TAGS" | sed -n 's/.*:\(sha-[0-9a-f]\{7,\}\)$/\1/p' | head -1)
+          [ -n "$tag" ] || { echo "no sha- tag among: $TAGS" >&2; exit 1; }
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: ${{ matrix.platforms }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # the cache lives in the registry: an unscoped Actions cache shared by a
+          # matrix overwrites itself, and a miss makes boxes download every layer again
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:buildcache,mode=max

@@ -49,7 +49,10 @@ def app(tmp_path, monkeypatch, executor):
     s = Settings(data_dir=tmp_path / "data", worker="0", engine="fake", secure_cookies="0",
                  public_url="https://box.test", github_token_file=tmp_path / "no-token", followup_on_done="0",
                  followup_executor=executor, drive_api_url="", followup_targets="drive,github",
-                 storage_default="drive", files_base_url="https://box.test/api/v1/files", accent="0", **make_keys(tmp_path))
+                 storage_default="drive", files_base_url="https://box.test/api/v1/files", accent="0",
+                 # no engines here: a closed port answers at once, where an unknown name can
+                 # wait on DNS for longer than any HTTP timeout
+                 nemo_url="http://127.0.0.1:9", qwen_url="http://127.0.0.1:9", **make_keys(tmp_path))
     monkeypatch.setattr(wk, "summarize", lambda transcript, settings, log=print: dict(SUMMARY))
     return create_app(s)
 
@@ -919,3 +922,164 @@ def test_a_large_file_goes_to_drive_in_parts(app, client, tmp_path):
     data = os.urandom(9 * 1024 * 1024 + 123)
     got = app.state.google.upload(uid, "Audio.m4a", data, "audio/mp4", parent="root")
     assert google.files[got["id"]]["data"] == data and google.files[got["id"]]["name"] == "Audio.m4a"
+
+
+# -- an Indie Box: one secret from the install form, the owner's password, the gateway's address --
+
+
+@pytest.fixture
+def box(tmp_path, monkeypatch):
+    """The recorder as an Indie Box runs it (indiebox/indie-recorder.compose.yml)."""
+    monkeypatch.setattr(wk, "summarize", lambda transcript, settings, log=print: dict(SUMMARY))
+    key = os.urandom(32)
+    s = Settings(data_dir=tmp_path / "data", worker="0", engine="fake", public_url="auto", box_name="indiebox-test",
+                 data_key=vault.b64u(key), data_key_file=tmp_path / "none.key", seal_key_file=tmp_path / "none.pem",
+                 scratch_dir=tmp_path / "scratch", owner_password="correct horse", owner_name="Kim",
+                 phone_reach="lan", drive="0", followup_on_done="0", accent="0", github_token_file=tmp_path / "no-token",
+                 qwen_url="off", nemo_url="http://127.0.0.1:9",
+                 ca_cert_file=tmp_path / "none.crt", apk_file=tmp_path / "none.apk", google_oauth_file=tmp_path / "none.json")
+    app = create_app(s)
+    with TestClient(app, base_url="http://box.local:9207") as c:
+        yield app, c, key
+
+
+def web(c, op, **args):
+    r = c.post("/api/v1/web", json={"op": op, "args": args})
+    assert r.status_code == 200, r.text
+    return r.json()["result"]
+
+
+def test_a_box_keeps_one_secret(box, tmp_path):
+    app, c, key = box
+    seal = c.get("/api/v1/health").json()["seal"]
+    assert seal and seal["alg"] == vault.SEAL_ALG                 # made from the data key: no second file
+    assert vault.Sealer.derived(vault.VAULT.subkey("seal")).describe() == seal
+    # the same key as hex opens the same data; another key does not
+    fingerprint = vault.VAULT.fingerprint()
+    again = Settings(data_dir=tmp_path / "data", worker="0", data_key=key.hex(), data_key_file=tmp_path / "none.key",
+                     seal_key_file=tmp_path / "none.pem", scratch_dir=tmp_path / "scratch")
+    assert vault.configure(again).fingerprint() == fingerprint
+    with pytest.raises(vault.VaultError, match="another key"):
+        vault.configure(Settings(data_dir=tmp_path / "data", data_key=vault.b64u(os.urandom(32)),
+                                 data_key_file=tmp_path / "none.key", scratch_dir=tmp_path / "scratch"))
+    with pytest.raises(vault.VaultError, match="32 bytes"):
+        vault.configure(Settings(data_dir=tmp_path / "other", data_key="short", scratch_dir=tmp_path / "scratch"))
+
+
+def test_the_owner_signs_in_with_the_password(box):
+    app, c, _ = box
+    assert c.get("/", follow_redirects=False).headers["location"] == "/login?next=/"
+    assert "Password" in c.get("/login").text
+    r = c.post("/login", data={"token": "wrong", "next": "/"}, follow_redirects=False)
+    assert r.status_code == 401 and "not right" in r.text
+    r = c.post("/login", data={"token": "correct horse", "next": "/"}, follow_redirects=False)
+    assert r.status_code == 303
+    assert "secure" not in r.headers["set-cookie"].lower()           # plain HTTP: a Secure cookie would never come back
+    page = c.get("/").text
+    assert "window.IndieApp" in page and 'lang="en"' in page and "IRMeetings" in page
+    st = web(c, "status")
+    assert st["box"] == "indiebox-test" and st["reach"] == "lan" and st["drive"] is False
+    assert web(c, "whoami")["name"] == "Kim"
+    # not the agent's ops, and not without a session
+    assert c.post("/api/v1/web", json={"op": "pending_work"}).status_code == 400
+    c.get("/logout")
+    assert c.post("/api/v1/web", json={"op": "status"}).status_code == 401
+
+
+def test_too_many_wrong_passwords_close_the_door(box):
+    app, c, _ = box
+    for _ in range(10):
+        c.post("/login", data={"token": "nope", "next": "/"})
+    r = c.post("/login", data={"token": "correct horse", "next": "/"}, follow_redirects=False)
+    assert r.status_code == 429
+
+
+def test_links_follow_the_address_the_gateway_serves(box, tmp_path):
+    app, c, _ = box
+    c.post("/login", data={"token": "correct horse", "next": "/"})
+    gw = {"x-forwarded-proto": "https", "x-forwarded-for": "192.168.1.20"}
+    r = c.post("/api/v1/web", json={"op": "pair_phone"}, headers=gw)
+    offer = r.json()["result"]
+    assert offer["url"].startswith("http://box.local:9207/connect#")     # the test client is not a trusted proxy
+    code = offer["code"]
+    peek = c.get(f"/api/v1/pair/{code}").json()
+    assert peek["box_url"] == "http://box.local:9207" and peek["ca"] is None and peek["box"] == "indiebox-test"
+    paired = c.post("/api/v1/pair", json={"code": code, "device": "Pixel"}).json()
+    assert paired["box_url"] == "http://box.local:9207"
+    # a phone records into the owner's account, sealed with the derived key
+    h = {"Authorization": f"Bearer {paired['token']}"}
+    mid, _ = make_meeting(app, c, tmp_path, headers=h)
+    assert [m["id"] for m in web(c, "list_meetings")] == [mid]
+    m = web(c, "get_meeting", meeting_id=mid, include_transcript=False)
+    assert m["url"].startswith("http://box.local:9207/m/")
+    # a meeting's link opens it in the meetings app, not in a sign-in loop
+    r = c.get(m["url"].replace("http://box.local:9207", ""), follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == f"/#m={mid}"
+
+
+def test_the_owner_gives_an_agent_a_token(box, tmp_path):
+    app, c, _ = box
+    c.post("/login", data={"token": "correct horse", "next": "/"})
+    made = web(c, "new_agent_token", name="Claude")
+    assert made["mcp_url"] == "http://box.local:9207/mcp" and made["skill_url"].endswith("/agent/SKILL.md")
+    assert [a["name"] for a in made["agents"]] == ["Claude"]
+    skill = c.get("/agent/SKILL.md")
+    assert skill.status_code == 200 and "pending_work" in skill.text
+    guide = c.get("/agent/").text
+    assert "http://box.local:9207/mcp" in guide and "recorder.example" not in guide and "openclaw mcp add" in guide
+    h = {"Authorization": f"Bearer {made['token']}"}
+    init = c.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}, headers=h).json()
+    assert "indiebox-test" in init["result"]["instructions"]
+    res = c.post("/mcp", json={"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                               "params": {"name": "status", "arguments": {}}}, headers=h).json()
+    assert json.loads(res["result"]["content"][0]["text"])["box"] == "indiebox-test"
+    # an agent cannot make agents, a phone cannot sign in to the web ops
+    assert c.post("/api/v1/web", json={"op": "status"}, headers=h).status_code == 403
+    gone = web(c, "revoke_agent_token", id=made["agents"][0]["id"])
+    assert gone["agents"] == []
+    assert c.post("/mcp", json={"jsonrpc": "2.0", "id": 3, "method": "ping"}, headers=h).status_code == 401
+
+
+def test_recordings_wait_for_the_speech_model(app, client, tmp_path, monkeypatch):
+    from recorder.engines.fake import FakeEngine
+    h = {"Authorization": f"Bearer {create_token(app.state.db, 'phone', 'device')}"}
+    data = tone(tmp_path / "m.wav", 5)
+    rid = client.post("/api/v1/recordings", json={"client_id": "wait-0001", "mime": "audio/wav"}, headers=h).json()["recording_id"]
+    client.put(f"/api/v1/recordings/{rid}/chunks/0", content=data, headers=h)
+    mid = client.post(f"/api/v1/recordings/{rid}/finalize", json={"total_chunks": 1}, headers=h).json()["meeting_id"]
+    worker = app.state.worker
+    monkeypatch.setattr(FakeEngine, "waiting", lambda self: "downloading the speech model: 42%", raising=False)
+    assert worker._claim() is None and worker.waiting == "downloading the speech model: 42%"
+    # a new summary needs no speech engine: it goes ahead meanwhile
+    worker.enqueue(mid, kind="summarize")
+    job = worker._claim()
+    assert job and job["kind"] == "summarize"
+    monkeypatch.setattr(FakeEngine, "waiting", lambda self: None, raising=False)
+    job = worker._claim()
+    assert job and job["kind"] == "process" and worker.waiting is None
+
+
+def test_a_box_model_elsewhere_gets_no_transcript(tmp_path, monkeypatch):
+    """An Indie Box lists a remote provider's model beside its own: the recorder
+    summarizes only with the box's own, and sizes the parts to its context."""
+    from recorder import llm, summarize as sm
+
+    class Answer:
+        def __init__(self, data, status=200):
+            self.data, self.status_code = data, status
+
+        def json(self):
+            return self.data
+
+    listing = {"models": [{"name": "qwen3.8:27b", "local": True, "context_length": 40960},
+                          {"name": "cloud/big:latest", "local": False, "provider": {"name": "StudioLLM"}}]}
+    monkeypatch.setattr(llm.httpx, "get", lambda url, timeout=10: Answer(listing))
+    posted = []
+    monkeypatch.setattr(llm.httpx, "post", lambda *a, **k: posted.append(a) or Answer({}, 500))
+    monkeypatch.setitem(llm._listing, "models", None)
+    s = Settings(data_dir=tmp_path, llm_model="cloud/big", ollama_url="http://ollama:11434")
+    with pytest.raises(llm.LLMError, match="StudioLLM, not on this box"):
+        llm.chat_json(s, "system", "user", {})
+    assert posted == []
+    assert sm.limits(Settings(data_dir=tmp_path, llm_model="qwen3.8:27b")) == (104_880, 52_440)
+    assert sm.limits(Settings(data_dir=tmp_path, llm_model="qwen3.8:27b", llm_context="65536")) == (120_000, 60_000)

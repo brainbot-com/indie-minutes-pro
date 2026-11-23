@@ -1,0 +1,103 @@
+# Cut a release of Indie Recorder as an Indie Box app: build and test, stamp
+# one version tag onto both images, pin that version in
+# indiebox/indie-recorder.compose.yml and add it to the Indie Box catalog.
+#
+# The release itself is brainbot-com/indie-box's composite action
+# `.github/actions/indiebox-app-release` (see its README); this file is the part
+# about this app.
+#
+# The form opens on Mode "dry-run (publish nothing)": it builds, resolves,
+# rewrites and validates, uploads the pinned app file as an artifact and prints
+# the catalog entry it would propose, and publishes no version. The first
+# release has no tag to bump from: run it with Bump "exact version below" and a
+# version such as 0.1.0.
+#
+# Before the first real release (once, by an admin):
+#   - the secret INDIE_BOX_TOKEN on this repo: a fine-grained token on
+#     brainbot-com/indie-box with Contents and Pull requests read and write;
+#   - the catalog's registry sync must be able to read this private repo
+#     (REGISTRY_SYNC_TOKEN in indie-box);
+#   - the two GHCR packages public (or every box logged in to ghcr.io), since
+#     boxes pull without credentials. The release warns while one is closed.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Mode -- dry-run resolves, rewrites and validates but publishes nothing; release publishes, commits and tags"
+        type: choice
+        required: true
+        default: "dry-run (publish nothing)"
+        options:
+          - "dry-run (publish nothing)"
+          - "release (publish, commit and tag)"
+      bump:
+        description: "Bump -- which component of the last release to increment; pick 'exact version below' to release the version typed in the next field instead (the first release must use this)"
+        type: choice
+        required: true
+        default: "patch"
+        options: ["patch", "minor", "major", "exact version below"]
+      version:
+        description: "Release version, bare semver, no leading v (e.g. 0.1.0). Only with Bump 'exact version below'"
+        required: false
+        default: ""
+      registry_pr:
+        description: "Also open a PR on brainbot-com/indie-box adding this version to registry/registry.json.in"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write      # commit the pinned app file and push the tag
+  packages: write      # build, and add the release tag to the images
+
+concurrency:           # two releases never race on the default branch
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  # 1. Build and test in the same run.
+  build:
+    uses: ./.github/workflows/publish-images.yml
+    permissions:
+      contents: read
+      packages: write
+
+  # 2. Promote exactly that build and pin it.
+  release:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}   # the commit the build job built: image and pin from one revision
+          fetch-depth: 0           # tags, for the bump base and the already-released guard
+
+      - uses: brainbot-com/indie-box/.github/actions/indiebox-app-release@main
+        with:
+          app_id: indie-recorder
+          images: indie-recorder indie-recorder-engine
+          # two image references plus the version label
+          max_changed_lines: 3
+          # the app file's required :? variables, so `docker compose config`
+          # resolves it the way a box does rather than refusing it
+          compose_env: |
+            INDIE_RECORDER_PASSWORD=dummy
+            INDIE_RECORDER_DATA_KEY=dummy
+          # Not in the catalog yet: the first release appends the app's block
+          # (ignored after that). Private unless the repository variable
+          # INDIEBOX_REGISTRY_SCOPE says public; a private app needs its audience
+          # in INDIEBOX_REGISTRY_AUDIENCE (box ids or client names from
+          # registry/audience-map.json in indie-box).
+          registry_create_app: true
+          registry_scope: ${{ vars.INDIEBOX_REGISTRY_SCOPE || 'private' }}
+          registry_audience: ${{ vars.INDIEBOX_REGISTRY_AUDIENCE }}
+          update_hint: >-
+            A box gets it from the dashboard's Apps page once the catalog PR is
+            merged, as an update of an installed Indie Recorder or a new install.
+          mode: ${{ inputs.mode }}
+          bump: ${{ inputs.bump }}
+          version: ${{ inputs.version }}
+          source_tag: ${{ needs.build.outputs.sha_tag }}
+          registry_pr: ${{ inputs.registry_pr }}
+          indie_box_token: ${{ secrets.INDIE_BOX_TOKEN }}

@@ -15,8 +15,8 @@ const STR = {
     pair3: 'No camera at hand? Type the code here.',
     pairLabel: 'Code', connect: 'Connect', pairUsed: 'This code is used or expired. Make a new one in indie-recorder.',
     pairSlow: 'Too many wrong codes. Wait a few minutes.',
-    pairNote: 'This page talks only to the box, over the VPN. Recordings go to this box and nowhere else.',
-    pairBad: 'The box did not accept this token.', pairNoBox: 'Cannot reach the box. Is the VPN on?',
+    pairNote: 'This page talks only to the box. Recordings go to this box and nowhere else.',
+    pairBad: 'The box did not accept this token.', pairNoBox: 'Cannot reach the box. Is this phone on its network (or the VPN)?',
     pairAgain: "The box no longer accepts this phone's token. Connect it again.",
     newRecording: 'New recording', recording: 'Recording', paused: 'Paused', title: 'Title', optional: 'Optional', untitled: 'Recording',
     box: 'Box', storage: 'Storage', drive: 'Google Drive', local: 'On the box', mic: 'Microphone', micOn: 'On', micOff: 'Off while paused',
@@ -46,8 +46,8 @@ const STR = {
     pair3: 'Keine Kamera zur Hand? Geben Sie den Code hier ein.',
     pairLabel: 'Code', connect: 'Verbinden', pairUsed: 'Dieser Code ist benutzt oder abgelaufen. Erstellen Sie in indie-recorder einen neuen.',
     pairSlow: 'Zu viele falsche Codes. Bitte einige Minuten warten.',
-    pairNote: 'Diese Seite spricht nur mit der Box, über das VPN. Aufnahmen gehen an diese Box und nirgendwo sonst hin.',
-    pairBad: 'Die Box hat dieses Token nicht angenommen.', pairNoBox: 'Die Box ist nicht erreichbar. Ist das VPN an?',
+    pairNote: 'Diese Seite spricht nur mit der Box. Aufnahmen gehen an diese Box und nirgendwo sonst hin.',
+    pairBad: 'Die Box hat dieses Token nicht angenommen.', pairNoBox: 'Die Box ist nicht erreichbar. Ist das Telefon in ihrem Netz (oder im VPN)?',
     pairAgain: 'Die Box nimmt das Token dieses Telefons nicht mehr an. Bitte neu verbinden.',
     newRecording: 'Neue Aufnahme', recording: 'Aufnahme läuft', paused: 'Pausiert', title: 'Titel', optional: 'Optional', untitled: 'Aufnahme',
     box: 'Box', storage: 'Ablage', drive: 'Google Drive', local: 'Auf der Box', mic: 'Mikrofon', micOn: 'An', micOff: 'Aus, solange pausiert',
@@ -444,7 +444,7 @@ async function pollMeetings() {
 
 // ---- UI ----
 
-let view = 'ready', box = { name: 'aibox1', up: null };
+let view = 'ready', box = { name: (() => { try { return localStorage.getItem('ir_box') || 'Box'; } catch (e) { return 'Box'; } })(), up: null };
 
 function warn(msg) { $('warn').hidden = false; $('warn').textContent = msg; }
 
@@ -473,7 +473,8 @@ async function checkBox() {
   try {
     const r = await fetch(at('/api/v1/health'), { cache: 'no-store' });
     const j = await r.json();
-    box = { name: j.box || box.name, up: !!(r.ok && j.worker), seal: j.seal || null };
+    box = { name: j.box || box.name, up: !!(r.ok && j.worker), seal: j.seal || null, drive: j.drive !== false };
+    try { localStorage.setItem('ir_box', box.name); } catch (e) { /* private mode */ }
     if (j.seal) try { localStorage.setItem('ir_seal', JSON.stringify(j.seal)); } catch (e) { /* private mode */ }
   } catch (e) {
     box.up = false;
@@ -549,7 +550,7 @@ async function render() {
    opens with its summary, speakers and transcript. The same views and words as
    indie-recorder in brainbot:agent command (recorder/static/meetings.js). */
 let boxMeetings = null;
-const M = IRMeetings.create({ lang: LANG, call: appCall, fail: e => netNote(e) });
+const M = IRMeetings.create({ lang: LANG, call: appCall, fail: e => netNote(e), box: () => box.name, drive: () => box.drive !== false });
 
 async function appCall(op, args) {
   const r = await api('/api/v1/app', json({ op, args: args || {} }));

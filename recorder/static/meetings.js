@@ -4,14 +4,16 @@
    words. A person's meetings by day, and one meeting: its summary, its
    speakers and their names, its transcript. Plain DOM. The host says how to
    reach the box, call(op, args) with the ops of the "indie-recorder"
-   connector, and in which language. */
+   connector, in which language, what the box is called (box), whether
+   meetings can go to Google Drive there (drive) and whether to link to the
+   box's own meeting page (boxLink). */
 (function () {
   'use strict';
   const STR = {
     en: {
       today: 'Today', yesterday: 'Yesterday', local: 'Local', processing: 'Processing', failed: 'Failed', uploading: 'Uploading',
       notYet: 'Not yet', length: 'Length', speakers: 'Speakers', drive: 'Google Drive', openFolder: 'Open folder',
-      noteLocal: 'Stays on aibox1.', noteWaiting: 'Waiting for the Drive upload.', noteDone: 'Stored in Drive.',
+      noteLocal: 'Stays on {box}.', noteWaiting: 'Waiting for the Drive upload.', noteDone: 'Stored in Drive.',
       queued: 'A new summary is on its way.', saved: 'Saved.',
       speakerNames: 'Speaker names', saveNames: 'Save names', unnamed: (n) => ` · ${n} without a name`,
       talk: (share, turns, first) => `${share}% of the talk · ${turns} turns · first at ${first}`,
@@ -22,13 +24,13 @@
         northernirish: 'Northern Irish', indian: 'Indian', spanish: 'Spanish', dutch: 'Dutch', german: 'German', czech: 'Czech',
         polish: 'Polish', french: 'French', italian: 'Italian', hungarian: 'Hungarian', finnish: 'Finnish', vietnamese: 'Vietnamese',
         romanian: 'Romanian', slovak: 'Slovak', estonian: 'Estonian', lithuanian: 'Lithuanian', croatian: 'Croatian', slovene: 'Slovene' },
-      transcript: 'Transcript', more: 'More', newSummary: 'Write a new summary', openBox: 'Open on aibox1 (VPN)',
+      transcript: 'Transcript', more: 'More', newSummary: 'Write a new summary', openBox: 'Open on {box}',
       tldr: 'Summary', decisions: 'Decisions', actions: 'Action items', questions: 'Open questions',
     },
     de: {
       today: 'Heute', yesterday: 'Gestern', local: 'Lokal', processing: 'In Arbeit', failed: 'Fehler', uploading: 'Lädt hoch',
       notYet: 'Noch nicht', length: 'Länge', speakers: 'Sprecher', drive: 'Google Drive', openFolder: 'Ordner öffnen',
-      noteLocal: 'Bleibt auf aibox1.', noteWaiting: 'Wartet auf das Hochladen nach Drive.', noteDone: 'In Drive abgelegt.',
+      noteLocal: 'Bleibt auf {box}.', noteWaiting: 'Wartet auf das Hochladen nach Drive.', noteDone: 'In Drive abgelegt.',
       queued: 'Eine neue Zusammenfassung ist unterwegs.', saved: 'Gespeichert.',
       speakerNames: 'Namen der Sprecher', saveNames: 'Namen speichern', unnamed: (n) => ` · ${n} ohne Namen`,
       talk: (share, turns, first) => `${share} % der Redezeit · ${turns} Beiträge · zuerst bei ${first}`,
@@ -39,16 +41,19 @@
         northernirish: 'Nordirisch', indian: 'Indisch', spanish: 'Spanisch', dutch: 'Niederländisch', german: 'Deutsch', czech: 'Tschechisch',
         polish: 'Polnisch', french: 'Französisch', italian: 'Italienisch', hungarian: 'Ungarisch', finnish: 'Finnisch', vietnamese: 'Vietnamesisch',
         romanian: 'Rumänisch', slovak: 'Slowakisch', estonian: 'Estnisch', lithuanian: 'Litauisch', croatian: 'Kroatisch', slovene: 'Slowenisch' },
-      transcript: 'Transkript', more: 'Mehr', newSummary: 'Neue Zusammenfassung schreiben', openBox: 'Auf aibox1 öffnen (VPN)',
+      transcript: 'Transkript', more: 'Mehr', newSummary: 'Neue Zusammenfassung schreiben', openBox: 'Auf {box} öffnen',
       tldr: 'Zusammenfassung', decisions: 'Entscheidungen', actions: 'Aufgaben', questions: 'Offene Fragen',
     },
   };
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const pad = (n) => String(n).padStart(2, '0');
 
-  function create({ lang, call, fail = () => {}, onChange = () => {} }) {
+  function create({ lang, call, fail = () => {}, onChange = () => {}, box = () => 'aibox1', drive = () => true, boxLink = true }) {
     const L = lang === 'de' ? 'de' : 'en';
-    const t = (k) => (STR[L][k] !== undefined ? STR[L][k] : STR.en[k]);
+    const t = (k) => {
+      const v = STR[L][k] !== undefined ? STR[L][k] : STR.en[k];
+      return typeof v === 'string' ? v.replace(/\{box\}/g, box()) : v;
+    };
     const dayKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;   // the local day
     function dayLabel(d) {
       if (dayKey(d) === dayKey(new Date())) return t('today');
@@ -194,6 +199,7 @@
         ({ label, name, suggestions: [], lines: [], share: 0, turns: 0, first: 0 }));
       const nSpk = Array.isArray(m.speakers) ? m.speakers.length : m.speakers;
       const unnamed = cards.filter((c) => !c.name).length;
+      const withDrive = drive() || m.storage === 'drive';
       const note = m.storage !== 'drive' ? t('noteLocal') : (m.drive_url ? t('noteDone') : t('noteWaiting'));
       el.innerHTML = `<div class="head"><span class="kicker" id="dWhen">${esc(d.toLocaleDateString(L, { day: 'numeric', month: 'short', year: 'numeric' }))} · ${esc(time(d))}</span>` +
         `<h1 class="h2" id="dTitle">${esc(m.title || m.id)}</h1></div>
@@ -201,7 +207,7 @@
           <div class="cells">
             <div class="cell"><span class="label">${esc(t('length'))}</span><span class="v tnum" id="dLen">${esc(length(m.duration_s))}</span></div>
             <div class="cell"><span class="label">${esc(t('speakers'))}</span><span class="v" id="dSpkN">${esc(nSpk ? String(nSpk) : t('notYet'))}</span></div>
-            <div class="cell"><span class="label" id="dLDrive">${esc(t('drive'))}</span><button type="button" class="switch" role="switch" aria-checked="${m.storage === 'drive'}" id="dDrive" aria-labelledby="dLDrive"></button></div>
+            ${withDrive ? `<div class="cell"><span class="label" id="dLDrive">${esc(t('drive'))}</span><button type="button" class="switch" role="switch" aria-checked="${m.storage === 'drive'}" id="dDrive" aria-labelledby="dLDrive"></button></div>` : ''}
           </div>
           <p class="note" style="margin-top: 12px"><span id="dNote">${esc(note)}</span> ${m.drive_url ? `<a id="dLink" target="_blank" rel="noopener" href="${esc(m.drive_url)}">${esc(t('openFolder'))}</a>` : ''}</p>
         </div>
@@ -213,11 +219,11 @@
           </details>
           <details class="fold" id="dTrBox"><summary>${esc(t('transcript'))}</summary><div class="inner"><div class="tr" id="dTr"></div></div></details>
           <details class="fold"><summary>${esc(t('more'))}</summary>
-            <div class="inner more"><button type="button" class="btn" id="dRedo">${esc(t('newSummary'))}</button>${m.url ? `<a id="dBox" target="_blank" rel="noopener" href="${esc(m.url)}">${esc(t('openBox'))}</a>` : ''}</div>
+            <div class="inner more"><button type="button" class="btn" id="dRedo">${esc(t('newSummary'))}</button>${m.url && boxLink ? `<a id="dBox" target="_blank" rel="noopener" href="${esc(m.url)}">${esc(t('openBox'))}</a>` : ''}</div>
           </details>
         </div>`;
       const $ = (s) => el.querySelector(s);
-      $('#dDrive').addEventListener('click', async () => {
+      if ($('#dDrive')) $('#dDrive').addEventListener('click', async () => {
         const drive = $('#dDrive').getAttribute('aria-checked') !== 'true';
         $('#dDrive').setAttribute('aria-checked', String(drive));
         try {
