@@ -17,7 +17,7 @@ if [ ! -f secrets/android-release.jks ]; then
 	docker run --rm --user "$(id -u):$(id -g)" -v "$PWD/secrets:/secrets" indie-recorder-android bash -c \
 		'P=$(cat /secrets/android-release.pass); keytool -genkeypair -keystore /secrets/android-release.jks \
 		-storetype PKCS12 -alias indie-recorder -keyalg RSA -keysize 3072 -validity 10000 \
-		-dname "CN=indie recorder, O=brainbot" -storepass "$P" -keypass "$P"' > /dev/null
+		-dname "CN=Minutes Pro, O=brainbot" -storepass "$P" -keypass "$P"' > /dev/null
 	chmod 600 secrets/android-release.jks
 fi
 docker run --rm --cpus 8 --user "$(id -u):$(id -g)" -e HOME=/cache/home -e GRADLE_USER_HOME=/cache/gradle \

@@ -347,7 +347,7 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
                 asked = params.get("protocolVersion")
                 result = {"protocolVersion": asked if asked in VERSIONS else VERSIONS[0],
                           "capabilities": {"tools": {"listChanged": False}},
-                          "serverInfo": {"name": "indie-recorder", "version": __version__},
+                          "serverInfo": {"name": "minutes-pro", "version": __version__},
                           "instructions": INSTRUCTIONS.replace("{box}", s.box_name)}
             elif method == "ping":
                 result = {}

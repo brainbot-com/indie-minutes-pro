@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Connects brainbot:agent command (indie-chat on ai-knowledge) to the indie-recorder on
+# Connects brainbot:agent command (indie-chat on ai-knowledge) to Minutes Pro on
 # aibox1: the Meetings app for everyone, each person seeing only their own
 # meetings. Run as root on ai-knowledge from a copy of this folder, with the
 # recorder's service token on stdin (it never appears on a command line):
@@ -38,7 +38,7 @@ CA_SHA256=${CA_SHA256:-E6:89:A7:83:FA:CE:DC:3C:1E:82:E7:A9:8F:45:6B:54:8A:56:F6:
 PATHS="/indie-recorder/mcp /indie-recorder/api/v1/files/* /indie-recorder/api/v1/indiechat /indie-recorder/connect /indie-recorder/api/v1/pair /indie-recorder/api/v1/pair/* /indie-recorder/indie-recorder.apk /indie-recorder/static/* /indie-recorder/app/* /indie-recorder/api/v1/health /indie-recorder/api/v1/me /indie-recorder/api/v1/settings /indie-recorder/api/v1/recordings /indie-recorder/api/v1/recordings/* /indie-recorder/oauth/google/*"
 
 [ "$(id -u)" = 0 ] || { echo "Run this as root." >&2; exit 1; }
-[ -f "$HERE/indie-recorder.html" ] || { echo "indie-recorder.html must be next to this script." >&2; exit 1; }
+[ -f "$HERE/minutes-pro.html" ] || { echo "minutes-pro.html must be next to this script." >&2; exit 1; }
 TOKEN=""
 if [ "${1:-}" = --token-stdin ]; then
 	read -r TOKEN
@@ -73,7 +73,7 @@ if "@indie_recorder" in s:
     # an earlier install: only the list of paths grows
     s = re.sub(r"\t@indie_recorder path [^\n]*\n", lambda m: matcher, s, count=1)
 else:
-    route = """	# indie-recorder on aibox1: its MCP endpoint, signed file links and the
+    route = """	# Minutes Pro on aibox1: its MCP endpoint, signed file links and the
 	# endpoint behind the "indie-recorder" connector, for the Meetings app and
 	# meeting agents in brainbot:agent command (each needs a recorder token or a
 	# signed link); the page a phone's connect code opens, the code's two
@@ -81,7 +81,7 @@ else:
 	# upload endpoints it uses (phone tokens; chunks sealed for the box on the
 	# phone); Google's sign-in for Drive and the page it returns to. Nothing
 	# else of the recorder is passed through. Added by
-	# indie-recorder/integrations/indie-chat/install-ai-knowledge.sh.
+	# indie-minutes-pro/integrations/indie-chat/install-ai-knowledge.sh.
 """ + matcher + """	handle @indie_recorder {
 		uri strip_prefix /indie-recorder
 		reverse_proxy https://10.1.9.7:8443 {
@@ -182,10 +182,10 @@ PY
 then changed=1; echo "connector added"; else echo "already in place"; fi
 
 echo "== 4. The Meetings app, for everyone"
-if cmp -s "$HERE/indie-recorder.html" $CFG/app-templates/indie-recorder.html; then
+if cmp -s "$HERE/minutes-pro.html" $CFG/app-templates/indie-recorder.html; then
 	echo "html unchanged"
 else
-	install -m 644 "$HERE/indie-recorder.html" $CFG/app-templates/indie-recorder.html
+	install -m 644 "$HERE/minutes-pro.html" $CFG/app-templates/indie-recorder.html
 	changed=1
 	echo "html copied"
 fi
@@ -194,8 +194,8 @@ if python3 - $CFG/app-templates.json <<'PY'
 import json, sys
 p = sys.argv[1]
 t = json.load(open(p))
-want = {"file": "indie-recorder.html", "key": "indie-recorder", "name": "indie-recorder", "icon": "🔴",
-        "description": "Your meetings from the indie recorder on aibox1: summaries, action items, speakers, Drive or local, your phones and your meeting agent. Each person sees only their own.",
+want = {"file": "indie-recorder.html", "key": "indie-recorder", "name": "Minutes Pro", "icon": "🔴",
+        "description": "Your meetings from Minutes Pro on aibox1: summaries, action items, speakers, Drive or local, your phones and your meeting agent. Each person sees only their own.",
         "refresh": True, "seed": {"id": "indie-recorder", "state": {}, "adopt": ["Meetings"]}}
 have = next((e for e in t if e.get("key") == "indie-recorder"), None)
 if have == want:

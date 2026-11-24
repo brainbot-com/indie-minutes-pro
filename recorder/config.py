@@ -65,7 +65,7 @@ class Settings:
         # Drive tools carries it out (an Indie Box without a Google client).
         self.drive = get("DRIVE", "1") == "1"
         self.drive_log_doc = get("DRIVE_LOG_DOC", "Meeting log")
-        self.drive_folder = get("DRIVE_FOLDER", "indie-recorder test")
+        self.drive_folder = get("DRIVE_FOLDER", "Minutes Pro")
         # The Android app's pairing link carries the box's CA, so the app trusts this box only.
         self.ca_cert_file = Path(get("CA_CERT_FILE", "/secrets/tls/ca.crt"))
         # The app for phones, served by this service (APK_URL can point elsewhere).

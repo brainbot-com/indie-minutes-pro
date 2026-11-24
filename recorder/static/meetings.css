@@ -1,4 +1,4 @@
-/* The meeting views every indie-recorder app shares (meetings.js): a person's
+/* The meeting views every Minutes Pro app shares (meetings.js): a person's
    meetings by day, and a meeting with its summary, speakers and transcript.
    On swiss.css; all under .irm, the class meetings.js gives what it draws. */
 .irm.list { display: flex; flex-direction: column; gap: 30px; }

@@ -1,7 +1,7 @@
 # Build, test and publish the images an Indie Box (or anyone) runs:
 #
-#   ghcr.io/brainbot-com/indie-recorder         the recorder (amd64 and arm64: a Mac too)
-#   ghcr.io/brainbot-com/indie-recorder-engine  speech: NeMo-Speech.cpp on Vulkan (amd64)
+#   ghcr.io/brainbot-com/indie-minutes-pro         the recorder (amd64 and arm64: a Mac too)
+#   ghcr.io/brainbot-com/indie-minutes-pro-engine  speech: NeMo-Speech.cpp on Vulkan (amd64)
 #
 # Every image gets sha-<commit>, and latest from the default branch. Neither is
 # a version: a release (release.yml) runs this workflow as its build job and
@@ -44,10 +44,10 @@ jobs:
         with:
           context: .
           load: true
-          tags: indie-recorder:test
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/indie-recorder:buildcache
+          tags: indie-minutes-pro:test
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/indie-minutes-pro:buildcache
       - name: Tests
-        run: docker run --rm -e PYTHONDONTWRITEBYTECODE=1 indie-recorder:test python -m pytest -q -p no:cacheprovider tests
+        run: docker run --rm -e PYTHONDONTWRITEBYTECODE=1 indie-minutes-pro:test python -m pytest -q -p no:cacheprovider tests
       - name: The engine's own code compiles
         run: python3 -m py_compile engines/jobserver.py engines/nemo/server.py
       - name: The box app file can be pinned
@@ -60,11 +60,11 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          - image: indie-recorder
+          - image: indie-minutes-pro
             context: .
             file: Dockerfile
             platforms: linux/amd64,linux/arm64
-          - image: indie-recorder-engine
+          - image: indie-minutes-pro-engine
             context: engines
             file: engines/nemo/Dockerfile
             platforms: linux/amd64

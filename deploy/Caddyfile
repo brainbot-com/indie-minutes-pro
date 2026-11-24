@@ -24,7 +24,7 @@ https://{$BIND_IP}:{$HTTPS_PORT} {
 	# Caddy sorts `respond` after them and the VPN check never runs.
 	@outside not remote_ip {$ALLOW_CIDRS}
 	route {
-		respond @outside "indie-recorder is only reachable over the VPN" 403
+		respond @outside "Minutes Pro is only reachable over the VPN" 403
 		# Mock GitHub and Drive pages (demo data only).
 		reverse_proxy /mock* 127.0.0.1:18099
 		reverse_proxy 127.0.0.1:18000

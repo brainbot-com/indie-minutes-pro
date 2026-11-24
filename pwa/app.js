@@ -1,4 +1,4 @@
-// indie recorder PWA: records in 30 s chunks, keeps every chunk in IndexedDB
+// Minutes Pro PWA: records in 30 s chunks, keeps every chunk in IndexedDB
 // until the box confirms it, uploads over the VPN and resumes after network
 // loss or an app restart. The screens follow the Android app (Swiss,
 // direction 5): Connect, Ready, Recording and Paused, Settings.
@@ -9,11 +9,11 @@ const $ = id => document.getElementById(id);
 const LANG = (navigator.language || 'en').toLowerCase().startsWith('de') ? 'de' : 'en';
 const STR = {
   en: {
-    brand: 'Indie recorder', back: 'Back', notConnected: 'Not connected', setUp: 'Set up', connectTitle: 'Connect to your recorder',
-    pair1: 'In brainbot:agent command, open indie-recorder, then Connect a phone.',
+    brand: 'Minutes Pro', back: 'Back', notConnected: 'Not connected', setUp: 'Set up', connectTitle: 'Connect to your recorder',
+    pair1: 'In Minutes Pro (in brainbot:agent command, or on your box): Connect a phone.',
     pair2: "Scan the code with this phone's camera and choose Record in the browser.",
     pair3: 'No camera at hand? Type the code here.',
-    pairLabel: 'Code', connect: 'Connect', pairUsed: 'This code is used or expired. Make a new one in indie-recorder.',
+    pairLabel: 'Code', connect: 'Connect', pairUsed: 'This code is used or expired. Make a new one in Minutes Pro.',
     pairSlow: 'Too many wrong codes. Wait a few minutes.',
     pairNote: 'This page talks only to the box. Recordings go to this box and nowhere else.',
     pairBad: 'The box did not accept this token.', pairNoBox: 'Cannot reach the box. Is this phone on its network (or the VPN)?',
@@ -40,11 +40,11 @@ const STR = {
     startFail: m => 'Could not start recording: ' + m, resumeFail: m => 'Could not switch the microphone back on: ' + m,
   },
   de: {
-    brand: 'Indie recorder', back: 'Zurück', notConnected: 'Nicht verbunden', setUp: 'Einrichten', connectTitle: 'Mit Ihrem Recorder verbinden',
-    pair1: 'Öffnen Sie in brainbot:agent command indie-recorder, dann Telefon verbinden.',
+    brand: 'Minutes Pro', back: 'Zurück', notConnected: 'Nicht verbunden', setUp: 'Einrichten', connectTitle: 'Mit Ihrem Recorder verbinden',
+    pair1: 'In Minutes Pro (in brainbot:agent command oder auf Ihrer Box): Telefon verbinden.',
     pair2: 'Scannen Sie den Code mit der Kamera dieses Telefons und wählen Sie Im Browser aufnehmen.',
     pair3: 'Keine Kamera zur Hand? Geben Sie den Code hier ein.',
-    pairLabel: 'Code', connect: 'Verbinden', pairUsed: 'Dieser Code ist benutzt oder abgelaufen. Erstellen Sie in indie-recorder einen neuen.',
+    pairLabel: 'Code', connect: 'Verbinden', pairUsed: 'Dieser Code ist benutzt oder abgelaufen. Erstellen Sie in Minutes Pro einen neuen.',
     pairSlow: 'Zu viele falsche Codes. Bitte einige Minuten warten.',
     pairNote: 'Diese Seite spricht nur mit der Box. Aufnahmen gehen an diese Box und nirgendwo sonst hin.',
     pairBad: 'Die Box hat dieses Token nicht angenommen.', pairNoBox: 'Die Box ist nicht erreichbar. Ist das Telefon in ihrem Netz (oder im VPN)?',
@@ -548,7 +548,7 @@ async function render() {
 /* The person's meetings: what this phone has not handed to the box yet on top,
    then all of their meetings on the box, from any phone, by day; a meeting
    opens with its summary, speakers and transcript. The same views and words as
-   indie-recorder in brainbot:agent command (recorder/static/meetings.js). */
+   Minutes Pro in brainbot:agent command (recorder/static/meetings.js). */
 let boxMeetings = null;
 const M = IRMeetings.create({ lang: LANG, call: appCall, fail: e => netNote(e), box: () => box.name, drive: () => box.drive !== false });
 
@@ -585,7 +585,7 @@ async function openMeeting(id) {
   try { await M.meeting($('meeting'), id); show('meeting'); } catch (e) { netNote(e); }
 }
 
-/* Google Drive, as in indie-recorder: the person connects their own once,
+/* Google Drive, as in Minutes Pro: the person connects their own once,
    Google's sign-in in a tab of its own; the recorder then uploads by itself. */
 let google = null;
 async function loadGoogle() {
@@ -690,7 +690,7 @@ async function boot() {
   document.documentElement.lang = LANG;
   document.querySelectorAll('[data-t]').forEach(el => { el.textContent = t(el.dataset.t); });
   document.querySelectorAll('[data-tp]').forEach(el => { el.placeholder = t(el.dataset.tp); });
-  // "/" is the box's own pages here, or brainbot:agent command (with the indie-recorder app) behind brain-tls
+  // "/" is the box's own pages here, or brainbot:agent command (with the Minutes Pro app) behind brain-tls
   $('webView').textContent = onBox ? t('webView') : t('webViewCommand');
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   $('pairForm').onsubmit = async e => {

@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}{{ 'Anmelden' if lang == 'de' else 'Sign in' }} · Indie recorder{% endblock %}
+{% block title %}{{ 'Anmelden' if lang == 'de' else 'Sign in' }} · Minutes Pro{% endblock %}
 {% block main %}
 {% set de = lang == 'de' %}
 <section class="card narrow">
   <h1>{{ 'Anmelden' if de else 'Sign in' }}</h1>
   {% if s.owner_password %}
-  <p class="muted">{{ 'Mit dem Passwort aus den Einstellungen dieser App auf Ihrer Indie Box (Apps, Indie Recorder, Konfigurieren).' if de else 'With the password from this app\'s settings on your Indie Box (Apps, Indie Recorder, Configure).' }}</p>
+  <p class="muted">{{ 'Mit dem Passwort aus den Einstellungen dieser App auf Ihrer Indie Box (Apps, Minutes Pro, Konfigurieren).' if de else 'With the password from this app\'s settings on your Indie Box (Apps, Minutes Pro, Configure).' }}</p>
   {% else %}
   <p class="muted">Paste a device or admin token. Admins create tokens on the Devices page; the first admin token is in <code>secrets/admin_token</code> next to the recorder.</p>
   {% endif %}

@@ -1,6 +1,6 @@
 ---
 name: meeting-follow-up
-description: Look after the person's meetings from the indie recorder on aibox1. Write better summaries with what you know, and put the meetings they keep in Google Drive there. Use it when the person asks to set up the meeting follow-up, and in each run of the "Meeting follow-up" routine.
+description: Look after the person's meetings from Minutes Pro on aibox1. Write better summaries with what you know, and put the meetings they keep in Google Drive there. Use it when the person asks to set up the meeting follow-up, and in each run of the "Meeting follow-up" routine.
 ---
 
 # Meeting follow-up
@@ -17,7 +17,7 @@ Drive is the person's own, through your Drive tools.
    (64k)" with the model qwen3.8:27b-ctx65536. If it is not, tell them to
    change it in your settings under Engine, and go on when they confirm.
 2. Google Drive is the recorder's job: once the person connects their
-   Google Drive in the indie-recorder app (Settings, Storage, Connect Google
+   Google Drive in the Minutes Pro app (Settings, Storage, Connect Google
    Drive), the recorder puts the meetings they keep in Drive there itself.
    If `{"op": "status"}` shows "google" not connected, tell them where to
    connect it. You need no Drive tools for it.
@@ -89,6 +89,6 @@ Drive is the person's own, through your Drive tools.
    - If one fails, leave it for the next run and say why.
    - No drive_* tools in this run: do not look for Drive another way. Leave
      the items, and say that the routine must not keep an app up to date
-     (in its settings), because a routine tied to the shared indie-recorder
+     (in its settings), because a routine tied to the shared Minutes Pro
      app gets none of the person's own accounts.
 5. End with one short line per meeting and per item you handled.

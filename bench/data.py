@@ -35,7 +35,7 @@ CHANNELS = {"sdm": "Array1-01", "ihm-mix": "Mix-Headset"}
 HF_CONFIG = {"sdm": "sdm", "ihm-mix": "ihm"}
 MLS_TREE = "https://huggingface.co/api/datasets/facebook/multilingual_librispeech/tree/main/german"
 MLS_FILE = "https://huggingface.co/datasets/facebook/multilingual_librispeech/resolve/main/{path}"
-UA = "indie-recorder-bench/0.1 (+https://github.com/brainbot-com/indie-recorder)"
+UA = "minutes-pro-bench/0.1 (+https://github.com/brainbot-com/indie-minutes-pro)"
 
 
 def fetch(url, dst):

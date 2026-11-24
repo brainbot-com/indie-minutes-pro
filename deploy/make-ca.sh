@@ -14,7 +14,7 @@ chmod 700 "$OUT"
 if [ ! -f "$OUT/ca.key" ]; then
   openssl ecparam -name prime256v1 -genkey -noout -out "$OUT/ca.key"
   openssl req -x509 -new -key "$OUT/ca.key" -sha256 -days 3650 \
-    -subj "/CN=${CA_NAME:-indie-recorder private CA ($(hostname -s))}" \
+    -subj "/CN=${CA_NAME:-Minutes Pro private CA ($(hostname -s))}" \
     -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
     -addext "keyUsage=critical,keyCertSign,cRLSign" \
     -addext "subjectKeyIdentifier=hash" \

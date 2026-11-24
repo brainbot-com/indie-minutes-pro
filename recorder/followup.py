@@ -88,7 +88,7 @@ class GitHub:
 
     def _client(self):
         headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28",
-                   "User-Agent": "indie-recorder"}
+                   "User-Agent": "minutes-pro"}
         if self._token():
             headers["Authorization"] = f"Bearer {self._token()}"
         return httpx.Client(base_url=self.base, timeout=30, headers=headers)
@@ -377,7 +377,7 @@ class Followup:
             have = newest.get(r["meeting_id"])
             if not have or d.get("summary_version", 1) > have[1].get("summary_version", 1):
                 newest[r["meeting_id"]] = (r["at"] or "", d)
-        head = (f"# {payload['doc']}\n\nOne entry per meeting kept in Google Drive, written by the indie recorder on "
+        head = (f"# {payload['doc']}\n\nOne entry per meeting kept in Google Drive, written by Minutes Pro on "
                 f"{self.s.box_name}. It writes this document whole with each meeting, so changes made here do not last.")
         return "\n\n".join([head] + [d["markdown"].strip() for _, d in sorted(newest.values(), key=lambda x: x[0])]) + "\n"
 

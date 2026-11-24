@@ -1,4 +1,4 @@
-# Indie Recorder on your own computer
+# Minutes Pro on your own computer
 
 For anyone without an Indie Box: the recorder on a Linux computer with a GPU,
 or on a Mac with Apple silicon. It is the same recorder an Indie Box installs
@@ -22,13 +22,13 @@ What you need:
 1. Get the recorder and fill in two values:
 
    ```bash
-   git clone https://github.com/brainbot-com/indie-recorder.git
-   cd indie-recorder/standalone
+   git clone https://github.com/brainbot-com/indie-minutes-pro.git
+   cd indie-minutes-pro/standalone
    cp .env.example .env
    ```
 
-   In `.env`, `RECORDER_PASSWORD` is what you sign in with, and
-   `RECORDER_DATA_KEY` encrypts every meeting; make one with
+   In `.env`, `MINUTES_PRO_PASSWORD` is what you sign in with, and
+   `MINUTES_PRO_DATA_KEY` encrypts every meeting; make one with
    `openssl rand -base64 32 | tr '+/' '-_' | tr -d '='` and keep a copy
    somewhere safe. On a Mac, switch to the three Mac lines in `.env`.
 
@@ -83,13 +83,13 @@ its address filled in.
 
 ## Updating
 
-`docker compose pull && docker compose up -d`. `RECORDER_TAG` in `.env` pins a
+`docker compose pull && docker compose up -d`. `MINUTES_PRO_TAG` in `.env` pins a
 release instead of the latest build. The data in `data/` and the model in
-`models/` stay; keep `RECORDER_DATA_KEY` the same.
+`models/` stay; keep `MINUTES_PRO_DATA_KEY` the same.
 
 ## Where things are
 
-- `data/`: the meetings, encrypted with `RECORDER_DATA_KEY`, and the index.
+- `data/`: the meetings, encrypted with `MINUTES_PRO_DATA_KEY`, and the index.
 - `models/`: the speech model (Nemotron 3.5 Transcribe 30B-A4B, AD-IQ4_NL).
 - `secrets/tls/`: your certificate authority (keep `ca.key` private) and the
   certificate Caddy serves.

@@ -13,7 +13,7 @@ def set_from(request):
     base = f"{request.url.scheme}://{request.url.netloc}"
     _current.set(base)
     # only a request through the gateway says how people reach us; an app on the box
-    # calling http://indie-recorder:8000 directly does not
+    # calling http://indie-minutes-pro:8000 directly does not
     if request.headers.get("x-forwarded-proto") or request.headers.get("x-forwarded-host"):
         _last["base"] = base
 

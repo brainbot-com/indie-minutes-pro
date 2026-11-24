@@ -11,7 +11,7 @@ import java.util.Locale
 import kotlin.math.roundToLong
 
 /*
- * The meeting views every indie-recorder app shares (recorder/static/meetings.js in the web apps):
+ * The meeting views every Minutes Pro app shares (recorder/static/meetings.js in the web apps):
  * a person's meetings by day, and one meeting with its summary, speakers and transcript. What the
  * screens draw is worked out here, without Android, so the tests can hold it to meetings.js.
  */

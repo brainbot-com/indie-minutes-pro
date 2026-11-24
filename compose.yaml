@@ -1,4 +1,4 @@
-# indie-recorder on aibox1. Nothing here listens on the LAN except Caddy on
+# Minutes Pro on aibox1. Nothing here listens on the LAN except Caddy on
 # BIND_IP (10.1.9.7), and Caddy only lets in ALLOW_CIDRS (the VPN clients).
 name: indie-recorder
 
