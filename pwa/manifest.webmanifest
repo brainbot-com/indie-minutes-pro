@@ -1,6 +1,6 @@
 {
   "name": "Minutes Pro",
-  "short_name": "Recorder",
+  "short_name": "Minutes Pro",
   "description": "Records meetings to your indie.box. Audio and transcripts stay on the box.",
   "start_url": "./",
   "scope": "./",
