@@ -988,7 +988,7 @@ private fun HomeScreen(cfg: BoxConfig, onMeetings: () -> Unit, onSettings: () ->
 
     // While the screen is visible: the phone's list every 2 s, the box and the person's meetings every
     // 14 s, and whom the phone records for each time the app comes to the front (a name set in the
-    // indie-recorder app shows up then).
+    // Minutes Pro app shows up then).
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(cfg) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -1615,7 +1615,7 @@ private fun SettingsScreen(cfg: BoxConfig, onBack: () -> Unit, onDisconnect: () 
             phone?.let { add(CellSpec(stringResource(R.string.phone_label)) { Value(it) }) }
             add(CellSpec(stringResource(R.string.box_label)) { Value(listOfNotNull(boxName.value, cfg.host).joinToString(" · ")) })
         })
-        // Google Drive, as in the indie-recorder app: the person connects their own once; the box then
+        // Google Drive, as in the Minutes Pro app: the person connects their own once; the box then
         // puts the meetings they keep in Drive there itself.
         val g = google
         if (g != null && g.optBoolean("available")) Column {

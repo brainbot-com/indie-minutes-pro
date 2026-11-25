@@ -1,4 +1,4 @@
-/* The meeting views every indie-recorder app shares: the app in brainbot:agent
+/* The meeting views every Minutes Pro app shares: the app in brainbot:agent
    command (integrations/indie-chat/inline_assets.py puts this file into it)
    and the phone web app; the Android app draws the same screens with the same
    words. A person's meetings by day, and one meeting: its summary, its

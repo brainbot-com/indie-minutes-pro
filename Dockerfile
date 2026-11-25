@@ -20,7 +20,7 @@ RUN set -eux; \
 COPY recorder recorder
 COPY pwa pwa
 # the Meetings app, which is also the web app in a browser, and the skill for any agent
-COPY integrations/indie-chat/indie-recorder.html integrations/indie-chat/indie-recorder.html
+COPY integrations/indie-chat/minutes-pro.html integrations/indie-chat/minutes-pro.html
 COPY agents agents
 COPY sim sim
 COPY bench bench

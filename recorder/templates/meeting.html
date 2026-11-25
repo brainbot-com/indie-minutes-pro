@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ m.title or m.id }} · Indie recorder{% endblock %}
+{% block title %}{{ m.title or m.id }} · Minutes Pro{% endblock %}
 {% block head %}{% if m.state not in ('done', 'failed') %}<meta http-equiv="refresh" content="5">{% endif %}{% endblock %}
 {% block barleft %}<a href="/">Back</a>{% endblock %}
 {% block main %}

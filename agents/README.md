@@ -6,7 +6,7 @@ with, and it can suggest who the unnamed speakers are. Any agent that speaks
 MCP will do. This page sets up Claude Code, Claude Desktop, OpenClaw and Hermes
 Agent; the commands were checked against their documentation on 2026-11-23.
 
-In brainbot:agent command none of this is needed: the indie-recorder app sets
+In brainbot:agent command none of this is needed: the Minutes Pro app sets
 up your agent there with one button.
 
 ## What every agent needs
@@ -14,9 +14,9 @@ up your agent there with one button.
 1. **A token.** In the recorder, open Settings, then Meeting agent: give the
    agent a name and press Make a token. Copy the token right away, it is shown
    only once. Give each agent a token of its own; Remove there ends one.
-2. **The MCP server**: `https://recorder.example:9207/mcp`, streamable HTTP,
+2. **The MCP server**: `https://minutes.example:9207/mcp`, streamable HTTP,
    with the header `Authorization: Bearer <token>`.
-3. **The skill**: [`/agent/SKILL.md`](https://recorder.example:9207/agent/SKILL.md),
+3. **The skill**: [`/agent/SKILL.md`](https://minutes.example:9207/agent/SKILL.md),
    saved as `meeting-follow-up/SKILL.md` in the agent's skills folder. It tells
    the agent what to do in each run.
 4. **A run every hour** that uses the skill.
@@ -37,11 +37,11 @@ In the commands below, put in your token for `<token>`.
 ## Claude Code
 
 ```bash
-claude mcp add --transport http --scope user recorder \
-  https://recorder.example:9207/mcp --header "Authorization: Bearer <token>"
+claude mcp add --transport http --scope user minutes \
+  https://minutes.example:9207/mcp --header "Authorization: Bearer <token>"
 mkdir -p ~/.claude/skills/meeting-follow-up
 curl -fsS -o ~/.claude/skills/meeting-follow-up/SKILL.md \
-  https://recorder.example:9207/agent/SKILL.md
+  https://minutes.example:9207/agent/SKILL.md
 ```
 
 Every hour, either in the Claude desktop app (Scheduled, New task, Local,
@@ -49,7 +49,7 @@ Hourly, with the prompt "Use the meeting-follow-up skill: do one run"; it runs
 while the app is open and the computer awake), or with cron:
 
 ```
-0 * * * * /usr/local/bin/claude -p "Use the meeting-follow-up skill: do one run." --allowedTools "mcp__recorder__*" >> ~/meeting-follow-up.log 2>&1
+0 * * * * /usr/local/bin/claude -p "Use the meeting-follow-up skill: do one run." --allowedTools "mcp__minutes__*" >> ~/meeting-follow-up.log 2>&1
 ```
 
 A `-p` run refuses tools that would ask first, so the recorder's tools are
@@ -65,9 +65,9 @@ recorder on your own network. Use the local bridge
 In Settings, Developer, Edit Config, add to `claude_desktop_config.json`:
 
 ```json
-{"mcpServers": {"recorder": {
+{"mcpServers": {"minutes": {
   "command": "npx",
-  "args": ["mcp-remote", "https://recorder.example:9207/mcp",
+  "args": ["mcp-remote", "https://minutes.example:9207/mcp",
            "--header", "Authorization: Bearer ${AUTH_TOKEN}"],
   "env": {"AUTH_TOKEN": "<token>"}}}}
 ```
@@ -78,12 +78,12 @@ Code's job (above).
 ## OpenClaw
 
 ```bash
-openclaw mcp add recorder --url https://recorder.example:9207/mcp \
+openclaw mcp add minutes --url https://minutes.example:9207/mcp \
   --transport streamable-http --header "Authorization=Bearer <token>"
-openclaw mcp doctor recorder --probe
+openclaw mcp doctor minutes --probe
 mkdir -p ~/.openclaw/skills/meeting-follow-up
 curl -fsS -o ~/.openclaw/skills/meeting-follow-up/SKILL.md \
-  https://recorder.example:9207/agent/SKILL.md
+  https://minutes.example:9207/agent/SKILL.md
 openclaw automations add --name "Meeting follow-up" --every 1h --session isolated \
   --message "Use the meeting-follow-up skill: do one run." --no-deliver
 ```
@@ -96,10 +96,10 @@ calls there).
 ## Hermes Agent
 
 ```bash
-hermes mcp add recorder --url https://recorder.example:9207/mcp --auth header
+hermes mcp add minutes --url https://minutes.example:9207/mcp --auth header
 mkdir -p ~/.hermes/skills/meetings/meeting-follow-up
 curl -fsS -o ~/.hermes/skills/meetings/meeting-follow-up/SKILL.md \
-  https://recorder.example:9207/agent/SKILL.md
+  https://minutes.example:9207/agent/SKILL.md
 hermes cron create "every 1h" "Do one run of the meeting follow-up." \
   --skill meeting-follow-up --name "Meeting follow-up"
 hermes gateway install
@@ -109,14 +109,14 @@ hermes gateway install
 
 ```yaml
 mcp_servers:
-  recorder:
-    url: "https://recorder.example:9207/mcp"
+  minutes:
+    url: "https://minutes.example:9207/mcp"
     headers:
-      Authorization: "Bearer ${MCP_RECORDER_API_KEY}"
+      Authorization: "Bearer ${MCP_MINUTES_API_KEY}"
     # ssl_verify: "/path/to/box-ca.pem"
 ```
 
-with the token in `~/.hermes/.env` as `MCP_RECORDER_API_KEY`, then `/reload-mcp`
+with the token in `~/.hermes/.env` as `MCP_MINUTES_API_KEY`, then `/reload-mcp`
 in a chat. Cron jobs run inside the gateway, hence `hermes gateway install`.
 For a local model, point Hermes at Ollama's OpenAI address
 (`http://<host>:11434/v1`) as a custom provider; it needs a context of at

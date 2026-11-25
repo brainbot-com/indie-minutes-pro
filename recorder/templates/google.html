@@ -7,7 +7,7 @@
 {% set got = error.info.get("got", "") if error else "" %}
 {% if de %}
 {% set why = {
-  "expired": "Dieser Link ist abgelaufen. Starten Sie in der indie-recorder-App neu.",
+  "expired": "Dieser Link ist abgelaufen. Starten Sie in der Minutes-Pro-App neu.",
   "replaced": "Diese Anmeldung wurde durch eine neuere ersetzt oder schon benutzt. Starten Sie in der App neu.",
   "denied": "Sie haben den Zugriff nicht erlaubt. Nichts wurde verbunden.",
   "no_drive": "Google Drive wurde nicht erlaubt. Starten Sie neu und lassen Sie das Häkchen bei Drive gesetzt.",
@@ -16,7 +16,7 @@
 } %}
 {% else %}
 {% set why = {
-  "expired": "This link has expired. Start again in the indie-recorder app.",
+  "expired": "This link has expired. Start again in the Minutes Pro app.",
   "replaced": "This sign-in was replaced by a newer one or used already. Start again in the app.",
   "denied": "You did not allow access. Nothing was connected.",
   "no_drive": "Google Drive was not allowed. Start again and leave the Drive box ticked.",
@@ -29,7 +29,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
-<title>Google Drive · Indie recorder</title>
+<title>Google Drive · Minutes Pro</title>
 <link rel="preload" href="../../static/Inter.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="../../static/swiss.css">
 <style>
@@ -39,7 +39,7 @@ main { max-width: 520px; margin: 0 auto; padding: 24px 24px calc(32px + env(safe
 </head>
 <body>
 <main>
-  <header class="bar"><span class="brand">Indie recorder</span><span>{{ s.box_name }}</span></header>
+  <header class="bar"><span class="brand">Minutes Pro</span><span>{{ s.box_name }}</span></header>
   <div class="head">
     <span class="kicker{{ ' live' if not ok }}">Google Drive</span>
     <h1 class="h1">{% if ok %}{{ "Verbunden" if de else "Connected" }}{% else %}{{ "Nicht verbunden" if de else "Not connected" }}{% endif %}</h1>
@@ -49,7 +49,7 @@ main { max-width: 520px; margin: 0 auto; padding: 24px 24px calc(32px + env(safe
   <p class="note muted done">{{ "Sie können diesen Tab schließen." if de else "You can close this tab." }}</p>
   {% else %}
   <p class="note">{{ why.get(code) or (("Google hat abgelehnt: " if de else "Google said no: ") ~ (error.detail or code)) }}</p>
-  <p class="note muted done">{{ "Ändern können Sie das in der indie-recorder-App unter Einstellungen, Ablage." if de else "You can change this in the indie-recorder app under Settings, Storage." }}</p>
+  <p class="note muted done">{{ "Ändern können Sie das in der Minutes-Pro-App unter Einstellungen, Ablage." if de else "You can change this in the Minutes Pro app under Settings, Storage." }}</p>
   {% endif %}
 </main>
 </body>

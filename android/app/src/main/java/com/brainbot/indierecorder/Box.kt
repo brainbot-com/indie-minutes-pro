@@ -176,8 +176,8 @@ class BoxApi(val cfg: BoxConfig) {
     private fun post(path: String, o: JSONObject) = JSONObject(send("POST", path, o.toString().toByteArray()))
 
     /**
-     * One of the ops every indie-recorder app uses (POST /api/v1/app): the same ones the
-     * indie-recorder app in brainbot:agent command calls through its connector, here for the
+     * One of the ops every Minutes Pro app uses (POST /api/v1/app): the same ones the
+     * Minutes Pro app in brainbot:agent command calls through its connector, here for the
      * person this phone records for. Its result: a JSONObject, a JSONArray or a string.
      */
     fun op(name: String, args: JSONObject = JSONObject()): Any? {

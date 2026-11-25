@@ -23,7 +23,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 GPU_LOCK = os.environ.get("GPU_LOCK", "/data/.gpu.lock")
 # Where the recorder's /data is on this machine, for an engine that runs outside its
-# containers (a Mac's Metal engine): PATH_MAP=/data=/Users/me/indie-recorder/data
+# containers (a Mac's Metal engine): PATH_MAP=/data/scratch=/Users/me/indie-minutes-pro/standalone/scratch
 _src, _, _dst = os.environ.get("PATH_MAP", "").partition("=")
 DATA_ROOT = (_dst.rstrip("/") if _src else "/data") + "/"
 

@@ -1,4 +1,4 @@
-# Indie Recorder
+# Minutes Pro
 
 A private meeting recorder. Your phone records a meeting, and a machine you own
 transcribes it, with who said what, and writes the minutes with its own
@@ -20,14 +20,14 @@ phone: Android app or web app            the recorder, on a machine you own
 The intended home. An Indie Box has the GPU, its own models and HTTPS, and
 installs the recorder from its catalog and keeps it updated:
 
-1. In the box's admin, Apps: find Indie Recorder in the catalog and install
+1. In the box's admin, Apps: find Minutes Pro in the catalog and install
    it. The form asks for a password and an encryption key: press Generate for
    both, note the password, and keep a copy of the key somewhere safe (without
    it the meetings cannot be read).
 2. On its first start the speech engine downloads its model (about 21 GB,
    checked file by file). Until then the recorder says "Getting ready", and
    recordings wait for it.
-3. Open Indie Recorder from the box's start page and sign in with the password.
+3. Open Minutes Pro from the box's start page and sign in with the password.
 4. Phones record only over HTTPS: in Admin, HTTPS, choose "Internal
    certificate" (then install the box's certificate authority on each phone
    once) or "Automatic HTTPS".
@@ -39,7 +39,7 @@ Updates come from the catalog like every box app; the meetings and the model
 stay. The recorder uses the box's GPU for speech and the box's default model
 for the minutes (another one in the app's settings). Only a model of the box
 itself gets a transcript: one the box only relays to a remote provider is
-refused. The app file is [indiebox/indie-recorder.compose.yml](indiebox/indie-recorder.compose.yml).
+refused. The app file is [indiebox/indie-minutes-pro.compose.yml](indiebox/indie-minutes-pro.compose.yml).
 
 ### On your own computer
 
@@ -50,7 +50,7 @@ runs natively with Metal there), with Docker and Ollama:
 ### aibox1 at brainbot
 
 Where the recorder started: phones over the VPN, two speech engines, the
-indie-recorder app and meeting agents in brainbot:agent command, Google Drive.
+Minutes Pro app and meeting agents in brainbot:agent command, Google Drive.
 See [docs/aibox1.md](docs/aibox1.md).
 
 ## Your agent
@@ -64,7 +64,7 @@ are; you decide in the app.
   follow [agents/README.md](agents/README.md) (the recorder shows it at
   `/agent/` with its own address filled in). The skill the agent follows is
   [agents/meeting-follow-up/SKILL.md](agents/meeting-follow-up/SKILL.md).
-- **brainbot:agent command**: the indie-recorder app sets up the person's own
+- **brainbot:agent command**: the Minutes Pro app sets up the person's own
   agent with one button ([integrations/indie-chat](integrations/indie-chat/README.md)).
 
 The agent reads whole transcripts. With a model on your own hardware they stay
@@ -111,7 +111,7 @@ transcript.
   keeps chunks until the recorder has them, lists the meetings.
 - **Android app** (`android/`): also records with the screen off; see
   [docs/aibox1.md](docs/aibox1.md#android-app).
-- **indie-recorder in brainbot:agent command**: the same app, through its
+- **Minutes Pro in brainbot:agent command**: the same app, through its
   connector.
 
 ## Settings
@@ -138,11 +138,11 @@ are (a Mac).
 
 ## Development
 
-- Tests: `docker build -t indie-recorder . && docker run --rm indie-recorder
+- Tests: `docker build -t minutes-pro . && docker run --rm minutes-pro
   python -m pytest -q tests`.
 - Images: `.github/workflows/publish-images.yml` tests, then publishes
-  `ghcr.io/brainbot-com/indie-recorder` (amd64 and arm64) and
-  `indie-recorder-engine` (amd64) with `sha-<commit>`, and `latest` from main.
+  `ghcr.io/brainbot-com/indie-minutes-pro` (amd64 and arm64) and
+  `indie-minutes-pro-engine` (amd64) with `sha-<commit>`, and `latest` from main.
 - A release for the Indie Box catalog: Actions, Release (dry-run first). It
   builds and tests, tags both images with the version, pins it in the app file
   (`indiebox/pin-images.sh`) and proposes it to the catalog in

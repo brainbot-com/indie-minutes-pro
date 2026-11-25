@@ -1,5 +1,5 @@
 [Unit]
-Description=Run the indie-recorder follow-up agent every hour
+Description=Run the Minutes Pro follow-up agent every hour
 
 [Timer]
 OnCalendar=hourly

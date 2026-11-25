@@ -1,6 +1,6 @@
-# Cut a release of Indie Recorder as an Indie Box app: build and test, stamp
+# Cut a release of Minutes Pro as an Indie Box app: build and test, stamp
 # one version tag onto both images, pin that version in
-# indiebox/indie-recorder.compose.yml and add it to the Indie Box catalog.
+# indiebox/indie-minutes-pro.compose.yml and add it to the Indie Box catalog.
 #
 # The release itself is brainbot-com/indie-box's composite action
 # `.github/actions/indiebox-app-release` (see its README); this file is the part
@@ -75,15 +75,15 @@ jobs:
 
       - uses: brainbot-com/indie-box/.github/actions/indiebox-app-release@main
         with:
-          app_id: indie-recorder
-          images: indie-recorder indie-recorder-engine
+          app_id: indie-minutes-pro
+          images: indie-minutes-pro indie-minutes-pro-engine
           # two image references plus the version label
           max_changed_lines: 3
           # the app file's required :? variables, so `docker compose config`
           # resolves it the way a box does rather than refusing it
           compose_env: |
-            INDIE_RECORDER_PASSWORD=dummy
-            INDIE_RECORDER_DATA_KEY=dummy
+            INDIE_MINUTES_PRO_PASSWORD=dummy
+            INDIE_MINUTES_PRO_DATA_KEY=dummy
           # Not in the catalog yet: the first release appends the app's block
           # (ignored after that). Private unless the repository variable
           # INDIEBOX_REGISTRY_SCOPE says public; a private app needs its audience
@@ -94,7 +94,7 @@ jobs:
           registry_audience: ${{ vars.INDIEBOX_REGISTRY_AUDIENCE }}
           update_hint: >-
             A box gets it from the dashboard's Apps page once the catalog PR is
-            merged, as an update of an installed Indie Recorder or a new install.
+            merged, as an update of an installed Minutes Pro or a new install.
           mode: ${{ inputs.mode }}
           bump: ${{ inputs.bump }}
           version: ${{ inputs.version }}

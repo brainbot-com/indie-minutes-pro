@@ -1,11 +1,11 @@
-# indie-recorder in brainbot:agent command
+# Minutes Pro in brainbot:agent command
 
 The recorder on aibox1 in brainbot:agent command (indie-chat on ai-knowledge): the
-indie-recorder app to read and steer your meetings, Google Drive for the
+Minutes Pro app to read and steer your meetings, Google Drive for the
 meetings you keep there, and a meeting agent that writes better summaries with
 what it knows.
 
-- `indie-recorder.html`: the app (named indie-recorder in the sidebar), one shared app for everyone. Each
+- `minutes-pro.html`: the app (named Minutes Pro in the sidebar), one shared app for everyone. Each
   person sees only their own meetings: list by day, a meeting's summary,
   decisions, action items and transcript, speaker names, "Google Drive" per
   meeting. Settings: the person's name (their phones show it), the storage
@@ -42,7 +42,7 @@ what it knows.
   person, not an agent, can connect or remove phones or set their name.
 - Each meeting is either local or in Drive (your choice per meeting; the
   default for new recordings is a setting). A local meeting stays on aibox1:
-  the indie-recorder app shows it through brainbot:agent command's server to your browser,
+  the Minutes Pro app shows it through brainbot:agent command's server to your browser,
   nothing is stored on the way. A Drive meeting goes to your own Google
   Drive once you connect it (Settings, Storage, "Connect Google Drive", or
   the button on the main screen when meetings wait for Drive): Google asks
@@ -100,7 +100,7 @@ recorder's (`E6:89:A7:83:...:07:F1:2D:9F`), then:
 
 Each changed file is backed up once as `<file>.pre-indie-recorder`. Running it
 again changes nothing that is already in place, except a newer
-`indie-recorder.html`, which it copies and loads.
+`minutes-pro.html`, which it copies and loads.
 
 To remove it: copy the `.pre-indie-recorder` files back (the Caddyfile in
 place, `cat Caddyfile.pre-indie-recorder > Caddyfile`, then `docker exec
@@ -110,11 +110,11 @@ delete `/opt/kb/indiechat-config/app-templates/indie-recorder.html` and run
 
 ## For each person
 
-The indie-recorder app is in everyone's sidebar. To record:
+The Minutes Pro app is in everyone's sidebar. To record:
 
-1. **Your name.** indie-recorder, Settings, Your name: your phones show it, so you
+1. **Your name.** Minutes Pro, Settings, Your name: your phones show it, so you
    can see whose account they record into.
-2. **A phone.** indie-recorder, Connect a phone: scan the code with the phone's
+2. **A phone.** Minutes Pro, Connect a phone: scan the code with the phone's
    camera (VPN on) and follow the page it opens ("Open the app", "Install the
    app" or "Record in the browser"), or type the code in the app. Remove a
    phone under Settings, Phones to lock it out.
@@ -122,7 +122,7 @@ The indie-recorder app is in everyone's sidebar. To record:
 For the better summaries and speaker names, each person sets up their own
 meeting agent from the app (Settings, Meeting agent):
 
-1. In indie-recorder, on the right: New agent for this app (or link one of
+1. In Minutes Pro, on the right: New agent for this app (or link one of
    theirs).
 2. In that agent's settings: engine **aibox1 Ollama (64k)**, model
    **qwen3.8:27b-ctx65536** (that exact tag: the box keeps it loaded for other
@@ -151,7 +151,7 @@ hourly run asks the model once even when there is nothing to do; it answers
 Without the connector (another deployment), a person's agent can use the
 recorder as an MCP server instead: a token from `recorder.cli token add
 --role agent --user <id>`, added from the browser console with
-`IndieLib.McpServersAPI.create({name: "indie-recorder", scope: "user", url:
+`IndieLib.McpServersAPI.create({name: "minutes-pro", scope: "user", url:
 "https://ai-knowledge.mz.brainbot.com/indie-recorder/mcp", headers:
 {Authorization: "Bearer <token>"}})`; the routine's precheck can then be
 `pending_work` (`IndieLib.RoutinesAPI.update(id, {precheck: {tool:
@@ -163,6 +163,6 @@ connector's ops.
 Record a short meeting with the phone (or `sim/phone_sim.py`), with "Save to
 Google Drive" on and Google Drive connected. When the recorder is done, the
 meeting's folder appears in Drive, the meeting log gets an entry, and
-indie-recorder shows "Open folder". "Run now" on the routine: indie-recorder
+Minutes Pro shows "Open folder". "Run now" on the routine: Minutes Pro
 shows summary version 2, and its new Summary.md replaces the old one in
 Drive (which moves into "Older versions").

@@ -1,13 +1,13 @@
 ---
 name: meeting-follow-up
-description: Look after the person's meetings in their indie recorder through its MCP server. Write better summaries with what you know about their work, and suggest who unnamed speakers are. Use it in each run of the hourly "Meeting follow-up" task, and when the person asks to set that up.
+description: Look after the person's meetings in their Minutes Pro through its MCP server. Write better summaries with what you know about their work, and suggest who unnamed speakers are. Use it in each run of the hourly "Meeting follow-up" task, and when the person asks to set that up.
 ---
 
 # Meeting follow-up
 
-The indie recorder records the person's meetings with their phone, transcribes
+Minutes Pro records the person's meetings with their phone, transcribes
 them on their own machine (an Indie Box, or a Mac or Linux computer) and writes
-a first summary. You reach it through its MCP server (named `recorder` in the
+a first summary. You reach it through its MCP server (named `minutes` in the
 setup guide; its tools are named below). It answers for the person whose token
 you use: their meetings and nothing else.
 

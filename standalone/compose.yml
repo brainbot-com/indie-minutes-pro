@@ -1,4 +1,4 @@
-# Indie Recorder on a computer of your own, without an Indie Box (standalone/README.md):
+# Minutes Pro on a computer of your own, without an Indie Box (standalone/README.md):
 #
 #   Linux with an AMD or Intel GPU: everything here, the engine included
 #     (COMPOSE_PROFILES=engine in .env). Without a GPU: NEMO_DEVICE=cpu (slow).
@@ -8,19 +8,19 @@
 # Phones record over HTTPS only: Caddy serves https://<this computer>:8443 with a
 # certificate from your own CA (../deploy/make-ca.sh secrets/tls), and the CA
 # itself at http://<this computer>:8480/ca.crt for the phones.
-name: indie-recorder
+name: indie-minutes-pro
 
 services:
   recorder:
-    image: ghcr.io/brainbot-com/indie-recorder:${RECORDER_TAG:-latest}
+    image: ghcr.io/brainbot-com/indie-minutes-pro:${MINUTES_PRO_TAG:-latest}
     restart: unless-stopped
     environment:
-      OWNER_PASSWORD: ${RECORDER_PASSWORD:?set RECORDER_PASSWORD in .env}
-      OWNER_NAME: ${RECORDER_OWNER:-}
-      DATA_KEY: ${RECORDER_DATA_KEY:?set RECORDER_DATA_KEY in .env}
+      OWNER_PASSWORD: ${MINUTES_PRO_PASSWORD:?set MINUTES_PRO_PASSWORD in .env}
+      OWNER_NAME: ${MINUTES_PRO_OWNER:-}
+      DATA_KEY: ${MINUTES_PRO_DATA_KEY:?set MINUTES_PRO_DATA_KEY in .env}
       PUBLIC_URL: auto
       FORWARDED_ALLOW_IPS: "*"
-      BOX_NAME: ${RECORDER_BOX_NAME:-this computer}
+      BOX_NAME: ${MINUTES_PRO_BOX_NAME:-this computer}
       PHONE_REACH: lan
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       LLM_MODEL: ${LLM_MODEL:-qwen3:14b}
@@ -46,7 +46,7 @@ services:
 
   engine:
     profiles: [engine]
-    image: ghcr.io/brainbot-com/indie-recorder-engine:${RECORDER_TAG:-latest}
+    image: ghcr.io/brainbot-com/indie-minutes-pro-engine:${MINUTES_PRO_TAG:-latest}
     restart: unless-stopped
     devices:
       - /dev/dri:/dev/dri

@@ -189,7 +189,7 @@ paired && { echo "still connected after Disconnect"; exit 1; } || echo "disconne
 type_code "$CODE1"
 tap_text "Connect"
 sleep 5
-ui_contains "This code is used or expired" && echo "refused: This code is used or expired. Make a new one in indie-recorder, ..." ||
+ui_contains "This code is used or expired" && echo "refused: This code is used or expired. Make a new one in Minutes Pro, ..." ||
 	{ echo "the used code was NOT refused"; shot used-failed; exit 1; }
 shots 0-error
 

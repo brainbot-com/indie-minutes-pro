@@ -1,9 +1,18 @@
-# indie-recorder on aibox1
+# Minutes Pro on aibox1
 
 brainbot's own deployment, where the recorder started: the details of that
 setup (the VPN, two speech engines, the benchmark, the connector in
 brainbot:agent command, Google Drive). For what the recorder is and the other
 ways to run it, see the [README](../README.md).
+
+The product was called indie-recorder until 2026-11-24 and is Minutes Pro
+now. brainbot's deployment keeps the old name where running systems or stored
+data depend on it: the folder `~/indie-recorder` on aibox1 with its Compose
+project, images and systemd units, the routes under `/indie-recorder/` on
+ai-knowledge (Google's sign-in is registered there), the "indie-recorder"
+connector in brainbot:agent command, the Android package
+`com.brainbot.indierecorder`, and the labels the phones and the box encrypt
+with (`indie-recorder/seal/v1`, `indie-recorder/chunk/v1`, `indie-recorder/vault/v1`).
 
 A phone records, the audio goes over
 the VPN to the box (aibox1: Ryzen AI Max+ 395, Radeon 8060S, 128 GB unified
@@ -12,7 +21,7 @@ own LLM. Per meeting the person chooses where it lives: only on the box, or
 also in Google Drive (summary, action items, transcript, optionally the
 audio). A meeting agent in brainbot:agent command does the
 Drive part and writes a better summary from its own context and memory; the
-indie-recorder app in brainbot:agent command shows and steers it all. Everyone has
+Minutes Pro app in brainbot:agent command shows and steers it all. Everyone has
 their own account there: a person's phones record into it, and each person
 sees only their own meetings.
 
@@ -31,7 +40,7 @@ phone (Android app or PWA, VPN)                 aibox1 (10.1.9.7)
        follow-up agent: meeting set to Drive -> outbox -> meeting agent (brainbot:agent command) -> Google Drive
                         GitHub (optional): /review -> approved -> outbox -> agent -> issue or comment
        meeting agent (MCP) -> better summary v2, v3 ... (its context and memory)
-       indie-recorder app in brainbot:agent command (connector, per person) -> meetings, summaries, speakers, phones
+       Minutes Pro app in brainbot:agent command (connector, per person) -> meetings, summaries, speakers, phones
 ```
 
 ## What stays on the box
@@ -42,7 +51,7 @@ phone (Android app or PWA, VPN)                 aibox1 (10.1.9.7)
   stay on aibox1. Drive: the meeting agent copies `Summary.md`,
   `Action items.md` and `Transcript.md` (and the recording when
   `drive_include_audio` is on) into a Drive folder per meeting. The person
-  decides per meeting (web view, indie-recorder app, phone app); the default for new
+  decides per meeting (web view, Minutes Pro app, phone app); the default for new
   recordings starts as `STORAGE_DEFAULT` and is a setting after that.
 - Everything listens on the box only: Caddy binds 10.1.9.7 and admits only
   `ALLOW_CIDRS` (the VPN client pools, ai-knowledge for
@@ -51,7 +60,7 @@ phone (Android app or PWA, VPN)                 aibox1 (10.1.9.7)
   no VPN interface of its own; VPN clients reach its LAN address unNATed,
   which is why the allowlist works.
 - brainbot:agent command reaches the recorder through a route on ai-knowledge that
-  passes only what the indie-recorder app, meeting agents and phones need (tokens,
+  passes only what the Minutes Pro app, meeting agents and phones need (tokens,
   connect codes, signed file links); see
   [integrations/indie-chat](../integrations/indie-chat/README.md).
 - Encrypted wherever it waits: on the phone, on the way and on the box (see
@@ -90,7 +99,7 @@ phone (Android app or PWA, VPN)                 aibox1 (10.1.9.7)
 - Limits: root on the running box holds the key. The web app served through
   ai-knowledge is only as trustworthy as ai-knowledge, which delivers its
   code; the Android app talks to aibox1 directly and pins it. Drive copies are
-  plain in Drive (the person chose Drive). The indie-recorder app and the meeting
+  plain in Drive (the person chose Drive). The Minutes Pro app and the meeting
   agent read summaries and transcripts in brainbot:agent command, which keeps
   its own data encrypted. Phones that do not seal (Android before 0.4.0)
   are still accepted, over TLS.
@@ -104,7 +113,7 @@ kernel 6.14 OEM, Mesa 25.2 RADV, ROCm 7.0.1, Docker 2x), as a user in the
 1. Ollama with `qwen3.8:27b-ctx65536` on port 11434 (aibox1 has it). Use the
    tag other services already use: a different tag or context size makes
    Ollama load a second copy.
-2. `git clone git@github.com:brainbot-com/indie-recorder.git ~/indie-recorder`
+2. `git clone git@github.com:brainbot-com/indie-minutes-pro.git ~/indie-recorder`
    and `cp .env.example .env`; set `BIND_IP`, `ALLOW_CIDRS`, `PUBLIC_URL`, and
    check `RENDER_GID` / `VIDEO_GID` against `getent group render video`.
 3. `deploy/fetch-models.sh` downloads about 63 GB into `models/` (pinned
@@ -152,10 +161,10 @@ records with the screen off.
    the box, from any of their phones, with what this phone has not handed
    over yet on top. A meeting opens with its summary, speaker names (play a
    speaker's voice, name them) and the transcript: the same views and words as
-   indie-recorder in brainbot:agent command (see Design). Settings has Google
+   Minutes Pro in brainbot:agent command (see Design). Settings has Google
    Drive (connect or disconnect).
 
-The phone apps reach those meetings with the same ops as indie-recorder,
+The phone apps reach those meetings with the same ops as the Minutes Pro app,
 for the person their token belongs to: `POST /api/v1/app {op, args}` with the
 device token (`list_meetings`, `get_meeting` with the transcript,
 `rename_speakers`, `set_storage`, `new_summary`, `status`, the settings, Google
@@ -169,7 +178,7 @@ to exercise the resume path.
 
 ## Connecting a phone
 
-One code for every phone and both apps. In brainbot:agent command, indie-recorder,
+One code for every phone and both apps. In brainbot:agent command, Minutes Pro,
 Connect a phone (on the empty list, or in Settings) shows a QR code and the
 same code to type, for example `K7Q4-M2XB`:
 
@@ -180,12 +189,12 @@ same code to type, for example `K7Q4-M2XB`:
    "Open the app" (or "Install the app" first, then "Open the app"); the app
    asks once more, "Record into Luis's account", and connects. On any phone:
    "Record in the browser" opens the web app, which connects at once.
-3. The indie-recorder app shows "Connected: Pixel 8" (the phone names itself) and
+3. The Minutes Pro app shows "Connected: Pixel 8" (the phone names itself) and
    lists the phone under Settings, Phones, where "Remove" locks it out.
 
 Without a camera at hand, type the code in the Android app's or the web app's
 first screen. On the phone that shows brainbot:agent command itself, the
-indie-recorder app offers "Connect this phone" instead of the QR code.
+Minutes Pro app offers "Connect this phone" instead of the QR code.
 
 - A code works once, for 15 minutes, and a new one replaces the person's
   older ones. It carries no token, address or certificate: the phone gets
@@ -244,7 +253,7 @@ for the targets in `FOLLOWUP_TARGETS` (default `drive`):
 - Dry-run by default: proposals wait on `/review`. `FOLLOWUP_AUTO=1` (or
   `run --auto`) approves them at once.
 - Google Drive, by the recorder itself: each person connects their own
-  Google Drive once in the indie-recorder app (Settings, Storage, Connect
+  Google Drive once in the Minutes Pro app (Settings, Storage, Connect
   Google Drive). That opens Google's sign-in in a tab of its own (OAuth with
   PKCE through `/oauth/google/start` and `/oauth/google/callback`, routed by
   brain-tls), asking only for `drive.file`: the files the recorder makes,
@@ -281,10 +290,10 @@ for the targets in `FOLLOWUP_TARGETS` (default `drive`):
   `docker compose exec -T recorder python -m recorder.followup run --json-in - <<< '{"auto": false}'`,
   plus `list`, `approve ID`, `reject ID`, `outbox`, `ack ID --url URL`.
 
-## brainbot:agent command (meeting agent and indie-recorder app)
+## brainbot:agent command (meeting agent and Minutes Pro app)
 
 Setup, step by step: [integrations/indie-chat](../integrations/indie-chat/README.md)
-(a script for ai-knowledge, your own MCP server, the indie-recorder app, the meeting
+(a script for ai-knowledge, your own MCP server, the Minutes Pro app, the meeting
 agent with its instructions and hourly routine). In short:
 
 - The recorder's MCP endpoint (`/mcp`, streamable HTTP, plain JSON, no
@@ -294,7 +303,7 @@ agent with its instructions and hourly routine). In short:
   `set_storage`, `rename_speakers`, `new_summary`, `drive_files` (signed
   download links for a `drive_store` item), `list_outbox`, `ack_outbox_item`,
   `sync_issues`.
-- The indie-recorder app is one shared app for everyone. It uses the deployment's
+- The Minutes Pro app is one shared app for everyone. It uses the deployment's
   "indie-recorder" connector (`/api/v1/indiechat`): brainbot:agent command
   sends the recorder's service token and names the signed-in person, so the
   recorder scopes everything to that person (their meetings, settings,
@@ -394,7 +403,7 @@ through the phone simulator into the running recorder, end to end.
 - Tokens: `docker compose exec recorder python -m recorder.cli token add|list|revoke`
   (phones connect with codes, see above; tokens are for agents).
 - People: `recorder.cli user add|list|claim|remove`. A person appears on their
-  first visit to the indie-recorder app; `claim` gives a token, and the meetings its
+  first visit to the Minutes Pro app; `claim` gives a token, and the meetings its
   phone recorded, to a person; `remove` revokes their phones and deletes them
   (refused while meetings still belong to them).
 - Delete meetings (folder, index, follow-ups): `docker compose exec recorder
@@ -429,10 +438,10 @@ through the phone simulator into the running recorder, end to end.
   GPU jobs at once; other services on the box (Ollama's other clients,
   ComfyUI) are outside that lock. Prefer IQ4_NL (22 GB) over Q8_0 (36 GB).
 - brainbot:agent command passes only a person's id to the recorder, no name or
-  email. Each person picks the name their phones show (indie-recorder, Settings,
+  email. Each person picks the name their phones show (Minutes Pro, Settings,
   Your name); until then the phone shows only its own name.
 - New people start with the box's defaults for storage (on aibox1: Google
-  Drive, folder "indie-recorder test"). Drive uploads need a meeting agent of
+  Drive, folder "Minutes Pro"). Drive uploads need a meeting agent of
   their own; without one, a Drive meeting waits and stays on aibox1.
 - Follow-up proposals are matched against existing issues, not against other
   proposals still waiting for review: two meetings about the same work can
@@ -476,7 +485,7 @@ name them) and the transcript, the same screens and words as the web apps
 (`/api/v1/app`, see the PWA; Design). Settings has Google Drive. Typed
 codes are looked up at `CONNECT_BASE` (set when it is built, default the
 brain-tls address); old token links still work. Disconnect on the phone
-forgets the token; remove the phone in indie-recorder to lock it out.
+forgets the token; remove the phone in Minutes Pro to lock it out.
 
 - Records in a foreground service of type microphone (a notification with a
   timer, Pause or Resume, and Stop; a partial wake lock): 16 kHz mono from the speech
@@ -531,7 +540,7 @@ Build and test, on aibox1 from `~/indie-recorder`:
 
 Not in the app yet: a VPN of its own (it shows "Box not reachable (VPN?)" and
 waits), choosing the microphone (an external one is used when Android routes
-to it), editing speaker names (the web view and the indie-recorder app have it).
+to it), editing speaker names (the web view and the Minutes Pro app have it).
 
 ## Design
 
@@ -541,7 +550,7 @@ Every face of the recorder shares one look, direction 5 of the design canvas
 sections and 1px rules between numbered rows, square switches and buttons.
 
 - `recorder/static/swiss.css`: the tokens and components; the PWA and the web
-  view load it from the box. The indie-recorder app gets it inlined, with the font,
+  view load it from the box. The Minutes Pro app gets it inlined, with the font,
   by `integrations/indie-chat/inline_assets.py`. The Android app has the same
   tokens in its Compose theme and the same Inter cuts in `res/font`.
 - Inter 4.1, subset to Latin (`recorder/static/Inter.woff2`, 53 KB), SIL Open
@@ -549,7 +558,7 @@ sections and 1px rules between numbered rows, square switches and buttons.
 - The meeting views, the same in every app: the person's meetings by day, and
   a meeting with its summary, speaker cards and the transcript as turns.
   `recorder/static/meetings.js` and `meetings.css` draw them; the PWA loads
-  them from the box, `inline_assets.py` puts them into the indie-recorder app,
+  them from the box, `inline_assets.py` puts them into the Minutes Pro app,
   and the Android app mirrors them in Compose with the same order and words.
 - The waveform, the same in the PWA and the Android app: one bar per 100 ms of
   recorded audio, bar 3 px wide every 5 px, the loudest sample of the window

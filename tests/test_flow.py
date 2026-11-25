@@ -194,7 +194,7 @@ def test_mcp_update_summary(app, client, tmp_path):
     h = {"Authorization": f"Bearer {create_token(app.state.db, 'agent', 'agent')}"}
     init = client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "initialize",
                                      "params": {"protocolVersion": "2025-06-18"}}, headers=h).json()
-    assert init["result"]["serverInfo"]["name"] == "indie-recorder"
+    assert init["result"]["serverInfo"]["name"] == "minutes-pro"
     call = {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "update_summary", "arguments": {
         "meeting_id": mid, "markdown": "## TL;DR\n\nBetter summary.", "note": "test"}}}
     res = client.post("/mcp", json=call, headers=h).json()["result"]
@@ -283,7 +283,7 @@ def test_direct_mode_against_the_mock_server(app, client, tmp_path, monkeypatch)
     assert sorted(folder) == ["Action items.md", "Summary.md", "Transcript.md"]
     issues = state["repos"]["brainbot-com/indie-recorder-sandbox"]["issues"]
     assert issues[-1]["title"] == "Security check" and len(state["repos"]["brainbot-com/indie-recorder-sandbox"]["comments"]["5"]) == 1
-    assert len(state["docs"]["indie-recorder test/Meeting log"]) == 1
+    assert len(state["docs"]["Minutes Pro/Meeting log"]) == 1
     f.db.run("DELETE FROM mappings")  # a lost database must not cause duplicates
     f.db.run("UPDATE proposals SET state = 'approved'")
     for p in f.list():
@@ -873,12 +873,12 @@ def test_the_recorder_puts_meetings_into_a_connected_google_drive(app, client, t
     phone = {"Authorization": "Bearer " + redeem(client, offer["url"]).json()["token"]}
     mid, _ = make_meeting(app, client, tmp_path, headers=phone)
     app.state.followup.run(meeting_ids=[mid])
-    folder = google.path("indie-recorder test", app.state.store.drive_folder_name(mid))
+    folder = google.path("Minutes Pro", app.state.store.drive_folder_name(mid))
     assert folder and app.state.store.meta(mid)["drive_url"] == folder["webViewLink"]
     files = google.ls(folder["id"])
     assert sorted(files) == ["Action items.md", "Summary.md", "Transcript.md"]
     assert files["Transcript.md"]["data"].decode() == read_text(app.state.store.folder(mid) / "transcript.md")
-    log = google.path("indie-recorder test", "Meeting log")
+    log = google.path("Minutes Pro", "Meeting log")
     assert log["mimeType"] == "application/vnd.google-apps.document" and log["data"].count(b"Test meeting") == 1
     work = call("pending_work", caller="agent")["result"]
     assert not work or not [p for p in work["outbox"] if p["kind"].startswith("drive_")]   # nothing left for an agent
@@ -891,7 +891,7 @@ def test_the_recorder_puts_meetings_into_a_connected_google_drive(app, client, t
     older = google.ls(files["Older versions"]["id"])
     assert [n.endswith(" Summary.md") for n in older] == [True]               # only what changed moved aside
     assert b"Better, with names." in files["Summary.md"]["data"]
-    assert google.path("indie-recorder test", "Meeting log")["data"].count(b"Test meeting") == 1   # the newest entry only
+    assert google.path("Minutes Pro", "Meeting log")["data"].count(b"Test meeting") == 1   # the newest entry only
 
     assert call("drive_disconnect", caller="agent")["ok"] is False
     assert call("drive_disconnect")["result"]["connected"] is False and google.revoked == ["rt-1"]
@@ -929,7 +929,7 @@ def test_a_large_file_goes_to_drive_in_parts(app, client, tmp_path):
 
 @pytest.fixture
 def box(tmp_path, monkeypatch):
-    """The recorder as an Indie Box runs it (indiebox/indie-recorder.compose.yml)."""
+    """The recorder as an Indie Box runs it (indiebox/indie-minutes-pro.compose.yml)."""
     monkeypatch.setattr(wk, "summarize", lambda transcript, settings, log=print: dict(SUMMARY))
     key = os.urandom(32)
     s = Settings(data_dir=tmp_path / "data", worker="0", engine="fake", public_url="auto", box_name="indiebox-test",
@@ -1026,7 +1026,7 @@ def test_the_owner_gives_an_agent_a_token(box, tmp_path):
     skill = c.get("/agent/SKILL.md")
     assert skill.status_code == 200 and "pending_work" in skill.text
     guide = c.get("/agent/").text
-    assert "http://box.local:9207/mcp" in guide and "recorder.example" not in guide and "openclaw mcp add" in guide
+    assert "http://box.local:9207/mcp" in guide and "minutes.example" not in guide and "openclaw mcp add" in guide
     h = {"Authorization": f"Bearer {made['token']}"}
     init = c.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}, headers=h).json()
     assert "indiebox-test" in init["result"]["instructions"]

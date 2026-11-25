@@ -41,7 +41,7 @@ from .worker import Worker
 HERE = Path(__file__).parent
 PWA_DIR = HERE.parent / "pwa"
 # the Meetings app of brainbot:agent command, which is also the web app in a browser
-WEB_APP = HERE.parent / "integrations" / "indie-chat" / "indie-recorder.html"
+WEB_APP = HERE.parent / "integrations" / "indie-chat" / "minutes-pro.html"
 AGENT_SKILL = HERE.parent / "agents" / "meeting-follow-up" / "SKILL.md"
 mimetypes.add_type("font/woff2", ".woff2")   # the slim image does not know it
 COOKIE = "ir_token"
@@ -151,7 +151,7 @@ def create_app(settings=None):
         yield
         worker.stop()
 
-    app = FastAPI(title="indie-recorder", version=__version__, lifespan=lifespan,
+    app = FastAPI(title="Minutes Pro", version=__version__, lifespan=lifespan,
                   docs_url=None, redoc_url=None, openapi_url="/api/v1/openapi.json")
     app.state.settings, app.state.db, app.state.store = s, db, store
     app.state.google = google
@@ -578,7 +578,7 @@ def create_app(settings=None):
     @app.get("/agent/", response_class=HTMLResponse)
     def agent_guide(request: Request):
         """How to set up one's own agent (agents/README.md), with this recorder's address in it."""
-        text = (AGENT_SKILL.parent.parent / "README.md").read_text().replace("https://recorder.example:9207",
+        text = (AGENT_SKILL.parent.parent / "README.md").read_text().replace("https://minutes.example:9207",
                                                                                s.public_url)
         return templates.TemplateResponse(request, "agent.html", {"s": s, "tok": None, "body": md.render(text)})
 
@@ -826,7 +826,7 @@ def create_app(settings=None):
     def apk():
         if not s.apk_file.exists():
             raise HTTPException(404)
-        return FileResponse(s.apk_file, media_type="application/vnd.android.package-archive", filename="indie-recorder.apk")
+        return FileResponse(s.apk_file, media_type="application/vnd.android.package-archive", filename="minutes-pro.apk")
 
     @app.post("/devices/{tid}/revoke")
     def revoke(tid: str, tok=Depends(need("admin", html=True))):

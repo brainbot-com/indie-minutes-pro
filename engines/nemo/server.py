@@ -153,7 +153,7 @@ def _download(path, size, sha, progress):
         url = f"https://huggingface.co/{REPO}/resolve/{REVISION}/{os.path.basename(path)}"
         pause = 10
         while have < size:
-            req = urllib.request.Request(url, headers={"Range": f"bytes={have}-", "User-Agent": "indie-recorder-engine"})
+            req = urllib.request.Request(url, headers={"Range": f"bytes={have}-", "User-Agent": "minutes-pro-engine"})
             try:
                 with urllib.request.urlopen(req, timeout=60) as r:
                     if have and r.status != 206:

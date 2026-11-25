@@ -3,7 +3,7 @@
 the PWA uses, then optionally waits for the transcript and summary.
 
     python3 sim/phone_sim.py --url https://10.1.9.7:8443 --cacert ca.crt \\
-        --token-file ~/.config/indie-recorder/token meeting.wav --title "Weekly" --wait
+        --token-file ~/.config/minutes-pro/token meeting.wav --title "Weekly" --wait
 
 Like the phone it encodes to WebM/Opus first (--encode opus, needs ffmpeg; use
 --encode none to send the file as it is) and uploads 30 s worth of bytes per

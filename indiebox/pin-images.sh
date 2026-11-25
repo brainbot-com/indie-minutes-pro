@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Pin the image tags in indiebox/indie-recorder.compose.yml to one release.
+# Pin the image tags in indiebox/indie-minutes-pro.compose.yml to one release.
 #
 #   indiebox/pin-images.sh --version 1.2.0 [--file <compose>] [--stdout]
 #   indiebox/pin-images.sh --check         [--file <compose>]
 #
 # Both images in the app file are written as
 #
-#   ghcr.io/brainbot-com/indie-recorder[-engine]:${INDIE_RECORDER_TAG:-<pin>}
+#   ghcr.io/brainbot-com/indie-minutes-pro[-engine]:${INDIE_MINUTES_PRO_TAG:-<pin>}
 #
 # so a box can still override the version through its shared .env, while the
 # default is the released version rather than a floating tag. This rewrites
@@ -31,8 +31,8 @@ set -euo pipefail
 OWNER=brainbot-com
 
 # repo|variable|expected occurrences
-IMAGES='indie-recorder|INDIE_RECORDER_TAG|1
-indie-recorder-engine|INDIE_RECORDER_TAG|1'
+IMAGES='indie-minutes-pro|INDIE_MINUTES_PRO_TAG|1
+indie-minutes-pro-engine|INDIE_MINUTES_PRO_TAG|1'
 
 # Every ghcr.io reference in the file, and the total lines this script may
 # touch: those references plus the version label. Both are asserted, so adding
@@ -44,7 +44,7 @@ MAX_CHANGED=3
 # exercises the real rewrite instead of a weaker approximation of it.
 CHECK_VERSION=0.0.0-check
 
-file=indiebox/indie-recorder.compose.yml
+file=indiebox/indie-minutes-pro.compose.yml
 version=""
 mode=pin
 to_stdout=0

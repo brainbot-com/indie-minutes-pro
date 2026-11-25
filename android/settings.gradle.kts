@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "indie-recorder"
+rootProject.name = "minutes-pro"
 include(":app")
