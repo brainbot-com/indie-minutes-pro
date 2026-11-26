@@ -45,7 +45,7 @@ services:
       # the database file and its WAL are then copied as one state. Phones
       # retry an upload that falls into the pause.
       indiebox.pause-for-backup: "true"
-      indiebox.app.description: "Meetings mit dem Telefon aufnehmen, auf der Box transkribieren und zusammenfassen. Nichts davon verlässt die Box."
+      indiebox.app.description: "Record meetings with your phone; the box transcribes and summarizes them. None of it leaves the box."
 
       # ---- the install form (docs/app-integration.md, "Required variables")
       indiebox.app.var.INDIE_MINUTES_PRO_PASSWORD.label: "Password"

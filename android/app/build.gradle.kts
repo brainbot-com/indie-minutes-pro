@@ -13,11 +13,13 @@ android {
         applicationId = "com.brainbot.indierecorder"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.5.2"
-        // Where a typed connect code is looked up: the recorder behind an address with a public
-        // certificate (brain-tls on ai-knowledge), so the lookup needs no CA of its own.
-        val connectBase = System.getenv("CONNECT_BASE") ?: "https://ai-knowledge.mz.brainbot.com/indie-recorder"
+        versionCode = 9
+        versionName = "0.5.3"
+        // Where a typed connect code is looked up, when a build names it (CONNECT_BASE: a recorder
+        // behind an address with a public certificate, android/build.sh takes it from the box's
+        // .env). Without one, the build on GitHub for any box, the connect screen asks for the
+        // box's address.
+        val connectBase = System.getenv("CONNECT_BASE") ?: ""
         buildConfigField("String", "CONNECT_BASE", "\"" + connectBase.trimEnd('/') + "\"")
     }
 

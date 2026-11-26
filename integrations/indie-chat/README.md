@@ -1,5 +1,9 @@
 # Minutes Pro in brainbot:agent command
 
+Addresses are placeholders here: `<aibox1>` is `BIND_IP` in aibox1's `.env`,
+`<agent-host>` brainbot:agent command's host name and `<ai-knowledge>` that
+server's address (`HOST` and `SELF` in `/root/indie-recorder-kit/site.env` there).
+
 The recorder on aibox1 in brainbot:agent command (indie-chat on ai-knowledge): the
 Minutes Pro app to read and steer your meetings, Google Drive for the
 meetings you keep there, and a meeting agent that writes better summaries with
@@ -27,7 +31,7 @@ what it knows.
 - Recording, transcription and the first summary happen on aibox1 only, with
   aibox1's own models.
 - brainbot:agent command reaches the recorder only through these paths on
-  `https://ai-knowledge.mz.brainbot.com/indie-recorder/`: `api/v1/indiechat`
+  `https://<agent-host>/indie-recorder/`: `api/v1/indiechat`
   (the "indie-recorder" connector: the deployment's service token, and
   brainbot:agent command names the signed-in person in `X-Indie-User`),
   `mcp` (a person's own recorder token, for their meeting agent),
@@ -54,7 +58,7 @@ what it knows.
   ("Waiting for the Drive upload") and stays on aibox1. Needs the OAuth
   client in `secrets/google_oauth.json` on aibox1 (brainbot:agent command's
   own, with the redirect address
-  `https://ai-knowledge.mz.brainbot.com/indie-recorder/oauth/google/callback`
+  `https://<agent-host>/indie-recorder/oauth/google/callback`
   added in the Google Cloud console); without it Drive is the meeting
   agent's job, as before.
 - The meeting agent reads full transcripts, and an agent's run history keeps
@@ -65,30 +69,34 @@ what it knows.
 ## Install (an admin of ai-knowledge)
 
 On aibox1 this is already set (`~/indie-recorder/.env`): `ALLOW_CIDRS`
-admits ai-knowledge (10.1.1.26), `FILES_BASE_URL` points at the route below,
+admits ai-knowledge (<ai-knowledge>), `FILES_BASE_URL` points at the route below,
 `FOLLOWUP_EXECUTOR=agent`, `FOLLOWUP_TARGETS=drive`, `STORAGE_DEFAULT=drive`,
 `CONNECT_URL` and `APK_URL` point at the brain-tls address. The connector's
 service token is made once on aibox1 with
 `python -m recorder.cli token add --name "brainbot:agent command" --role agent
 --trusts-identity` and kept in `secrets/indiechat_service_token`.
 
-From a checkout of this repo:
+The server's own values live next to the script on ai-knowledge, in
+`/root/indie-recorder-kit/site.env` (kept there, not in this repo): `HOST`,
+`RECORDER` (aibox1's address), `CA_SHA256` (the fingerprint of aibox1's CA),
+`SELF` (ai-knowledge's address) and `BOX_LABEL` (`aibox1`). From a checkout of
+this repo:
 
 ```bash
-scp -r integrations/indie-chat root@ai-knowledge.mz.brainbot.com:/root/indie-recorder-kit
+scp -r integrations/indie-chat root@<agent-host>:/root/indie-recorder-kit
 ssh aibox1 cat indie-recorder/secrets/indiechat_service_token \
-  | ssh root@ai-knowledge.mz.brainbot.com bash /root/indie-recorder-kit/install-ai-knowledge.sh --token-stdin
+  | ssh root@<agent-host> bash /root/indie-recorder-kit/install-ai-knowledge.sh --token-stdin
 ```
 
 The token travels on stdin, never on a command line; without `--token-stdin`
 the script keeps the one already set. It fetches the recorder's CA
 certificate from aibox1 and refuses it unless its SHA-256 fingerprint is the
-recorder's (`E6:89:A7:83:...:07:F1:2D:9F`), then:
+recorder's (`CA_SHA256` in `site.env`), then:
 
 1. routes the paths above in `/opt/kb/brain-tls/Caddyfile` to aibox1,
    trusting only the recorder's CA (validated, then a graceful reload; on a
    validation error the file is put back),
-2. adds `ai-knowledge.mz.brainbot.com` to `INDIE_PRIVATE_HOSTS` and sets
+2. adds `<agent-host>` to `INDIE_PRIVATE_HOSTS` and sets
    `INDIE_RECORDER_TOKEN` in `/opt/kb/indiechat-src/.env`,
 3. adds the "indie-recorder" connector (with `identity: true`) to
    `connectors.json`,
@@ -152,7 +160,7 @@ Without the connector (another deployment), a person's agent can use the
 recorder as an MCP server instead: a token from `recorder.cli token add
 --role agent --user <id>`, added from the browser console with
 `IndieLib.McpServersAPI.create({name: "minutes-pro", scope: "user", url:
-"https://ai-knowledge.mz.brainbot.com/indie-recorder/mcp", headers:
+"https://<agent-host>/indie-recorder/mcp", headers:
 {Authorization: "Bearer <token>"}})`; the routine's precheck can then be
 `pending_work` (`IndieLib.RoutinesAPI.update(id, {precheck: {tool:
 "pending_work", args: {}}, quiet: "[Nothing new]"})`). The MCP tools are the

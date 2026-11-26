@@ -14,10 +14,10 @@ class PairingTest {
 
     @Test
     fun parsesTheDevicesPageLink() {
-        val c = BoxConfig.parse("indierecorder://pair?u=${enc("https://10.1.9.7:8443/")}&t=abcdefghijklmnopqrstuvwxyz012345" +
+        val c = BoxConfig.parse("indierecorder://pair?u=${enc("https://192.168.1.20:8443/")}&t=abcdefghijklmnopqrstuvwxyz012345" +
             "&ca=$ca&n=${enc("Luis's phone")}")!!
-        assertEquals("https://10.1.9.7:8443", c.url)
-        assertEquals("10.1.9.7:8443", c.host)
+        assertEquals("https://192.168.1.20:8443", c.url)
+        assertEquals("192.168.1.20:8443", c.host)
         assertEquals("abcdefghijklmnopqrstuvwxyz012345", c.token)
         assertArrayEquals(der, c.caDer)
         assertEquals("Luis's phone", c.name)
@@ -25,9 +25,9 @@ class PairingTest {
 
     @Test
     fun refusesWhatIsNotAPairingLink() {
-        assertNull(BoxConfig.parse("https://10.1.9.7:8443/app/#pair=abcdefghijklmnopqrstuvwxyz"))
-        assertNull(BoxConfig.parse("indierecorder://pair?u=${enc("http://10.1.9.7")}&t=abcdefghijklmnopqrstuvwxyz&ca=$ca"))
-        assertNull(BoxConfig.parse("indierecorder://pair?u=${enc("https://10.1.9.7:8443")}&t=short&ca=$ca"))
-        assertNull(BoxConfig.parse("indierecorder://pair?u=${enc("https://10.1.9.7:8443")}&t=abcdefghijklmnopqrstuvwxyz"))
+        assertNull(BoxConfig.parse("https://192.168.1.20:8443/app/#pair=abcdefghijklmnopqrstuvwxyz"))
+        assertNull(BoxConfig.parse("indierecorder://pair?u=${enc("http://192.168.1.20")}&t=abcdefghijklmnopqrstuvwxyz&ca=$ca"))
+        assertNull(BoxConfig.parse("indierecorder://pair?u=${enc("https://192.168.1.20:8443")}&t=short&ca=$ca"))
+        assertNull(BoxConfig.parse("indierecorder://pair?u=${enc("https://192.168.1.20:8443")}&t=abcdefghijklmnopqrstuvwxyz"))
     }
 }

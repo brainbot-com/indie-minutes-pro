@@ -7,7 +7,7 @@
 <meta name="theme-color" content="#111111" media="(prefers-color-scheme: dark)">
 <meta name="referrer" content="no-referrer">
 <title>Connect a phone · Minutes Pro</title>
-{# Relative links: the same page works on the box and behind brain-tls under /indie-recorder/. #}
+{# Relative links: the same page works on the box and behind a proxy that serves it under a path (/indie-recorder/). #}
 <link rel="preload" href="static/Inter.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="static/swiss.css">
 <style>
@@ -137,7 +137,7 @@ async function main() {
     $('open').href = web;
     $('openLabel').textContent = T.openWeb;
     $('open').hidden = false;
-    // on the box's own address the browser needs its certificate; behind brain-tls it does not
+    // on the box's own address the browser needs its certificate; behind a proxy with a public one it does not
     if (new URL(info.webapp, location.href).origin !== location.origin) $('foot').textContent = T.webNote + ' ' + T.foot;
   }
 }

@@ -6,8 +6,10 @@
 # TLS_DNS_NAMES="<its names>" ../deploy/make-ca.sh secrets/tls).
 set -euo pipefail
 OUT=${1:-secrets/tls}
-IP=${BIND_IP:-10.1.9.7}
-NAMES=${TLS_DNS_NAMES:-aibox1}
+# the address phones reach the recorder on: BIND_IP, else the one in .env
+IP=${BIND_IP:-$(sed -n 's/^BIND_IP=//p' .env 2>/dev/null | tail -1)}
+[ -n "$IP" ] || { echo "set BIND_IP to the address phones reach (or put it in .env)" >&2; exit 1; }
+NAMES=${TLS_DNS_NAMES:-$(hostname -s)}
 
 mkdir -p "$OUT/public"
 chmod 700 "$OUT"

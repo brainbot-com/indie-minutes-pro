@@ -16,6 +16,8 @@
     <string name="pair_title">Connect to your recorder</string>
     <string name="pair_step1">In Minutes Pro (in brainbot:agent command, or on your box): Connect a phone.</string>
     <string name="pair_step2">Scan the code with the phone\'s camera, or type it here:</string>
+    <string name="box_address">Box address</string>
+    <string name="box_address_note">As in the browser\'s address bar when Minutes Pro is open on the box.</string>
     <string name="code_label">Connect code</string>
     <string name="code_hint" translatable="false">XXXX-XXXX</string>
     <string name="pair_button">Connect</string>

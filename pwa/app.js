@@ -113,7 +113,7 @@ async function chunksOf(cid) {
 const token = () => localStorage.getItem('ir_token') || '';
 class AuthError extends Error {}
 
-// The app lives at /app/ on the box, or at /indie-recorder/app/ behind brain-tls: every
+// The app lives at /app/ on the box, or at /indie-recorder/app/ behind a proxy: every
 // request goes to the folder above it, so the same files work in both places.
 const ROOT = new URL('..', document.baseURI).pathname;
 const at = path => ROOT + path.replace(/^\//, '');
@@ -711,7 +711,7 @@ async function boot() {
   document.documentElement.lang = LANG;
   document.querySelectorAll('[data-t]').forEach(el => { el.textContent = t(el.dataset.t); });
   document.querySelectorAll('[data-tp]').forEach(el => { el.placeholder = t(el.dataset.tp); });
-  // "/" is the box's own pages here, or brainbot:agent command (with the Minutes Pro app) behind brain-tls
+  // "/" is the box's own pages here, or brainbot:agent command (with the Minutes Pro app) behind its proxy
   $('webView').textContent = onBox ? t('webView') : t('webViewCommand');
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
   $('pairForm').onsubmit = async e => {

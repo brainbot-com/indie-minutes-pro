@@ -15,6 +15,8 @@
     <string name="pair_title">Mit Ihrem Recorder verbinden</string>
     <string name="pair_step1">In Minutes Pro (in brainbot:agent command oder auf Ihrer Box): Telefon verbinden.</string>
     <string name="pair_step2">Scannen Sie den Code mit der Kamera des Telefons oder tippen Sie ihn hier ein:</string>
+    <string name="box_address">Adresse der Box</string>
+    <string name="box_address_note">Wie in der Adresszeile des Browsers, wenn Minutes Pro auf der Box offen ist.</string>
     <string name="code_label">Verbindungscode</string>
     <string name="pair_button">Verbinden</string>
     <string name="pair_bad">Dieser Link stammt nicht vom Recorder.</string>

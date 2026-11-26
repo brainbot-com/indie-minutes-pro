@@ -1,6 +1,6 @@
 <!doctype html>
 {# Where Google sends a person back after Connect Google Drive (gdrive.py). Relative
-   links: the page lives at oauth/google/callback, on the box and behind brain-tls. #}
+   links: the page lives at oauth/google/callback, on the box and behind a proxy under a path. #}
 {% set de = lang == "de" %}
 {% set code = error.code if error else "" %}
 {% set want = error.info.get("want", "") if error else "" %}

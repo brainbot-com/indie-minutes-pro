@@ -1,7 +1,7 @@
 """HTTP service: chunked upload API for phones, JSON API for agents, web view, PWA.
 
-A proxy in front terminates TLS: Caddy on 10.1.9.7:8443 for VPN clients only on
-aibox1, the gateway on an Indie Box. This app never listens on the LAN itself."""
+A proxy in front terminates TLS: the gateway on an Indie Box, Caddy on a server of
+your own (compose.yaml, for VPN clients only). This app never listens on the LAN itself."""
 import base64
 import contextlib
 import hmac
