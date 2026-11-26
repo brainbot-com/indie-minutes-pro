@@ -1,0 +1,16 @@
+Minutes Pro
+Copyright 2026 brainbot gmbh
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Minutes Pro downloads and runs, each under its own license:
+- NVIDIA Nemotron 3.5 Transcribe 30B-A4B (OpenMDW-1.1), as GGUF files published
+  by AtomicChat on Hugging Face, fetched at a pinned revision and checked by SHA-256
+- NVIDIA NeMo-Speech.cpp (Apache-2.0), the prebuilt release archives
+
+It includes:
+- Inter 4.1, (c) 2016 The Inter Project Authors, SIL Open Font License 1.1
+  (recorder/static/Inter.woff2, recorder/static/Inter-OFL.txt)
+
+The Python packages in requirements.txt and the Android libraries in
+android/app/build.gradle.kts are used under their own licenses.

@@ -50,6 +50,7 @@ def app(tmp_path, monkeypatch, executor):
                  public_url="https://box.test", github_token_file=tmp_path / "no-token", followup_on_done="0",
                  followup_executor=executor, drive_api_url="", followup_targets="drive,github",
                  storage_default="drive", files_base_url="https://box.test/api/v1/files", accent="0",
+                 box_name="aibox1", github_repo="brainbot-com/indie-recorder-sandbox",
                  # no engines here: a closed port answers at once, where an unknown name can
                  # wait on DNS for longer than any HTTP timeout
                  nemo_url="http://127.0.0.1:9", qwen_url="http://127.0.0.1:9", **make_keys(tmp_path))
@@ -1083,3 +1084,117 @@ def test_a_box_model_elsewhere_gets_no_transcript(tmp_path, monkeypatch):
     assert posted == []
     assert sm.limits(Settings(data_dir=tmp_path, llm_model="qwen3.8:27b")) == (104_880, 52_440)
     assert sm.limits(Settings(data_dir=tmp_path, llm_model="qwen3.8:27b", llm_context="65536")) == (120_000, 60_000)
+
+
+# -- a team on an Indie Box: the owner records and manages, the team reads what is shared --
+
+
+def owner_phone(c):
+    offer = web(c, "pair_phone")
+    paired = c.post("/api/v1/pair", json={"code": offer["code"], "device": "Pixel"}).json()
+    return {"Authorization": f"Bearer {paired['token']}"}
+
+
+def test_a_team_reads_what_the_owner_shares(box, tmp_path):
+    app, c, _ = box
+    c.post("/login", data={"token": "correct horse", "next": "/"})
+    h = owner_phone(c)
+    shared, _ = make_meeting(app, c, tmp_path, headers=h, client_id="team-0001")
+    private, _ = make_meeting(app, c, tmp_path, headers=h, client_id="team-0002")
+    web(c, "share_meeting", meeting_id=private, shared=False)
+    inv = web(c, "team_invite", name="Anna")
+    assert inv["url"].startswith("http://box.local:9207/join#") and "<svg" in inv["qr"]
+    code = inv["url"].split("#", 1)[1]
+    assert c.post("/api/v1/web", json={"op": "team_invite", "args": {"name": "anna"}}).status_code == 400   # taken
+    member = TestClient(app, base_url="http://box.local:9207")
+    peek = member.get(f"/api/v1/join/{code}").json()
+    assert peek["name"] == "Anna" and peek["owner"] == "Kim"
+    assert member.post("/join", data={"code": code, "password": "short", "password2": "short"}).status_code == 400
+    r = member.post("/join", data={"code": code, "password": "anna-secret-1", "password2": "anna-secret-1"},
+                    follow_redirects=False)
+    assert r.status_code == 303
+    me = web(member, "whoami")
+    assert me["role"] == "member" and me["owner"] == "Kim"
+    assert [m["id"] for m in web(member, "list_meetings")] == [shared]
+    assert web(member, "get_meeting", meeting_id=shared, include_transcript=True)["transcript_md"]
+    assert member.post("/api/v1/web", json={"op": "get_meeting", "args": {"meeting_id": private}}).status_code == 400
+    for op, args in (("rename_speakers", {"meeting_id": shared, "names": {"Speaker 1": "X"}}),
+                     ("delete_meeting", {"meeting_id": shared}), ("team", {}), ("pair_phone", {}),
+                     ("new_agent_token", {}), ("share_meeting", {"meeting_id": shared, "shared": False}),
+                     ("new_summary", {"meeting_id": shared})):
+        assert member.post("/api/v1/web", json={"op": op, "args": args}).status_code == 400, op
+    # the link worked once; later Anna signs in with her name and password
+    assert member.post("/join", data={"code": code, "password": "x" * 12, "password2": "x" * 12}).status_code == 404
+    later = TestClient(app, base_url="http://box.local:9207")
+    assert later.post("/login", data={"name": "anna", "token": "wrong-password", "next": "/"}).status_code == 401
+    assert later.post("/login", data={"name": "Anna", "token": "anna-secret-1", "next": "/"},
+                      follow_redirects=False).status_code == 303
+    assert [m["id"] for m in web(later, "list_meetings")] == [shared]
+    # the owner sees the team, a new link resets the password, removing ends the sessions
+    team = web(c, "team")
+    assert [m["name"] for m in team["members"]] == ["Anna"] and team["members"][0]["joined"] and team["share_new"]
+    again = web(c, "team_reset", id=team["members"][0]["id"])
+    assert later.post("/api/v1/web", json={"op": "list_meetings"}).status_code == 401      # her sessions ended
+    assert again["url"] != inv["url"]
+    web(c, "team_remove", id=team["members"][0]["id"])
+    assert web(c, "team")["members"] == []
+    assert TestClient(app, base_url="http://box.local:9207").post(
+        "/login", data={"name": "Anna", "token": "anna-secret-1", "next": "/"}).status_code == 401
+    # new meetings stay private once the owner says so
+    web(c, "team_settings", share_new=False)
+    third, _ = make_meeting(app, c, tmp_path, headers=h, client_id="team-0003")
+    assert not app.state.store.meta(third)["shared"]
+
+
+def test_too_many_wrong_passwords_for_one_name(box):
+    app, c, _ = box
+    c.post("/login", data={"token": "correct horse", "next": "/"})
+    web(c, "team_invite", name="Ben")
+    other = TestClient(app, base_url="http://box.local:9207")
+    for _ in range(5):
+        assert other.post("/login", data={"name": "Ben", "token": "guess-guess", "next": "/"}).status_code == 401
+    assert other.post("/login", data={"name": "Ben", "token": "guess-guess", "next": "/"}).status_code == 429
+    # the owner is not locked out by guesses at someone else's name
+    assert other.post("/login", data={"token": "correct horse", "next": "/"}, follow_redirects=False).status_code == 303
+
+
+def test_the_owner_deletes_a_meeting_for_good(box, tmp_path):
+    app, c, _ = box
+    c.post("/login", data={"token": "correct horse", "next": "/"})
+    mid, _ = make_meeting(app, c, tmp_path, headers=owner_phone(c), client_id="del-0001")
+    folder, db = app.state.store.folder(mid), app.state.db
+    rid = db.one("SELECT id FROM recordings WHERE meeting_id = ?", mid)["id"]
+    assert folder.exists() and db.one("SELECT 1 FROM chunks WHERE recording_id = ?", rid)
+    assert web(c, "delete_meeting", meeting_id=mid) == {"deleted": mid}
+    assert not folder.exists() and app.state.store.meta(mid) is None
+    assert db.one("SELECT 1 FROM recordings WHERE id = ?", rid) is None
+    assert db.one("SELECT 1 FROM chunks WHERE recording_id = ?", rid) is None
+    assert web(c, "list_meetings") == []
+
+
+def test_a_person_deletes_their_meeting_through_the_connector(app, client, tmp_path):
+    db = app.state.db
+    service = create_token(db, "brainbot:agent command", "agent", trusts_identity=True)
+    person = {"Authorization": f"Bearer {service}", "X-Indie-User": "u-del"}
+    client.post("/api/v1/indiechat", json={"op": "whoami"}, headers=person)
+    uid = db.one("SELECT id FROM users WHERE ext_id = 'u-del'")["id"]
+    mid, _ = make_meeting(app, client, tmp_path, headers={
+        "Authorization": f"Bearer {create_token(db, 'phone', 'device', user_id=uid)}"}, client_id="del-0002")
+    agent = client.post("/api/v1/indiechat", json={"op": "delete_meeting", "args": {"meeting_id": mid}},
+                        headers={**person, "X-Indie-Caller": "agent"})
+    assert agent.status_code == 400 and app.state.store.meta(mid)
+    other = client.post("/api/v1/indiechat", json={"op": "delete_meeting", "args": {"meeting_id": mid}},
+                        headers={**person, "X-Indie-User": "someone-else"})
+    assert other.status_code == 400 and app.state.store.meta(mid)
+    ok = client.post("/api/v1/indiechat", json={"op": "delete_meeting", "args": {"meeting_id": mid}}, headers=person)
+    assert ok.json()["result"] == {"deleted": mid} and app.state.store.meta(mid) is None
+
+
+def test_privacy_and_about_pages(box):
+    app, c, _ = box
+    en = c.get("/privacy").text
+    assert "§ 201 StGB" in en and "indiebox-test" in en and "Art. 15" in en
+    de = c.get("/privacy", headers={"accept-language": "de-DE"}).text
+    assert "Einwilligung" in de and "nichtöffentlich" in de
+    assert "Apache License 2.0" in c.get("/about").text and "OpenMDW" in c.get("/about").text
+    assert 'name="name"' in c.get("/login").text

@@ -35,7 +35,7 @@ SRC=/opt/kb/indiechat-src
 CFG=/opt/kb/indiechat-config
 COMPOSE="docker compose -p indiechat -f $SRC/docker-compose.ai-knowledge.yml"
 CA_SHA256=${CA_SHA256:-E6:89:A7:83:FA:CE:DC:3C:1E:82:E7:A9:8F:45:6B:54:8A:56:F6:2D:ED:E2:E4:83:F5:43:F9:40:07:F1:2D:9F}
-PATHS="/indie-recorder/mcp /indie-recorder/api/v1/files/* /indie-recorder/api/v1/indiechat /indie-recorder/connect /indie-recorder/api/v1/pair /indie-recorder/api/v1/pair/* /indie-recorder/indie-recorder.apk /indie-recorder/static/* /indie-recorder/app/* /indie-recorder/api/v1/health /indie-recorder/api/v1/me /indie-recorder/api/v1/settings /indie-recorder/api/v1/recordings /indie-recorder/api/v1/recordings/* /indie-recorder/oauth/google/*"
+PATHS="/indie-recorder/mcp /indie-recorder/api/v1/files/* /indie-recorder/api/v1/indiechat /indie-recorder/connect /indie-recorder/api/v1/pair /indie-recorder/api/v1/pair/* /indie-recorder/indie-recorder.apk /indie-recorder/static/* /indie-recorder/app/* /indie-recorder/api/v1/health /indie-recorder/api/v1/me /indie-recorder/api/v1/settings /indie-recorder/api/v1/recordings /indie-recorder/api/v1/recordings/* /indie-recorder/oauth/google/* /indie-recorder/privacy /indie-recorder/about"
 
 [ "$(id -u)" = 0 ] || { echo "Run this as root." >&2; exit 1; }
 [ -f "$HERE/minutes-pro.html" ] || { echo "minutes-pro.html must be next to this script." >&2; exit 1; }

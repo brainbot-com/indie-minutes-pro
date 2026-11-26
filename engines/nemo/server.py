@@ -119,8 +119,20 @@ def diarize(params, job):
             "resources": resources, "device": device_arg(params)}
 
 
+CACHEDIR_TAG = "Signature: 8a477f597d28d172789f06886806bc55\n# Minutes Pro's speech model: downloaded again when missing, so backups may skip it.\n"
+
+
 def fetch(variants):
     """Downloads the encoder and the decoders named (iq4, q8) unless they are there."""
+    try:
+        # the standard cache marker (bford.info/cachedir): backups that honour it (restic
+        # --exclude-caches, tar --exclude-caches) leave the model out, 21 GB a snapshot
+        tag = os.path.join(MODELS, "CACHEDIR.TAG")
+        if not os.path.exists(tag):
+            with open(tag, "w") as f:
+                f.write(CACHEDIR_TAG)
+    except OSError:
+        pass                                      # a read-only model folder (aibox1's) needs no marker
     todo = [f for f in [ENCODER] + [DECODERS[v] for v in variants] if not os.path.exists(f)]
     total = sum(FILES[f][0] for f in todo)
     FETCH.update(state="downloading" if todo else "ready", done=0, total=total, file=None, error=None)

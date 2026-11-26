@@ -127,6 +127,14 @@ CREATE TABLE IF NOT EXISTS pair_codes (
   used_at TEXT,
   token_id TEXT
 );
+-- someone the owner invited to the team: a link, once, to choose a password
+CREATE TABLE IF NOT EXISTS invites (
+  code_hash TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  used_at TEXT
+);
 -- a person signed in with a browser (the owner's password on an Indie Box)
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
@@ -152,6 +160,11 @@ MIGRATIONS = [
     "ALTER TABLE meetings ADD COLUMN owner_id TEXT",
     "ALTER TABLE recordings ADD COLUMN seal_kid TEXT",
     "ALTER TABLE recordings ADD COLUMN seal_epk TEXT",
+    # a team on an Indie Box: the owner records and manages, members read what is shared with them
+    "ALTER TABLE users ADD COLUMN role TEXT",
+    "ALTER TABLE users ADD COLUMN password_hash TEXT",
+    "ALTER TABLE users ADD COLUMN invited_by TEXT",
+    "ALTER TABLE meetings ADD COLUMN shared INTEGER NOT NULL DEFAULT 0",
 ]
 
 

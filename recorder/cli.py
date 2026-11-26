@@ -156,7 +156,7 @@ def main(argv=None):
             elif db.one("SELECT 1 FROM jobs WHERE meeting_id = ? AND state = 'running'", mid):
                 out[mid] = "a job is running for it, try again later"
             else:
-                store.delete(mid)
+                store.erase(mid)
                 out[mid] = "deleted"
     elif a.cmd == "accents":
         from .worker import accents

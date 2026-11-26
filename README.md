@@ -31,9 +31,9 @@ installs the recorder from its catalog and keeps it updated:
 4. Phones record only over HTTPS: in Admin, HTTPS, choose "Internal
    certificate" (then install the box's certificate authority on each phone
    once) or "Automatic HTTPS".
-5. Settings, Connect a phone: scan the code with the phone, choose Record in
-   the browser, and add the page to the home screen. (The Android app connects
-   to an Indie Box from its next version on.)
+5. Settings, Connect a phone: scan the code with the phone, then record in
+   the browser (add the page to the home screen) or install the Android app,
+   which the connect page offers from GitHub.
 
 Updates come from the catalog like every box app; the meetings and the model
 stay. The recorder uses the box's GPU for speech and the box's default model
@@ -69,6 +69,31 @@ are; you decide in the app.
 
 The agent reads whole transcripts. With a model on your own hardware they stay
 with you; a cloud model's provider gets what the agent reads.
+
+## A team
+
+The owner records and manages the meetings: one person who records, names the
+speakers and deletes what should go. Everyone else in the team reads. In the
+meetings app, Settings, Team: invite people by name. Each gets a link, valid
+once for seven days, to choose their own password, and then signs in with their
+name. They read the meetings the owner shares with the team: every new one
+unless the owner switches that off, with a Team switch on each meeting. A new
+link resets someone's password; removing them ends their sessions.
+
+## Consent and privacy
+
+- Recording others needs their consent: the phone apps say "Tell everyone
+  first" on the Record button and ask once on each phone before the first
+  recording. In Germany, recording the non-public spoken word without consent
+  is a crime (§ 201 StGB).
+- `/privacy` on the recorder (linked from every page and app) says what is
+  stored, where, who sees it, how long, and how to ask for deletion, with the
+  operator's contact (`PRIVACY_CONTACT`, on an Indie Box a field of the
+  install form).
+- The owner deletes a meeting for good from its page (More, Delete meeting):
+  recording, transcript, summaries and everything the box kept about it.
+- For companies: a template for the data protection impact assessment, in
+  German, [docs/dsfa-vorlage.md](docs/dsfa-vorlage.md). It is not legal advice.
 
 ## What stays where
 
@@ -161,5 +186,9 @@ are (a Mac).
 `integrations/` brainbot:agent command · `deploy/` aibox1's Caddy, CA, keys
 and scripts · `sim/` phone simulator · `bench/` benchmark ([BENCHMARK.md](BENCHMARK.md)).
 
-Licenses of what the recorder downloads: Nemotron 3.5 Transcribe OpenMDW-1.1,
-NeMo-Speech.cpp Apache-2.0.
+## License
+
+Apache License 2.0 ([LICENSE](LICENSE)). What Minutes Pro downloads and
+includes, under its own licenses, is listed in [NOTICE](NOTICE): Nemotron 3.5
+Transcribe (OpenMDW-1.1), NeMo-Speech.cpp (Apache-2.0), the Inter font (SIL
+OFL 1.1).

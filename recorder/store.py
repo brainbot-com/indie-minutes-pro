@@ -99,6 +99,9 @@ class Store:
         """Every meeting (who=None, the box itself), else what that caller may see."""
         if who is None or who.admin:
             return self.db.all("SELECT * FROM meetings ORDER BY COALESCE(started_at, created_at) DESC LIMIT ?", limit)
+        if who.member:
+            return self.db.all("SELECT * FROM meetings WHERE shared = 1 AND owner_id = ?"
+                               " ORDER BY COALESCE(started_at, created_at) DESC LIMIT ?", who.team_owner, limit)
         return self.db.all("SELECT * FROM meetings WHERE owner_id IS ? ORDER BY COALESCE(started_at, created_at) DESC"
                            " LIMIT ?", who.user_id, limit)
 
@@ -112,10 +115,12 @@ class Store:
                storage=None, owner_id=None):
         self.folder(mid).mkdir(parents=True, exist_ok=False)
         storage = storage if storage in STORAGE else self.settings(owner_id)["storage_default"]
+        # with a team (an Indie Box): shared with it unless the owner switched that off
+        shared = 1 if owner_id and self.db.user_setting(owner_id, "share_new", "1") == "1" else 0
         self.db.run(
             "INSERT INTO meetings (id, title, created_at, started_at, source, recording_id, language, state, storage,"
-            " owner_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)",
-            mid, title, now_iso(), started_at, source, recording_id, language, storage, owner_id)
+            " owner_id, shared) VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)",
+            mid, title, now_iso(), started_at, source, recording_id, language, storage, owner_id, shared)
         self.write_meta(mid)
         return mid
 
@@ -127,6 +132,18 @@ class Store:
         self.db.run("DELETE FROM meetings WHERE id = ?", mid)
         for table in ("jobs", "proposals", "mappings", "followup_seen"):
             self.db.run(f"DELETE FROM {table} WHERE meeting_id = ?", mid)
+
+    def erase(self, mid):
+        """Everything about a meeting on the box, for good (a person asked, or GDPR):
+        its folder, its rows, its recording's rows and any follow-up waiting in the
+        outbox. Copies already in Google Drive stay there."""
+        for p in self.db.all("SELECT id FROM proposals WHERE meeting_id = ?", mid):
+            (self.s.outbox_dir / f"{p['id']}.json").unlink(missing_ok=True)
+        for r in self.db.all("SELECT id FROM recordings WHERE meeting_id = ?", mid):
+            shutil.rmtree(self.s.uploads_dir / r["id"], ignore_errors=True)
+            self.db.run("DELETE FROM chunks WHERE recording_id = ?", r["id"])
+            self.db.run("DELETE FROM recordings WHERE id = ?", r["id"])
+        self.delete(mid)
 
     # -- files ---------------------------------------------------------------
 

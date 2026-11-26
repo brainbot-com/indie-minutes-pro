@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Datenschutz' if lang == 'de' else 'Privacy' }} · Minutes Pro{% endblock %}
+{% block main %}
+{% set de = lang == 'de' %}
+<article class="card doc">
+{% if de %}
+  <h1>Datenschutz und Einwilligung</h1>
+  <p>Minutes Pro nimmt Meetings mit dem Telefon auf, schreibt auf diesem Gerät ({{ s.box_name }}) mit, wer was gesagt hat, und fasst sie zusammen. Diese Seite beschreibt, was dabei mit den Daten geschieht.</p>
+  <h2>Verantwortlich</h2>
+  <p>Wer Minutes Pro betreibt und aufnimmt, entscheidet über die Aufnahmen und ist dafür verantwortlich (Verantwortlicher nach der DSGVO).{% if s.privacy_contact %} Kontakt: {{ s.privacy_contact }}{% endif %}</p>
+  <h2>Vor jeder Aufnahme</h2>
+  <p>Sagen Sie allen im Meeting, dass Sie aufnehmen, und nehmen Sie nur auf, wenn alle einverstanden sind. Das nichtöffentlich gesprochene Wort ohne Einwilligung aufzunehmen ist in Deutschland strafbar (§ 201 StGB), und die DSGVO verlangt eine Rechtsgrundlage, meist die Einwilligung. Minutes Pro nimmt nur auf, wenn jemand auf Aufnehmen tippt; es hört nicht von selbst mit.</p>
+  <h2>Was gespeichert wird</h2>
+  <ul>
+    <li>die Aufnahme, das Transkript mit Sprecherkennungen, Zusammenfassungen und Aufgaben;</li>
+    <li>die Namen, die jemand den Sprechern gibt, und von wem und wann aufgenommen wurde;</li>
+    <li>für Mitglieder eines Teams: ihr Name, ein gehashtes Passwort und wann sie zuletzt angemeldet waren.</li>
+  </ul>
+  <h2>Wo</h2>
+  <p>Auf diesem Gerät, verschlüsselt (AES-256-GCM; der Index mit SQLCipher). Spracherkennung und Zusammenfassung laufen hier, mit eigenen Modellen; kein Cloud-Dienst bekommt Audio oder Text. Auf dem Telefon wird jedes Stück der Aufnahme verschlüsselt, bevor es gespeichert oder gesendet wird. Ausnahmen wählt der Inhaber selbst: Google Drive für einzelne Meetings, wo das eingerichtet ist, und ein eigener Agent; läuft der auf einem Cloud-Modell, bekommt dessen Anbieter die Transkripte, die der Agent liest.</p>
+  <h2>Wer es sieht</h2>
+  <p>Der Inhaber; Mitglieder seines Teams die Meetings, die er mit dem Team teilt; sein eigener Agent, wenn er einen verbindet. Sonst niemand, auch nicht brainbot.</p>
+  <h2>Wie lange</h2>
+  <p>Bis der Inhaber ein Meeting löscht. Löschen entfernt Aufnahme, Transkript und Zusammenfassungen von diesem Gerät; Kopien in Google Drive bleiben dort, und Sicherungen des Geräts behalten ihre Kopie, bis sie ablaufen.</p>
+  <h2>Ihre Rechte</h2>
+  <p>Wer aufgenommen wurde, kann vom Inhaber Auskunft, eine Kopie, die Berichtigung oder die Löschung verlangen (Art. 15 bis 17 DSGVO).</p>
+  <p class="muted">Diese Seite beschreibt, wie Minutes Pro arbeitet. Für Unternehmen gibt es eine Vorlage für die Datenschutz-Folgenabschätzung im Repository (docs/dsfa-vorlage.md).</p>
+{% else %}
+  <h1>Privacy and consent</h1>
+  <p>Minutes Pro records meetings with a phone, writes down on this device ({{ s.box_name }}) who said what, and summarizes them. This page describes what happens to the data.</p>
+  <h2>Who is responsible</h2>
+  <p>Whoever runs Minutes Pro and records decides about the recordings and is responsible for them (the controller under the GDPR).{% if s.privacy_contact %} Contact: {{ s.privacy_contact }}{% endif %}</p>
+  <h2>Before every recording</h2>
+  <p>Tell everyone in the meeting that you record, and record only if they all agree. In Germany, recording the non-public spoken word without consent is a crime (§ 201 StGB), and the GDPR needs a legal basis, usually consent. Minutes Pro records only when someone taps Record; it never listens on its own.</p>
+  <h2>What is stored</h2>
+  <ul>
+    <li>the recording, the transcript with speaker labels, summaries and action items;</li>
+    <li>the names people give the speakers, and who recorded and when;</li>
+    <li>for members of a team: their name, a hashed password and when they last signed in.</li>
+  </ul>
+  <h2>Where</h2>
+  <p>On this device, encrypted (AES-256-GCM; the index with SQLCipher). Speech recognition and summaries run here, with their own models; no cloud service gets audio or text. On the phone every piece of the recording is encrypted before it is stored or sent. The owner chooses the exceptions: Google Drive for single meetings, where it is set up, and an agent of their own; if that runs on a cloud model, its provider gets the transcripts the agent reads.</p>
+  <h2>Who sees it</h2>
+  <p>The owner; members of their team the meetings the owner shares with the team; the owner's own agent, if they connect one. Nobody else, brainbot included.</p>
+  <h2>How long</h2>
+  <p>Until the owner deletes a meeting. Deleting removes the recording, the transcript and the summaries from this device; copies in Google Drive stay there, and backups of the device keep their copy until they expire.</p>
+  <h2>Your rights</h2>
+  <p>People who were recorded can ask the owner for information, a copy, a correction or the deletion (GDPR Art. 15 to 17).</p>
+  <p class="muted">This page describes how Minutes Pro works. For companies there is a template for the data protection impact assessment in the repository (docs/dsfa-vorlage.md, in German).</p>
+{% endif %}
+</article>
+{% endblock %}

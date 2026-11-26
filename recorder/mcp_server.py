@@ -216,7 +216,7 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
                 rows = [m for m in rows if m["state"] == args["state"]]
             return [{k: m[k] for k in ("id", "title", "started_at", "duration_s", "language", "state", "speakers",
                                        "summary_version", "summary_author", "updated_at", "storage", "drive_url",
-                                       "tldr")} | {"url": store.link(m["id"])}
+                                       "tldr", "shared")} | {"url": store.link(m["id"])}
                     for m in rows]
         if name == "status":
             rows = store.list(limit=10000, who=who)

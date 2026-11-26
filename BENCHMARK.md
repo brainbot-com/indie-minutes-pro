@@ -241,7 +241,7 @@ engine A's words, so it measures how far the engines agree, not who is right:
 - A-iq4 on the 5-minute excerpt ran during the GPU incident, so its timing
   and its GTT peak (which counts every process on the box) are left out.
 
-### Luis's phone recordings (2026-11-18)
+### Two real meetings, recorded with a phone (2026-11-18)
 
 Two real meetings recorded with the phone web app over the VPN (WebM/Opus,
 30 s chunks uploaded during the meeting): a 17-minute security briefing and a

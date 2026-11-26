@@ -7,6 +7,7 @@ import contextlib
 import hmac
 import mimetypes
 import os
+import secrets
 import shutil
 import threading
 import time
@@ -24,14 +25,14 @@ from starlette.concurrency import run_in_threadpool
 from markdown_it import MarkdownIt
 from pydantic import BaseModel, Field
 
-from . import __version__, audio, speakers, urls, vault
+from . import __version__, audio, passwords, speakers, urls, vault
 from .config import Settings
 from .connect import CODE_MINUTES, Codes, Guesses, shown
 from .db import open_index
 from .engines import NAMES as ENGINE_NAMES, Engines
 from .followup import Followup
 from .gdrive import Google, GoogleError
-from .people import label, person_for, resolve
+from .people import add_person, label, person_for, resolve
 from .render import display_name, local_time, render_summary_md, words_to_segments
 from .store import Store
 from .util import (fmt_clock, fmt_duration, fmt_ts, hash_token, new_id, new_meeting_id, new_token, now_iso,
@@ -185,14 +186,19 @@ def create_app(settings=None):
         return row or session_row(raw)
 
     def session_row(raw):
-        """A browser signed in with the owner's password: a token-like row of role "web"."""
-        ses = db.one("SELECT * FROM sessions WHERE token_hash = ? AND expires_at > ?", hash_token(raw), now_iso())
+        """A browser signed in with a password (the owner's, or a team member's own): a
+        token-like row of role "web". A member's carries whose shared meetings they read."""
+        ses = db.one("SELECT s.*, u.role AS user_role, u.invited_by FROM sessions s JOIN users u ON u.id = s.user_id"
+                     " WHERE s.token_hash = ? AND s.expires_at > ?", hash_token(raw), now_iso())
         if not ses:
             return None
         if (ses["last_used_at"] or "")[:16] != now_iso()[:16]:
             db.run("UPDATE sessions SET last_used_at = ? WHERE id = ?", now_iso(), ses["id"])
+            db.run("UPDATE users SET last_seen_at = ? WHERE id = ?", now_iso(), ses["user_id"])
+        member = ses["user_role"] == "member"
         return {"id": ses["id"], "name": "Browser", "role": "web", "user_id": ses["user_id"], "trusts_identity": 0,
-                "created_at": ses["created_at"], "last_used_at": ses["last_used_at"], "revoked_at": None}
+                "created_at": ses["created_at"], "last_used_at": ses["last_used_at"], "revoked_at": None,
+                "team_owner": (ses["invited_by"] or "-") if member else None}
 
     def need(*roles, html=False):
         def dep(request: Request):
@@ -499,7 +505,32 @@ def create_app(settings=None):
 
     # -- web view ---------------------------------------------------------------
 
-    logins = Guesses(limit=10)          # wrong passwords from anyone, per 10 minutes
+    logins = Guesses(limit=30)          # wrong sign-ins from anyone, per 10 minutes
+    tries = {}                          # and per name, so one name cannot be guessed at
+    no_member = passwords.make(secrets.token_urlsafe(16))   # checked for unknown names, so they take as long
+
+    def tried(name):
+        key = name.lower()
+        if key not in tries:
+            if len(tries) > 1000:
+                tries.clear()
+            tries[key] = Guesses(limit=5)
+        return tries[key]
+
+    def start_session(resp, request, user_id):
+        raw = new_token()
+        expires = (utcnow() + timedelta(days=SESSION_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        db.run("INSERT INTO sessions (id, user_id, token_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
+               new_id("ses"), user_id, hash_token(raw), now_iso(), expires)
+        db.run("DELETE FROM sessions WHERE expires_at <= ?", now_iso())
+        # a cookie marked Secure is never sent back over plain HTTP (an Indie Box's default)
+        resp.set_cookie(COOKIE, raw, httponly=True, secure=s.secure_cookies and request.url.scheme == "https",
+                        samesite="strict", max_age=SESSION_DAYS * 86400)
+        return resp
+
+    def owner_named(name):
+        me = db.one("SELECT name FROM users WHERE id = ?", owner_id) if owner_id else None
+        return not name or name.lower() in ("owner", ((me or {}).get("name") or "").lower())
 
     def lang_of(request):
         return "de" if request.headers.get("accept-language", "").lower().startswith("de") else "en"
@@ -508,33 +539,93 @@ def create_app(settings=None):
     def login_form(request: Request, next: str = "/"):
         return page(request, "login.html", None, next=next, error=None, lang=lang_of(request))
 
+    @app.get("/privacy", response_class=HTMLResponse)
+    def privacy_page(request: Request):
+        """What happens to recordings, and recording only with everyone's consent (public)."""
+        return page(request, "privacy.html", None, lang=lang_of(request), root="")
+
+    @app.get("/about", response_class=HTMLResponse)
+    def about_page(request: Request):
+        return page(request, "about.html", None, lang=lang_of(request), root="")
+
     @app.post("/login")
-    def login(request: Request, token: str = Form(...), next: str = Form("/")):
-        given, lang = token.strip(), lang_of(request)
+    def login(request: Request, token: str = Form(...), name: str = Form(""), next: str = Form("/")):
+        given, lang, who = token.strip(), lang_of(request), " ".join(name.split())[:80]
         safe = next.startswith("/") and not next.startswith("//") and "\\" not in next
         resp = RedirectResponse(next if safe else "/", status_code=303)
-        # a cookie marked Secure is never sent back over plain HTTP (an Indie Box's default)
-        secure = s.secure_cookies and request.url.scheme == "https"
+        again = {"next": next, "lang": lang, "login_name": who}
         if s.owner_password:
-            if logins.blocked():
-                return page(request, "login.html", None, next=next, lang=lang, error="blocked", status_code=429)
-            if hmac.compare_digest(given.encode(), s.owner_password.encode()):
-                raw = new_token()
-                expires = (utcnow() + timedelta(days=SESSION_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
-                db.run("INSERT INTO sessions (id, user_id, token_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
-                       new_id("ses"), owner_id, hash_token(raw), now_iso(), expires)
-                db.run("DELETE FROM sessions WHERE expires_at <= ?", now_iso())
-                resp.set_cookie(COOKIE, raw, httponly=True, secure=secure, samesite="strict",
-                                max_age=SESSION_DAYS * 86400)
-                return resp
+            if logins.blocked() or tried(who).blocked():
+                return page(request, "login.html", None, error="blocked", status_code=429, **again)
+            if owner_named(who):
+                if hmac.compare_digest(given.encode(), s.owner_password.encode()):
+                    return start_session(resp, request, owner_id)
+            else:
+                m = db.one("SELECT * FROM users WHERE role = 'member' AND lower(name) = lower(?)", who)
+                if passwords.check(given, (m or {}).get("password_hash") or no_member) and m:
+                    return start_session(resp, request, m["id"])
         row = db.one("SELECT * FROM tokens WHERE token_hash = ? AND revoked_at IS NULL", hash_token(given))
         if not row or row["role"] not in READERS:
             if s.owner_password:
                 logins.miss()
-            return page(request, "login.html", None, next=next, lang=lang,
-                        error="password" if s.owner_password else "token", status_code=401)
-        resp.set_cookie(COOKIE, given, httponly=True, secure=secure, samesite="strict", max_age=180 * 86400)
+                tried(who).miss()
+            return page(request, "login.html", None, error="password" if s.owner_password else "token",
+                        status_code=401, **again)
+        resp.set_cookie(COOKIE, given, httponly=True, secure=s.secure_cookies and request.url.scheme == "https",
+                        samesite="strict", max_age=180 * 86400)
         return resp
+
+    # -- joining the team: a link from the owner, once, to choose a password ----
+
+    joins = Guesses()
+    INVITE_DAYS = 7
+
+    def invite_row(code):
+        return db.one("SELECT * FROM invites WHERE code_hash = ? AND used_at IS NULL AND expires_at > ?",
+                      hash_token("invite:" + str(code or "")), now_iso())
+
+    @app.get("/join", response_class=HTMLResponse)
+    def join_page(request: Request):
+        """Where an invitation leads (the code stays in the fragment, the server never logs it)."""
+        return templates.TemplateResponse(request, "join.html", {"s": s, "lang": lang_of(request), "error": None})
+
+    @app.get("/api/v1/join/{code}")
+    def join_peek(code: str):
+        if joins.blocked():
+            raise HTTPException(429, "too many wrong links, try again in a few minutes")
+        row = invite_row(code)
+        if not row:
+            joins.miss()
+            raise HTTPException(404, "unknown, used or expired link")
+        member = db.one("SELECT * FROM users WHERE id = ?", row["user_id"])
+        owner = db.one("SELECT * FROM users WHERE id = ?", member["invited_by"]) if member else None
+        return {"name": (member or {}).get("name"), "owner": (owner or {}).get("name"), "box": s.box_name,
+                "expires_at": row["expires_at"]}
+
+    @app.post("/join")
+    def join(request: Request, code: str = Form(...), password: str = Form(...), password2: str = Form(...)):
+        lang = lang_of(request)
+        if joins.blocked():
+            return templates.TemplateResponse(request, "join.html", {"s": s, "lang": lang, "error": "blocked"},
+                                              status_code=429)
+        wrong = passwords.problem(password) and "short" or (password != password2 and "differ")
+        if wrong:
+            return templates.TemplateResponse(request, "join.html", {"s": s, "lang": lang, "error": wrong, "code": code},
+                                              status_code=400)
+        with db.tx() as con:
+            row = con.execute("SELECT * FROM invites WHERE code_hash = ? AND used_at IS NULL AND expires_at > ?",
+                              (hash_token("invite:" + code), now_iso())).fetchone()
+            if row:
+                con.execute("UPDATE invites SET used_at = ? WHERE code_hash = ?", (now_iso(), row["code_hash"]))
+        if not row:
+            joins.miss()
+            return templates.TemplateResponse(request, "join.html", {"s": s, "lang": lang, "error": "used"},
+                                              status_code=404)
+        # a new link for someone who joined before is how a password is reset: old sessions end
+        db.run("DELETE FROM sessions WHERE user_id = ?", row["user_id"])
+        db.run("UPDATE users SET password_hash = ?, last_seen_at = ? WHERE id = ?", passwords.make(password), now_iso(),
+               row["user_id"])
+        return start_session(RedirectResponse("/", status_code=303), request, row["user_id"])
 
     @app.get("/logout")
     def logout(request: Request):
@@ -755,7 +846,7 @@ def create_app(settings=None):
         code, expires = codes.create(user_id)
         url = f"{s.connect_url}#{code}"
         return {"code": shown(code), "url": url, "qr": qr_svg(url), "expires_at": expires, "minutes": CODE_MINUTES,
-                "apk_url": s.apk_url if s.apk_file.exists() else None}
+                "apk_url": s.apk_url}
 
     def phone_token(name, user_id):
         raw = create_token(db, name, "device", user_id=user_id)
@@ -807,7 +898,7 @@ def create_app(settings=None):
             raise HTTPException(404, "unknown, used or expired code")
         return {"person": person_name(row["user_id"]), "box": s.box_name, "box_url": s.public_url, "ca": ca_der(),
                 "expires_at": row["expires_at"], "webapp": s.webapp_url,
-                "apk_url": s.apk_url if s.apk_file.exists() else None}
+                "apk_url": s.apk_url}
 
     @app.post("/api/v1/pair")
     def pair_redeem(body: PairIn):
@@ -892,13 +983,16 @@ def create_app(settings=None):
     # A browser signed in with the owner's password (an Indie Box, or a recorder on a Mac):
     # the phone's ops plus connecting phones and giving the person's own agent a token.
     AGENT_OPS = {"agent_tokens", "new_agent_token", "revoke_agent_token"}
-    WEB_OPS = PHONE_OPS | {"pair_phone", "phones", "remove_phone"} | AGENT_OPS
+    TEAM_OPS = {"team", "team_invite", "team_reset", "team_remove", "team_settings", "share_meeting"}
+    WEB_OPS = PHONE_OPS | {"pair_phone", "phones", "remove_phone", "delete_meeting"} | AGENT_OPS | TEAM_OPS
+    # a team member reads what the owner shares: recording and managing stay with the owner
+    MEMBER_OPS = {"status", "whoami", "set_name", "list_meetings", "get_meeting"}
 
     @app.post("/api/v1/web")
     async def web_ops(request: Request, who=Depends(person("web"))):
         if "application/json" not in request.headers.get("content-type", ""):
             return JSONResponse({"ok": False, "error": "send JSON"}, status_code=415)
-        return await answer(request, who, WEB_OPS)
+        return await answer(request, who, MEMBER_OPS if who.member else WEB_OPS)
 
     async def answer(request, who, allowed=None):
         try:
@@ -923,8 +1017,30 @@ def create_app(settings=None):
             raise ToolError("only a person can pair or remove phones, set their name or connect Google Drive, not an agent")
         if op == "whoami":
             me = db.one("SELECT name FROM users WHERE id = ?", who.user_id)
-            return {"meetings": len(store.list(limit=10000, who=who)), "caller": who.caller,
-                    "phones": len(phones(who)), "name": me["name"]}
+            role = "member" if who.member else "owner" if who.token["role"] == "web" else "person"
+            out = {"meetings": len(store.list(limit=10000, who=who)), "caller": who.caller,
+                   "phones": len(phones(who)), "name": me["name"], "role": role}
+            if who.member:
+                owner = db.one("SELECT name FROM users WHERE id = ?", who.team_owner)
+                out["owner"] = (owner or {}).get("name")
+            elif role == "owner":
+                out["team_members"] = len(members(who.user_id))
+            return out
+        if op in TEAM_OPS:
+            if who.token["role"] != "web" or who.member:
+                raise ToolError("only the owner manages the team")
+            return team_op(op, args, who.user_id)
+        if op == "delete_meeting":
+            if who.member or is_agent(who):
+                raise ToolError("only the person who recorded a meeting deletes it")
+            mid = str(args.get("meeting_id") or "")
+            m = store.meta(mid)
+            if not m or m.get("owner_id") != who.user_id:
+                raise ToolError(f"no meeting {mid!r}")
+            if db.one("SELECT 1 FROM jobs WHERE meeting_id = ? AND state = 'running'", mid):
+                raise ToolError("the meeting is being processed right now: try again in a minute")
+            store.erase(mid)
+            return {"deleted": mid}
         if op == "set_name":
             # brainbot:agent command names people only by id; the person picks the name their phones show
             name = str(args.get("name") or "").strip()[:80] or None
@@ -956,6 +1072,60 @@ def create_app(settings=None):
         return mcp_call(op, args, who)
 
     MAX_AGENTS = 5
+    MAX_MEMBERS = 50
+
+    def team_op(op, args, owner):
+        """The owner's team: invite people by name (a link, once, to choose a password),
+        a new link to reset one, remove them, and which meetings the team reads."""
+        if op == "team_invite":
+            name = " ".join(str(args.get("name") or "").split())[:80]
+            if not name:
+                raise ToolError("a name, please")
+            if len(members(owner)) >= MAX_MEMBERS:
+                raise ToolError(f"at most {MAX_MEMBERS} people in a team")
+            if owner_named(name) or db.one("SELECT 1 FROM users WHERE role = 'member' AND lower(name) = lower(?)", name):
+                raise ToolError(f"{name} is taken: pick another name")
+            uid = add_person(db, name=name)["id"]
+            db.run("UPDATE users SET role = 'member', invited_by = ? WHERE id = ?", owner, uid)
+            return {"member": next(m for m in members(owner) if m["id"] == uid), **invite(uid)}
+        if op in ("team_reset", "team_remove"):
+            m = next((x for x in members(owner) if x["id"] == str(args.get("id") or "")), None)
+            if not m:
+                raise ToolError("no such person in the team")
+            db.run("DELETE FROM sessions WHERE user_id = ?", m["id"])
+            if op == "team_reset":
+                return {"member": m, **invite(m["id"])}
+            for table in ("invites", "user_settings"):
+                db.run(f"DELETE FROM {table} WHERE user_id = ?", m["id"])
+            db.run("DELETE FROM users WHERE id = ?", m["id"])
+        if op == "team_settings" and "share_new" in args:
+            db.set_user_setting(owner, "share_new", "1" if args["share_new"] else "0")
+        if op == "share_meeting":
+            mid = str(args.get("meeting_id") or "")
+            m = store.meta(mid)
+            if not m or m.get("owner_id") != owner:
+                raise ToolError(f"no meeting {mid!r}")
+            db.run("UPDATE meetings SET shared = ? WHERE id = ?", 1 if args.get("shared") else 0, mid)
+            return {"meeting_id": mid, "shared": bool(args.get("shared"))}
+        return {"members": members(owner), "share_new": db.user_setting(owner, "share_new", "1") == "1"}
+
+    def members(owner):
+        now = now_iso()
+        return [{"id": r["id"], "name": r["name"], "joined": bool(r["password_hash"]), "last_seen_at": r["last_seen_at"]
+                 if r["password_hash"] else None,
+                 "invite_expires_at": (db.one("SELECT max(expires_at) AS t FROM invites WHERE user_id = ? AND used_at IS NULL"
+                                              " AND expires_at > ?", r["id"], now) or {}).get("t")}
+                for r in db.all("SELECT * FROM users WHERE role = 'member' AND invited_by = ? ORDER BY created_at", owner)]
+
+    def invite(uid):
+        """A new link for the person; their older unused ones stop working."""
+        code, now = secrets.token_urlsafe(24), now_iso()
+        expires = (utcnow() + timedelta(days=INVITE_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        db.run("UPDATE invites SET expires_at = ? WHERE user_id = ? AND used_at IS NULL AND expires_at > ?", now, uid, now)
+        db.run("INSERT INTO invites (code_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+               hash_token("invite:" + code), uid, now, expires)
+        url = f"{s.public_url}/join#{code}"
+        return {"url": url, "qr": qr_svg(url), "expires_at": expires}
 
     def agent_op(op, args, who):
         """A token for the person's own agent (Claude, OpenClaw, Hermes, ...) to use the MCP

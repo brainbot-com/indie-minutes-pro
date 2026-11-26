@@ -20,7 +20,7 @@ const STR = {
     pairAgain: "The box no longer accepts this phone's token. Connect it again.",
     newRecording: 'New recording', recording: 'Recording', paused: 'Paused', title: 'Title', optional: 'Optional', untitled: 'Recording',
     box: 'Box', storage: 'Storage', drive: 'Google Drive', local: 'On the box', mic: 'Microphone', micOn: 'On', micOff: 'Off while paused',
-    forWhom: 'Recording for', forShort: 'For', phone: 'Phone', record: 'Record', pause: 'Pause', resume: 'Resume', stop: 'Stop',
+    forWhom: 'Recording for', forShort: 'For', phone: 'Phone', record: 'Record', askFirst: 'Tell everyone first', consentAsk: 'Before you record: tell everyone in the meeting that you are recording, and record only if they all agree. In Germany, recording people without their consent is a crime (§ 201 StGB). Asked once on this phone.', privacy: 'Privacy and consent', pause: 'Pause', resume: 'Resume', stop: 'Stop',
     pausedNote: 'Paused. The microphone is off; nothing is recorded until you resume.',
     recordings: 'Recordings', onPhone: 'On this phone', noRecs: 'Nothing recorded yet.',
     meetings: 'Meetings', private: 'Only you see your meetings', noMeetings: 'No meetings yet.',
@@ -51,7 +51,7 @@ const STR = {
     pairAgain: 'Die Box nimmt das Token dieses Telefons nicht mehr an. Bitte neu verbinden.',
     newRecording: 'Neue Aufnahme', recording: 'Aufnahme läuft', paused: 'Pausiert', title: 'Titel', optional: 'Optional', untitled: 'Aufnahme',
     box: 'Box', storage: 'Ablage', drive: 'Google Drive', local: 'Auf der Box', mic: 'Mikrofon', micOn: 'An', micOff: 'Aus, solange pausiert',
-    forWhom: 'Aufnahme für', forShort: 'Für', phone: 'Telefon', record: 'Aufnehmen', pause: 'Pause', resume: 'Weiter', stop: 'Stopp',
+    forWhom: 'Aufnahme für', forShort: 'Für', phone: 'Telefon', record: 'Aufnehmen', askFirst: 'Erst allen Bescheid sagen', consentAsk: 'Vor der Aufnahme: Sagen Sie allen im Meeting, dass Sie aufnehmen, und nehmen Sie nur auf, wenn alle einverstanden sind. Menschen ohne ihre Einwilligung aufzunehmen ist in Deutschland strafbar (§ 201 StGB). Diese Frage kommt einmal auf diesem Telefon.', privacy: 'Datenschutz und Einwilligung', pause: 'Pause', resume: 'Weiter', stop: 'Stopp',
     pausedNote: 'Pausiert. Das Mikrofon ist aus; bis Sie fortsetzen, wird nichts aufgenommen.',
     recordings: 'Aufnahmen', onPhone: 'Auf diesem Telefon', noRecs: 'Noch nichts aufgenommen.',
     meetings: 'Meetings', private: 'Ihre Meetings sehen nur Sie', noMeetings: 'Noch keine Meetings.',
@@ -646,8 +646,16 @@ function wire() {
   if (wired) return;
   wired = true;
   $('rec').addEventListener('click', async () => {
+    // Everyone in the meeting has to know and agree (§ 201 StGB, GDPR): asked once on this phone
+    let ok = false;
+    try { ok = localStorage.getItem('ir_consent') === '1'; } catch (e) { /* private mode: ask */ }
+    if (!ok) {
+      if (!confirm(t('consentAsk'))) return;
+      try { localStorage.setItem('ir_consent', '1'); } catch (e) { /* private mode */ }
+    }
     try { await start(); } catch (e) { warn(t('startFail')(e.message)); stop(); }
   });
+  $('privacyLink').href = at('/privacy');
   $('pause').addEventListener('click', () => (paused ? resume() : pause()));
   $('stop').addEventListener('click', stop);
   $('driveBtn').addEventListener('click', () => { setOn($('drive'), !on($('drive'))); storageLabel(); });

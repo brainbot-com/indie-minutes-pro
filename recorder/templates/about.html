@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Über' if lang == 'de' else 'About' }} · Minutes Pro{% endblock %}
+{% block main %}
+{% set de = lang == 'de' %}
+<article class="card doc">
+  <h1>Minutes Pro {{ version }}</h1>
+  <p>{{ 'Ein privater Meeting-Recorder von brainbot. Der Code ist offen, unter der Apache-Lizenz 2.0:' if de else 'A private meeting recorder by brainbot. The code is open, under the Apache License 2.0:' }} <a href="https://github.com/brainbot-com/indie-minutes-pro">github.com/brainbot-com/indie-minutes-pro</a></p>
+  <h2>{{ 'Was es mitbringt' if de else 'What it builds on' }}</h2>
+  <ul>
+    <li>NVIDIA Nemotron 3.5 Transcribe 30B-A4B ({{ 'Spracherkennung, Lizenz' if de else 'speech recognition, license' }} OpenMDW-1.1), {{ 'als GGUF von' if de else 'as GGUF by' }} AtomicChat</li>
+    <li>NVIDIA NeMo-Speech.cpp (Apache-2.0)</li>
+    <li>Inter 4.1, The Inter Project Authors (SIL Open Font License 1.1)</li>
+    <li>{{ 'Die Zusammenfassungen schreibt das Modell der Box oder das eigene Ollama, unter dessen Lizenz.' if de else 'The summaries are written by the box\'s model or your own Ollama, under its license.' }}</li>
+    <li>{{ 'Python-Pakete wie FastAPI, Uvicorn, Jinja, cryptography und SQLCipher, jeweils unter ihrer eigenen Lizenz (requirements.txt).' if de else 'Python packages such as FastAPI, Uvicorn, Jinja, cryptography and SQLCipher, each under its own license (requirements.txt).' }}</li>
+  </ul>
+  <p><a href="privacy">{{ 'Datenschutz und Einwilligung' if de else 'Privacy and consent' }}</a></p>
+</article>
+{% endblock %}
