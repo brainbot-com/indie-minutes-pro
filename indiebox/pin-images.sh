@@ -12,7 +12,7 @@
 # default is the released version rather than a floating tag. This rewrites
 # those defaults and the indiebox.app.version label and nothing else. The
 # indiebox-app-release action calls it from .github/workflows/release.yml, and
-# --check runs on every change to indiebox/ (.github/workflows/compose-check.yml).
+# --check runs on every pull request (.github/workflows/checks.yml).
 #
 # One variable for both images on purpose: the recorder and its engine speak a
 # job protocol of their own (engines/jobserver.py, the model download in
