@@ -114,6 +114,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
@@ -1037,6 +1038,18 @@ private fun HomeScreen(cfg: BoxConfig, onMeetings: () -> Unit, onSettings: () ->
         if (needed.all { ContextCompat.checkSelfPermission(ctx, it) == PackageManager.PERMISSION_GRANTED }) start()
         else ask.launch(needed)
     }
+    // Everyone in the meeting has to know and agree (§ 201 StGB, GDPR): asked once on this phone,
+    // and the Record block says it every time.
+    var consentAsk by remember { mutableStateOf(false) }
+    val consent = ctx.getSharedPreferences("app", Context.MODE_PRIVATE)
+    fun recordAsked() {
+        if (consent.getBoolean("consent_ok", false)) record() else consentAsk = true
+    }
+    if (consentAsk) ConsentDialog(onOk = {
+        consent.edit().putBoolean("consent_ok", true).apply()
+        consentAsk = false
+        record()
+    }, onCancel = { consentAsk = false })
 
     val titleLabel = stringResource(R.string.title_label)
     val boxLabel = stringResource(R.string.box_label)
@@ -1081,8 +1094,13 @@ private fun HomeScreen(cfg: BoxConfig, onMeetings: () -> Unit, onSettings: () ->
                 whom?.let { (label, name) -> add(CellSpec(label) { Value(name) }) }
             }, compact = short)
             Block(stringResource(R.string.record), p.red, p.redDark, p.onRed, 40.sp,
-                Modifier.layoutId(Grow(112.dp, 186.dp, first = true)).fillMaxWidth(), onClick = { record() }) {
-                Box(Modifier.size(30.dp).clip(CircleShape).background(p.onRed))
+                Modifier.layoutId(Grow(112.dp, 186.dp, first = true)).fillMaxWidth(), onClick = { recordAsked() }) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(30.dp).clip(CircleShape).background(p.onRed))
+                    Spacer(Modifier.weight(1f))
+                    Text(stringResource(R.string.ask_first), Modifier.widthIn(max = 200.dp), color = p.onRed, fontSize = 13.sp,
+                        lineHeight = 16.sp, fontWeight = FontWeight.W700, textAlign = TextAlign.End)
+                }
             }
         } else {
             val r = items.firstOrNull { it.clientId == a.clientId }
@@ -1658,7 +1676,25 @@ private fun SettingsScreen(cfg: BoxConfig, onBack: () -> Unit, onDisconnect: () 
             }
         }
         OutlineButton(stringResource(R.string.disconnect), onDisconnect)
+        LinkText(stringResource(R.string.privacy)) { open(ctx, cfg.url.trimEnd('/') + "/privacy") }
         Text(stringResource(R.string.version, BuildConfig.VERSION_NAME), fontSize = 12.sp, color = pal().muted)
+    }
+}
+
+/** Before the first recording on this phone: tell everyone, record only if they agree. */
+@Composable
+private fun ConsentDialog(onOk: () -> Unit, onCancel: () -> Unit) {
+    val p = pal()
+    Dialog(onDismissRequest = onCancel) {
+        Column(Modifier.background(p.paper).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text(stringResource(R.string.consent_title), fontSize = 24.sp, fontWeight = FontWeight.W900, color = p.ink,
+                letterSpacing = (-0.5).sp)
+            Text(stringResource(R.string.consent_text), fontSize = 16.sp, lineHeight = 23.sp, color = p.ink)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                RedButton(stringResource(R.string.consent_ok), onOk)
+                LinkText(stringResource(R.string.cancel), onCancel)
+            }
+        }
     }
 }
 

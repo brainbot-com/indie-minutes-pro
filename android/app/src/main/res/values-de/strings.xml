@@ -49,6 +49,11 @@
     <string name="mic_taken">Von einem Anruf belegt</string>
     <string name="parts">%1$d von %2$d Teilen</string>
     <string name="record">Aufnehmen</string>
+    <string name="ask_first">Erst allen Bescheid sagen</string>
+    <string name="consent_title">Vor der Aufnahme</string>
+    <string name="consent_text">Sagen Sie allen im Meeting, dass Sie aufnehmen, und nehmen Sie nur auf, wenn alle einverstanden sind. Menschen ohne ihre Einwilligung aufzunehmen ist in Deutschland strafbar (§ 201 StGB).</string>
+    <string name="consent_ok">Mache ich</string>
+    <string name="privacy">Datenschutz und Einwilligung</string>
     <string name="pause">Pause</string>
     <string name="resume">Weiter</string>
     <string name="stop">Stopp</string>

@@ -52,6 +52,11 @@
     <string name="mic_taken">Taken by a call</string>
     <string name="parts">%1$d of %2$d parts</string>
     <string name="record">Record</string>
+    <string name="ask_first">Tell everyone first</string>
+    <string name="consent_title">Before you record</string>
+    <string name="consent_text">Tell everyone in the meeting that you are recording, and record only if they all agree. In Germany, recording people without their consent is a crime (§ 201 StGB).</string>
+    <string name="consent_ok">I tell them</string>
+    <string name="privacy">Privacy and consent</string>
     <string name="pause">Pause</string>
     <string name="resume">Resume</string>
     <string name="stop">Stop</string>

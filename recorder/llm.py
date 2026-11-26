@@ -57,6 +57,9 @@ def context_tokens(settings):
 def chat_json(settings, system, user, schema, timeout=1800, temperature=0.2):
     """One chat call that must return JSON matching `schema`. Returns (obj, stats)."""
     info = model_info(settings)
+    if settings.llm_local_only and info.get("local") is not True and not settings.llm_remote_ok:
+        raise LLMError(f"the box does not list {settings.llm_model} as one of its own models (or did not answer), "
+                       "and transcripts stay on the box: choose one of the box's models (LLM_MODEL)")
     if info.get("local") is False and not settings.llm_remote_ok:
         where = (info.get("provider") or {}).get("name") or "a remote provider"
         raise LLMError(f"{settings.llm_model} runs at {where}, not on this box, and transcripts stay on the box: "

@@ -5,15 +5,16 @@
 <section class="card narrow">
   <h1>{{ 'Anmelden' if de else 'Sign in' }}</h1>
   {% if s.owner_password %}
-  <p class="muted">{{ 'Mit dem Passwort aus den Einstellungen dieser App auf Ihrer Indie Box (Apps, Minutes Pro, Konfigurieren).' if de else 'With the password from this app\'s settings on your Indie Box (Apps, Minutes Pro, Configure).' }}</p>
+  <p class="muted">{{ 'Als Inhaber mit dem Passwort aus den Einstellungen dieser App auf der Indie Box (Apps, Minutes Pro, Konfigurieren). Im Team mit Ihrem Namen und Ihrem eigenen Passwort.' if de else 'As the owner, with the password from this app\'s settings on the Indie Box (Apps, Minutes Pro, Configure). In the team, with your name and your own password.' }}</p>
   {% else %}
   <p class="muted">Paste a device or admin token. Admins create tokens on the Devices page; the first admin token is in <code>secrets/admin_token</code> next to the recorder.</p>
   {% endif %}
-  {% if error %}<p class="error">{% if error == 'blocked' %}{{ 'Zu viele falsche Versuche. Bitte in ein paar Minuten noch einmal.' if de else 'Too many wrong tries. Try again in a few minutes.' }}{% elif error == 'password' %}{{ 'Das Passwort stimmt nicht.' if de else 'That password is not right.' }}{% else %}Unknown or revoked token.{% endif %}</p>{% endif %}
+  {% if error %}<p class="error">{% if error == 'blocked' %}{{ 'Zu viele falsche Versuche. Bitte in ein paar Minuten noch einmal.' if de else 'Too many wrong tries. Try again in a few minutes.' }}{% elif error == 'password' %}{{ 'Name oder Passwort stimmt nicht.' if de else 'That name or password is not right.' }}{% else %}Unknown or revoked token.{% endif %}</p>{% endif %}
   <form method="post" action="/login">
     <input type="hidden" name="next" value="{{ next }}">
     {% if s.owner_password %}
-    <label>{{ 'Passwort' if de else 'Password' }} <input name="token" type="password" autocomplete="current-password" required autofocus></label>
+    <label>{{ 'Name (im Team; als Inhaber leer lassen)' if de else 'Name (in the team; the owner leaves it empty)' }} <input name="name" autocomplete="username" value="{{ login_name or '' }}"></label>
+    <label>{{ 'Passwort' if de else 'Password' }} <input name="token" type="password" autocomplete="current-password" required {% if not login_name %}autofocus{% endif %}></label>
     <button>{{ 'Anmelden' if de else 'Sign in' }}</button>
     {% else %}
     <label>Token <input name="token" type="password" autocomplete="off" required autofocus></label>

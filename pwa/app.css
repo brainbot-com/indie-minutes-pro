@@ -38,7 +38,10 @@ main:has(#ready:not([hidden])) { height: 100dvh; overflow-y: auto; }
   font-size: clamp(30px, 9vw, 40px); font-weight: 900; letter-spacing: -.03em; white-space: nowrap;
 }
 .recbtn:active { background: var(--red-dark); }
-.recbtn .dot { width: 30px; height: 30px; border-radius: 50%; background: var(--on-red); }
+.recbtn .dot { width: 30px; height: 30px; border-radius: 50%; background: var(--on-red); flex: none; }
+/* everyone in the meeting has to know: said on the Record block itself, no extra height */
+.recbtn .top { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; }
+.recbtn .ask { font-size: 13px; line-height: 16px; font-weight: 700; letter-spacing: 0; white-space: normal; text-align: right; max-width: 60%; }
 
 /* Pause or Resume, and Stop, side by side while recording */
 .pair2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }

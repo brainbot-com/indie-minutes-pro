@@ -1,9 +1,11 @@
 """Settings, read from the environment once per process."""
 import os
 from pathlib import Path
-from urllib.parse import urlsplit
 
 from . import urls
+
+# the Android app's rolling release on GitHub (android/publish-github.sh replaces its file)
+GITHUB_APK = "https://github.com/brainbot-com/indie-minutes-pro/releases/download/android/minutes-pro.apk"
 
 
 class Settings:
@@ -15,18 +17,18 @@ class Settings:
 
         self.data_dir = Path(get("DATA_DIR", "/data"))
         # PUBLIC_URL=auto: whatever address requests come in on (an Indie Box gateway)
-        self._public_url = get("PUBLIC_URL", "https://10.1.9.7:8443").rstrip("/")
+        self._public_url = get("PUBLIC_URL", "auto").rstrip("/")
         self._urls = {k: get(k).rstrip("/") for k in ("FILES_BASE_URL", "APK_URL", "CONNECT_URL", "WEBAPP_URL",
                                                        "BROWSER_URL", "GOOGLE_REDIRECT_URI")}
-        self.box_name = get("BOX_NAME", "aibox1")   # what the apps call this box: "aibox1 · ready"
+        self.box_name = get("BOX_NAME", "Box")      # what the apps call this box: "aibox1 · ready"
         # how phones reach the box, for the connect steps: vpn (aibox1) or lan (an Indie Box at home)
-        self.phone_reach = get("PHONE_REACH", "vpn")
+        self.phone_reach = get("PHONE_REACH", "lan")
         self.display_tz = get("DISPLAY_TZ", "Europe/Berlin")
         # LLM on aibox1's own Ollama. The -ctx65536 tag is the one the company
         # brain keeps loaded; passing other options (num_ctx) would load a
         # second copy of the model.
         self.ollama_url = get("OLLAMA_URL", "http://host.docker.internal:11434").rstrip("/")
-        self.llm_model = get("LLM_MODEL", "qwen3.8:27b-ctx65536")
+        self.llm_model = get("LLM_MODEL", "qwen3.8:27b")
         self.llm_think = get("LLM_THINK", "0") == "1"
         # tokens the model reads at once; 0: what an Indie Box says about it, else 64k
         self.llm_context = int(get("LLM_CONTEXT", "0"))
@@ -35,15 +37,18 @@ class Settings:
         # an Indie Box may offer a remote provider's model under a local-looking name:
         # transcripts would leave the box, so only with LLM_REMOTE_OK=1
         self.llm_remote_ok = get("LLM_REMOTE_OK", "0") == "1"
+        # an Indie Box: summaries only from a model the box lists as its own ("local": true);
+        # no listing, or a model it does not list, holds them (fail closed)
+        self.llm_local_only = get("LLM_LOCAL_ONLY", "0") == "1"
         self.engine = get("ENGINE", "A-iq4")
         self.nemo_url = get("NEMO_URL", "http://engine-nemo:8090").rstrip("/")
-        self.qwen_url = get("QWEN_URL", "http://engine-qwen:8091").rstrip("/")
+        self.qwen_url = get("QWEN_URL", "off").rstrip("/")          # engine B: aibox1 only
         # accent hints for naming speakers (engines/accent, CPU), English meetings only
-        self.accent = get("ACCENT", "1") == "1"
+        self.accent = get("ACCENT", "0") == "1"
         self.accent_url = get("ACCENT_URL", "http://engine-accent:8092").rstrip("/")
         self.chunk_seconds = int(get("CHUNK_SECONDS", "30"))
         self.max_chunk_bytes = int(get("MAX_CHUNK_MB", "64")) * 1024 * 1024
-        self.github_repo = get("GITHUB_REPO", "brainbot-com/indie-recorder-sandbox")
+        self.github_repo = get("GITHUB_REPO", "")
         self.github_token_file = Path(get("GITHUB_TOKEN_FILE", "/secrets/github_token"))
         # agent: approved follow-ups go to the outbox and the Agent Command Center
         # agent (which has GitHub and Drive access) carries them out;
@@ -63,7 +68,7 @@ class Settings:
         # Whether meetings can go to Google Drive here at all: with Google's sign-in set up
         # (GOOGLE_OAUTH_FILE) always; DRIVE=0 hides it where neither that nor an agent with
         # Drive tools carries it out (an Indie Box without a Google client).
-        self.drive = get("DRIVE", "1") == "1"
+        self.drive = get("DRIVE", "0") == "1"
         self.drive_log_doc = get("DRIVE_LOG_DOC", "Meeting log")
         self.drive_folder = get("DRIVE_FOLDER", "Minutes Pro")
         # The Android app's pairing link carries the box's CA, so the app trusts this box only.
@@ -94,6 +99,8 @@ class Settings:
         # for it at install); without one, only tokens sign in.
         self.owner_password = get("OWNER_PASSWORD")
         self.owner_name = get("OWNER_NAME")
+        # who answers privacy questions, shown on /privacy (the operator's own contact)
+        self.privacy_contact = get("PRIVACY_CONTACT")
         self.worker = get("WORKER", "1") == "1"
 
     # -- where people and agents reach this service ------------------------------
@@ -109,11 +116,13 @@ class Settings:
 
     @property
     def apk_url(self):
+        """Where phones get the Android app: APK_URL, else the recorder's own copy (APK_FILE),
+        else the latest release on GitHub."""
         if self._urls["APK_URL"]:
             return self._urls["APK_URL"]
-        if self._public_url == "auto":
+        if self.apk_file.exists():
             return self.public_url + "/indie-recorder.apk"
-        return f"http://{urlsplit(self.public_url).hostname}:8480/indie-recorder.apk"   # Caddy's CA port, aibox1
+        return GITHUB_APK
 
     @property
     def connect_url(self):

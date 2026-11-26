@@ -195,6 +195,7 @@ details.fold > .inner { padding: 0 0 16px; }
   .irm .spkhead { grid-template-columns: 30px minmax(0, 1fr) auto; }
   .irm .spkhead .side { grid-column: 2 / -1; grid-row: 2; font-size: 13px; color: var(--muted); }
 }
+.irm .more .danger { color: var(--red); margin-left: auto; }
 </style>
 <style>
 main { max-width: 780px; margin: 0 auto; padding: 24px 24px 48px; display: flex; flex-direction: column; gap: 26px; }
@@ -353,6 +354,32 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 24px 48px; display: flex;
       <p class="note" style="margin-top: 12px"><span data-t="agentHow"></span> <a href="/agent/" target="_blank" rel="noopener" data-t="agentDocs"></a></p>
       <p class="error" id="agentWebErr" hidden></p>
     </div>
+    <div id="teamBox" hidden>
+      <h2 class="section" data-t="team"></h2>
+      <p class="note" data-t="teamWhat" style="margin: 12px 0"></p>
+      <div class="rows" id="members"></div>
+      <p class="note muted" id="noMembers" data-t="noMembers" style="margin-top: 10px" hidden></p>
+      <div class="rows" style="margin-top: 16px">
+        <label class="row plain setting"><span data-t="memberName"></span><input class="line" id="memberName" maxlength="80"></label>
+      </div>
+      <p style="margin-top: 16px"><button class="btn go" id="inviteBtn" data-t="invite"></button></p>
+      <div class="agentNew" id="inviteNew" hidden>
+        <p class="note red" id="inviteFor"></p>
+        <div class="connect">
+          <div class="qr" id="inviteQr"></div>
+          <div class="typed">
+            <span class="label" data-t="inviteLink"></span>
+            <code id="inviteUrl"></code>
+            <span><button class="textbtn" data-copy="inviteUrl" data-t="copy"></button></span>
+            <span class="note muted" id="inviteValid"></span>
+          </div>
+        </div>
+      </div>
+      <div class="rows" style="margin-top: 16px">
+        <div class="row plain setting"><span id="lShareNew" data-t="shareNew"></span><button class="switch" role="switch" aria-checked="true" id="shareNew" aria-labelledby="lShareNew"></button></div>
+      </div>
+      <p class="error" id="teamErr" hidden></p>
+    </div>
     <div id="storageBox">
       <h2 class="section" data-t="storage"></h2>
       <div class="rows">
@@ -364,7 +391,10 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 24px 48px; display: flex;
       <p class="error" id="gErr" hidden></p>
       <p class="note muted" data-t="storageNote" style="margin-top: 10px"></p>
     </div>
-    <div id="webBox" hidden><a class="btn" href="/logout" data-t="signOut"></a></div>
+    <div id="webBox" hidden>
+      <p><a class="btn" href="/logout" data-t="signOut"></a></p>
+      <p class="note muted" style="margin-top: 16px"><a href="/privacy" target="_blank" rel="noopener" data-t="privacy"></a> · <a href="/about" target="_blank" rel="noopener" data-t="about"></a></p>
+    </div>
   </section>
 
   <article class="view irm" id="detail" hidden></article>
@@ -379,7 +409,9 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 24px 48px; display: flex;
    reach the box, call(op, args) with the ops of the "indie-recorder"
    connector, in which language, what the box is called (box), whether
    meetings can go to Google Drive there (drive) and whether to link to the
-   box's own meeting page (boxLink). */
+   box's own meeting page (boxLink). In a team (an Indie Box): readOnly for a
+   member, who reads what the owner shares; team, the owner's switch that
+   shares a meeting; canDelete and onDeleted, deleting a meeting for good. */
 (function () {
   'use strict';
   const STR = {
@@ -399,6 +431,8 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 24px 48px; display: flex;
         romanian: 'Romanian', slovak: 'Slovak', estonian: 'Estonian', lithuanian: 'Lithuanian', croatian: 'Croatian', slovene: 'Slovene' },
       transcript: 'Transcript', more: 'More', newSummary: 'Write a new summary', openBox: 'Open on {box}',
       tldr: 'Summary', decisions: 'Decisions', actions: 'Action items', questions: 'Open questions',
+      team: 'Team', deleteMeeting: 'Delete meeting', noName: 'No name yet',
+      deleteAsk: 'Delete this meeting for good? Its recording, transcript and summaries go from {box}. Copies in Google Drive stay there.',
     },
     de: {
       today: 'Heute', yesterday: 'Gestern', local: 'Lokal', processing: 'In Arbeit', failed: 'Fehler', uploading: 'Lädt hoch',
@@ -416,12 +450,17 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 24px 48px; display: flex;
         romanian: 'Rumänisch', slovak: 'Slowakisch', estonian: 'Estnisch', lithuanian: 'Litauisch', croatian: 'Kroatisch', slovene: 'Slowenisch' },
       transcript: 'Transkript', more: 'Mehr', newSummary: 'Neue Zusammenfassung schreiben', openBox: 'Auf {box} öffnen',
       tldr: 'Zusammenfassung', decisions: 'Entscheidungen', actions: 'Aufgaben', questions: 'Offene Fragen',
+      team: 'Team', deleteMeeting: 'Meeting löschen', noName: 'Noch ohne Namen',
+      deleteAsk: 'Dieses Meeting endgültig löschen? Aufnahme, Transkript und Zusammenfassungen werden von {box} entfernt. Kopien in Google Drive bleiben dort.',
     },
   };
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  // links that agents report (a Drive folder) only as web addresses: javascript: would run
+  const webUrl = (u) => (/^https?:\/\/[^\s]+$/i.test(String(u || '').trim()) ? String(u).trim() : '');
   const pad = (n) => String(n).padStart(2, '0');
 
-  function create({ lang, call, fail = () => {}, onChange = () => {}, box = () => 'aibox1', drive = () => true, boxLink = true }) {
+  function create({ lang, call, fail = () => {}, onChange = () => {}, box = () => 'aibox1', drive = () => true, boxLink = true,
+                    readOnly = () => false, team = () => false, canDelete = () => false, onDeleted = () => {} }) {
     const L = lang === 'de' ? 'de' : 'en';
     const t = (k) => {
       const v = STR[L][k] !== undefined ? STR[L][k] : STR.en[k];
@@ -538,16 +577,17 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 24px 48px; display: flex;
        applies them everywhere. */
     const accent = (list) => (list || []).filter((a) => a.p >= 0.1)
       .map((a) => `${t('accents')[a.accent] || a.accent} ${Math.round(a.p * 100)}%`).join(' · ');
-    function speakers(cards) {
+    function speakers(cards, ro) {
       return cards.map((c, i) => `<div class="spk">
         <div class="spkhead"><span class="num">${pad(i + 1)}</span><span class="who">${esc(c.label)}</span>
           <span class="side">${c.turns ? esc(t('talk')(c.share, c.turns, length(c.first))) : ''}</span>
           ${c.clip_url ? `<button type="button" class="textbtn play" data-url="${esc(c.clip_url)}">${esc(t('play'))}</button>` : '<span></span>'}</div>
         ${accent(c.accent) ? `<p class="said accent">${esc(t('accentGuess')(accent(c.accent)))}</p>` : ''}
         ${(c.lines || []).map((l) => `<p class="said">"${esc(l)}"</p>`).join('')}
-        ${(c.suggestions || []).map((x) => `<p class="sugg"><button type="button" class="textbtn use" data-label="${esc(c.label)}" data-name="${esc(x.name)}">${esc(t('use')(x.name))}</button>` +
+        ${ro ? '' : (c.suggestions || []).map((x) => `<p class="sugg"><button type="button" class="textbtn use" data-label="${esc(c.label)}" data-name="${esc(x.name)}">${esc(t('use')(x.name))}</button>` +
           `<span class="muted">${esc(t('by')[x.by] || '')}${x.why ? ': ' + esc(x.why) : ''}</span></p>`).join('')}
-        <label class="cell"><span class="label">${esc(t('nameLabel'))}</span><input class="line" data-label="${esc(c.label)}" value="${esc(c.name)}"></label>
+        ${ro ? `<div class="cell"><span class="label">${esc(t('nameLabel'))}</span><span class="v">${esc(c.name || t('noName'))}</span></div>`
+          : `<label class="cell"><span class="label">${esc(t('nameLabel'))}</span><input class="line" data-label="${esc(c.label)}" value="${esc(c.name)}"></label>`}
       </div>`).join('');
     }
 
@@ -572,7 +612,9 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 24px 48px; display: flex;
         ({ label, name, suggestions: [], lines: [], share: 0, turns: 0, first: 0 }));
       const nSpk = Array.isArray(m.speakers) ? m.speakers.length : m.speakers;
       const unnamed = cards.filter((c) => !c.name).length;
-      const withDrive = drive() || m.storage === 'drive';
+      const ro = readOnly();
+      const withDrive = !ro && (drive() || m.storage === 'drive');
+      const withTeam = !ro && team();
       const note = m.storage !== 'drive' ? t('noteLocal') : (m.drive_url ? t('noteDone') : t('noteWaiting'));
       el.innerHTML = `<div class="head"><span class="kicker" id="dWhen">${esc(d.toLocaleDateString(L, { day: 'numeric', month: 'short', year: 'numeric' }))} · ${esc(time(d))}</span>` +
         `<h1 class="h2" id="dTitle">${esc(m.title || m.id)}</h1></div>
@@ -581,19 +623,20 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 24px 48px; display: flex;
             <div class="cell"><span class="label">${esc(t('length'))}</span><span class="v tnum" id="dLen">${esc(length(m.duration_s))}</span></div>
             <div class="cell"><span class="label">${esc(t('speakers'))}</span><span class="v" id="dSpkN">${esc(nSpk ? String(nSpk) : t('notYet'))}</span></div>
             ${withDrive ? `<div class="cell"><span class="label" id="dLDrive">${esc(t('drive'))}</span><button type="button" class="switch" role="switch" aria-checked="${m.storage === 'drive'}" id="dDrive" aria-labelledby="dLDrive"></button></div>` : ''}
+            ${withTeam ? `<div class="cell"><span class="label" id="dLTeam">${esc(t('team'))}</span><button type="button" class="switch" role="switch" aria-checked="${!!m.shared}" id="dTeam" aria-labelledby="dLTeam"></button></div>` : ''}
           </div>
-          <p class="note" style="margin-top: 12px"><span id="dNote">${esc(note)}</span> ${m.drive_url ? `<a id="dLink" target="_blank" rel="noopener" href="${esc(m.drive_url)}">${esc(t('openFolder'))}</a>` : ''}</p>
+          <p class="note" style="margin-top: 12px"><span id="dNote">${esc(note)}</span> ${webUrl(m.drive_url) ? `<a id="dLink" target="_blank" rel="noopener" href="${esc(webUrl(m.drive_url))}">${esc(t('openFolder'))}</a>` : ''}</p>
         </div>
         <div class="sum" id="dSum">${summary(m.summary_md)}</div>
         <div class="folds">
           <details class="fold" id="dSpkBox"${cards.length ? '' : ' hidden'}>
             <summary>${esc(t('speakerNames') + (unnamed ? t('unnamed')(unnamed) : ''))}</summary>
-            <div class="inner"><div class="names" id="dSpk">${speakers(cards)}</div><button type="button" class="btn" id="dSave">${esc(t('saveNames'))}</button></div>
+            <div class="inner"><div class="names" id="dSpk">${speakers(cards, ro)}</div>${ro ? '' : `<button type="button" class="btn" id="dSave">${esc(t('saveNames'))}</button>`}</div>
           </details>
           <details class="fold" id="dTrBox"><summary>${esc(t('transcript'))}</summary><div class="inner"><div class="tr" id="dTr"></div></div></details>
-          <details class="fold"><summary>${esc(t('more'))}</summary>
-            <div class="inner more"><button type="button" class="btn" id="dRedo">${esc(t('newSummary'))}</button>${m.url && boxLink ? `<a id="dBox" target="_blank" rel="noopener" href="${esc(m.url)}">${esc(t('openBox'))}</a>` : ''}</div>
-          </details>
+          ${ro ? '' : `<details class="fold"><summary>${esc(t('more'))}</summary>
+            <div class="inner more"><button type="button" class="btn" id="dRedo">${esc(t('newSummary'))}</button>${m.url && boxLink ? `<a id="dBox" target="_blank" rel="noopener" href="${esc(m.url)}">${esc(t('openBox'))}</a>` : ''}${canDelete() ? `<button type="button" class="textbtn danger" id="dDelete">${esc(t('deleteMeeting'))}</button>` : ''}</div>
+          </details>`}
         </div>`;
       const $ = (s) => el.querySelector(s);
       if ($('#dDrive')) $('#dDrive').addEventListener('click', async () => {
@@ -604,6 +647,16 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 24px 48px; display: flex;
           onChange(m.id);
           await meeting(el, m.id, true);
         } catch (e) { $('#dDrive').setAttribute('aria-checked', String(!drive)); fail(e); }
+      });
+      if ($('#dTeam')) $('#dTeam').addEventListener('click', async () => {
+        const shared = $('#dTeam').getAttribute('aria-checked') !== 'true';
+        $('#dTeam').setAttribute('aria-checked', String(shared));
+        try { await call('share_meeting', { meeting_id: m.id, shared }); m.shared = shared ? 1 : 0; onChange(m.id); }
+        catch (e) { $('#dTeam').setAttribute('aria-checked', String(!shared)); fail(e); }
+      });
+      if ($('#dDelete')) $('#dDelete').addEventListener('click', async () => {
+        if (!confirm(t('deleteAsk'))) return;
+        try { stop(); await call('delete_meeting', { meeting_id: m.id }); current = null; onDeleted(m.id); } catch (e) { fail(e); }
       });
       $('#dSpk').querySelectorAll('.play').forEach((b) => b.addEventListener('click', () => {
         const again = playing === b;
@@ -616,7 +669,7 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 24px 48px; display: flex;
         const input = [...$('#dSpk').querySelectorAll('input')].find((x) => x.dataset.label === b.dataset.label);
         if (input) { input.value = b.dataset.name; input.focus(); }
       }));
-      $('#dSave').addEventListener('click', async () => {
+      if ($('#dSave')) $('#dSave').addEventListener('click', async () => {
         const names = {};
         $('#dSpk').querySelectorAll('input').forEach((i) => { names[i.dataset.label] = i.value; });
         try {
@@ -632,7 +685,7 @@ main { max-width: 780px; margin: 0 auto; padding: 24px 24px 48px; display: flex;
         catch (e) { fail(e); }
       };
       $('#dTrBox').addEventListener('toggle', loadTranscript);
-      $('#dRedo').addEventListener('click', async () => {
+      if ($('#dRedo')) $('#dRedo').addEventListener('click', async () => {
         try { await call('new_summary', { meeting_id: m.id }); $('#dNote').textContent = t('queued'); } catch (e) { fail(e); }
       });
       if (was) {
@@ -657,6 +710,9 @@ const LANG = document.documentElement.lang === 'de' ? 'de' : 'en';
    talks to /api/v1/web for the person signed in. */
 const WEB = !!(window.IndieApp && window.IndieApp.web);
 let BOX = WEB ? location.hostname : 'aibox1', REACH = 'vpn', DRIVE = true;   // the status op says
+// In a browser on the box: the owner, or a member of the owner's team, who reads what is shared
+let ROLE = null, OWNER = null, TEAM_N = 0;
+const pct = (w) => { const m = /(\d+)%/.exec(String(w || '')); return m ? ` · ${m[1]} %` : ''; };
 const STR = {
   en: {
     brand: 'Minutes Pro', title: 'Meetings', back: 'Back', settings: 'Settings', private: 'Only you see your meetings',
@@ -678,7 +734,7 @@ const STR = {
     setupText: 'This app needs the meeting recorder on {box}, and it is not connected here yet:',
     setup1: 'An admin adds the "indie-recorder" connector (indie-minutes-pro/integrations/indie-chat).',
     setup2: 'Or add your own MCP server for the recorder in Settings.',
-    status: (s) => (s.box || BOX) + ' · ' + (s.worker ? (s.current_job ? 'Working' : s.engine_wait ? 'Getting ready' : 'Ready') : 'Offline'), forDrive: (n) => ` · ${n} for Drive`,
+    status: (s) => (s.box || BOX) + ' · ' + (s.worker ? (s.current_job ? 'Working' : s.engine_wait ? 'Getting ready' + pct(s.engine_wait) : 'Ready') : 'Offline'), forDrive: (n) => ` · ${n} for Drive`,
     you: 'You', yourName: 'Your name', yourNameNote: 'Your phones show it, so you can see whose account they record into.',
     phones: 'Phones', noPhones: 'No phone connected yet.', connectPhone: 'Connect a phone', remove: 'Remove',
     lastUsed: (d) => `Last used ${d}`, unused: 'Not used yet',
@@ -705,6 +761,14 @@ const STR = {
     gFinish: 'Finish the sign-in in the new tab.',
     gDisconnectAsk: 'Disconnect Google Drive? Meetings set to Drive then wait until you connect again.',
     step1lan: 'Put the phone on the same network as {box}.',
+    team: 'Team', teamWhat: 'People in your team read the meetings you share with them: summaries, speakers and transcripts. Recording and managing stay with you.',
+    noMembers: 'Nobody in the team yet.', memberName: 'Name of the person', invite: 'Invite', inviteLink: 'Link',
+    inviteFor: (n) => `Send this link to ${n}: it works once, to choose a password.`, inviteValid: (d) => `Valid until ${d}.`,
+    newLink: 'New link', invited: 'Invited', joined: 'Joined', seen: (d) => `Last seen ${d}`,
+    removeAsk: (n) => `Remove ${n} from the team? They can no longer sign in.`,
+    shareNew: 'Share new meetings with the team', noShared: 'No meetings are shared with you yet.',
+    sharedBy: (o) => (o ? `Shared by ${o}` : 'Shared with your team'), privateTeam: 'Only you and your team see them',
+    memberKick: (o) => (o ? `In ${o}'s team` : 'In the team'), privacy: 'Privacy', about: 'About',
     httpNote: 'Phones record only over HTTPS. On an Indie Box: Admin, HTTPS, then Internal certificate (install the box\'s certificate authority on the phone once) or Automatic HTTPS.',
     signOut: 'Sign out', copy: 'Copy', copied: 'Copied',
     agentWebWhat: 'Your own agent can write better summaries with what it knows about your work, and suggest who the speakers are, once an hour. Any agent with MCP will do: Claude, OpenClaw, Hermes. Give each agent a token of its own.',
@@ -734,7 +798,7 @@ const STR = {
     setupText: 'Diese App braucht den Meeting-Recorder auf {box}, der hier noch nicht verbunden ist:',
     setup1: 'Ein Admin richtet den Connector "indie-recorder" ein (indie-minutes-pro/integrations/indie-chat).',
     setup2: 'Oder fügen Sie in den Einstellungen einen eigenen MCP-Server für den Recorder hinzu.',
-    status: (s) => (s.box || BOX) + ' · ' + (s.worker ? (s.current_job ? 'Arbeitet' : s.engine_wait ? 'Wird vorbereitet' : 'Bereit') : 'Nicht erreichbar'), forDrive: (n) => ` · ${n} für Drive`,
+    status: (s) => (s.box || BOX) + ' · ' + (s.worker ? (s.current_job ? 'Arbeitet' : s.engine_wait ? 'Wird vorbereitet' + pct(s.engine_wait) : 'Bereit') : 'Nicht erreichbar'), forDrive: (n) => ` · ${n} für Drive`,
     you: 'Sie', yourName: 'Ihr Name', yourNameNote: 'Ihre Telefone zeigen ihn an, damit Sie sehen, in welches Konto sie aufnehmen.',
     phones: 'Telefone', noPhones: 'Noch kein Telefon verbunden.', connectPhone: 'Telefon verbinden', remove: 'Entfernen',
     lastUsed: (d) => `Zuletzt ${d}`, unused: 'Noch nicht benutzt',
@@ -761,6 +825,14 @@ const STR = {
     gFinish: 'Melden Sie sich im neuen Tab bei Google an.',
     gDisconnectAsk: 'Google Drive trennen? Meetings für Drive warten dann, bis Sie wieder verbinden.',
     step1lan: 'Das Telefon ins selbe Netz wie {box} bringen.',
+    team: 'Team', teamWhat: 'Ihr Team liest die Meetings, die Sie mit ihm teilen: Zusammenfassungen, Sprecher und Transkripte. Aufnehmen und Verwalten bleibt bei Ihnen.',
+    noMembers: 'Noch niemand im Team.', memberName: 'Name der Person', invite: 'Einladen', inviteLink: 'Link',
+    inviteFor: (n) => `Schicken Sie ${n} diesen Link: er funktioniert einmal, zum Wählen eines Passworts.`, inviteValid: (d) => `Gültig bis ${d}.`,
+    newLink: 'Neuer Link', invited: 'Eingeladen', joined: 'Dabei', seen: (d) => `Zuletzt ${d}`,
+    removeAsk: (n) => `${n} aus dem Team entfernen? Die Person kann sich dann nicht mehr anmelden.`,
+    shareNew: 'Neue Meetings mit dem Team teilen', noShared: 'Noch keine Meetings mit Ihnen geteilt.',
+    sharedBy: (o) => (o ? `Geteilt von ${o}` : 'Mit Ihrem Team geteilt'), privateTeam: 'Nur Sie und Ihr Team sehen sie',
+    memberKick: (o) => (o ? `Im Team von ${o}` : 'Im Team'), privacy: 'Datenschutz', about: 'Über',
     httpNote: 'Telefone nehmen nur über HTTPS auf. Auf einer Indie Box: Admin, HTTPS, dann Internes Zertifikat (die Zertifizierungsstelle der Box einmal auf dem Telefon installieren) oder Automatisches HTTPS.',
     signOut: 'Abmelden', copy: 'Kopieren', copied: 'Kopiert',
     agentWebWhat: 'Ihr eigener Agent kann mit dem, was er über Ihre Arbeit weiß, bessere Zusammenfassungen schreiben und vorschlagen, wer die Sprecher sind, einmal pro Stunde. Jeder Agent mit MCP geht: Claude, OpenClaw, Hermes. Geben Sie jedem Agenten ein eigenes Token.',
@@ -834,13 +906,20 @@ const on = (el) => el.getAttribute('aria-checked') === 'true';
 const setOn = (el, v) => el.setAttribute('aria-checked', v ? 'true' : 'false');
 
 /* The meeting views every Minutes Pro app shares (recorder/static/meetings.js). */
-const M = IRMeetings.create({ lang: LANG, call, fail, box: () => BOX, drive: () => DRIVE, boxLink: !WEB });
+const M = IRMeetings.create({ lang: LANG, call, fail, box: () => BOX, drive: () => DRIVE, boxLink: !WEB,
+  readOnly: () => ROLE === 'member', team: () => WEB && ROLE === 'owner' && TEAM_N > 0,
+  canDelete: () => ROLE !== 'member' && (WEB || VIA === 'connector'),
+  onDeleted: () => { current = null; show('home'); load(); } });
 const time = M.time;
 
 function renderHome() {
   $('count').textContent = meetings.length ? t('countN')(meetings.length) : '';
   // on a new account the first step below has the same button: not twice
-  $('heroConnect').hidden = !meetings.length && !(phoneList && phoneList[0]);
+  $('heroConnect').hidden = ROLE === 'member' || (!meetings.length && !(phoneList && phoneList[0]));
+  if (ROLE === 'member' && !meetings.length) {
+    $('list').innerHTML = `<p class="note">${esc(t('noShared'))}</p>`;
+    return;
+  }
   if (!meetings.length) {
     // the first steps, with the phone step done once a phone is connected
     const phone = phoneList && phoneList[0];
@@ -862,15 +941,27 @@ async function openMeeting(id, keepOpen) {
   } catch (e) { fail(e); }
 }
 
+function applyRole() {
+  // a member reads: no phones, no agents, no team, no storage; the owner's team shows on the home's red block
+  const member = ROLE === 'member';
+  document.querySelector('.hero .kick').textContent = member ? t('sharedBy')(OWNER) : TEAM_N ? t('privateTeam') : t('private');
+  document.querySelector('#settings .kicker').textContent = member ? t('memberKick')(OWNER) : t('settingsKick');
+}
+
 async function load() {
   try {
+    if (WEB && ROLE === null) {
+      const me = await call('whoami');
+      ROLE = me.role; OWNER = me.owner || null; TEAM_N = me.team_members || 0;
+      applyRole();
+    }
     const [st, list] = await Promise.all([call('status'), call('list_meetings')]);
     $('error').hidden = true;
     if (view === 'setup') show('home');
     settings = st.settings; meetings = list || [];
     const was = [BOX, REACH];
     BOX = st.box || BOX; REACH = st.reach || REACH; DRIVE = st.drive !== false;
-    if (was[0] !== BOX || was[1] !== REACH) fillTexts();
+    if (was[0] !== BOX || was[1] !== REACH) { fillTexts(); if (ROLE) applyRole(); }
     $('storageBox').hidden = !DRIVE;
     if (!meetings.length && VIA === 'connector' && phoneList === null) phoneList = await call('phones').catch(() => []);
     $('status').textContent = t('status')(st);
@@ -878,7 +969,7 @@ async function load() {
     renderGoogle(st.google);
     // Drive is the recorder's once the person connects it; without a sign-in on the box it is the agent's
     const g = st.google || {};
-    $('nudge').hidden = !st.pending_drive || VIA !== 'connector' || !!g.connected;
+    $('nudge').hidden = !st.pending_drive || VIA !== 'connector' || !!g.connected || ROLE === 'member';
     $('nudgeText').textContent = st.pending_drive ? (g.available ? t('nudgeGoogle') : t('nudge'))(st.pending_drive) : '';
     $('nudgeBtn').textContent = g.available ? t('gConnect') : t('nudgeBtn');
     $('status').classList.toggle('red', !st.worker);
@@ -908,7 +999,17 @@ function switchTo(el, apply) {
 
 async function loadPhones() {
   if (VIA === 'mcp') { $('phonesBox').hidden = true; $('youBox').hidden = true; $('agentBox').hidden = true; return; }   // they need the connector (it knows the person)
-  if (WEB) { $('agentBox').hidden = true; $('agentWeb').hidden = false; $('webBox').hidden = false; loadAgents(); }
+  if (WEB) {
+    const member = ROLE === 'member';
+    $('agentBox').hidden = true; $('webBox').hidden = false;
+    for (const id of ['agentWeb', 'teamBox']) $(id).hidden = member;
+    if (member) { $('phonesBox').hidden = true; $('storageBox').hidden = true; }
+    else { loadAgents(); loadTeam(); }
+    if (member) {
+      try { const me = await call('whoami'); if (document.activeElement !== $('myName')) $('myName').value = me.name || ''; } catch (e) { fail(e); }
+      return;
+    }
+  }
   try {
     const me = await call('whoami');
     if (document.activeElement !== $('myName')) $('myName').value = me.name || '';
@@ -924,6 +1025,50 @@ async function loadPhones() {
     }));
   } catch (e) { fail(e); }
 }
+
+/* The owner's team (web mode): people read the meetings the owner shares. Each joins
+   with a link, once, and chooses a password; a new link resets it. */
+function inviteShown(r, name) {
+  $('inviteFor').textContent = t('inviteFor')(name);
+  $('inviteQr').innerHTML = r.qr;                          // SVG made by the recorder
+  $('inviteUrl').textContent = r.url;
+  $('inviteValid').textContent = t('inviteValid')(new Date(r.expires_at).toLocaleDateString(LANG));
+  $('inviteNew').hidden = false;
+}
+function renderTeam(v) {
+  TEAM_N = (v.members || []).length;
+  applyRole();
+  setOn($('shareNew'), !!v.share_new);
+  $('noMembers').hidden = TEAM_N > 0;
+  $('members').innerHTML = (v.members || []).map((m, i) => {
+    const state = !m.joined ? t('invited') : m.last_seen_at ? t('seen')(new Date(m.last_seen_at).toLocaleDateString(LANG)) : t('joined');
+    return `<div class="row phone"><span class="num">${pad(i + 1)}</span><span>${esc(m.name)}</span><span class="side">${esc(state)}</span>` +
+      `<span><button class="textbtn" data-act="reset" data-id="${esc(m.id)}" data-name="${esc(m.name)}">${esc(t('newLink'))}</button> ` +
+      `<button class="textbtn" data-act="remove" data-id="${esc(m.id)}" data-name="${esc(m.name)}">${esc(t('remove'))}</button></span></div>`;
+  }).join('');
+  $('members').querySelectorAll('button').forEach((b) => b.addEventListener('click', async () => {
+    $('teamErr').hidden = true;
+    try {
+      if (b.dataset.act === 'reset') { const r = await call('team_reset', { id: b.dataset.id }); inviteShown(r, b.dataset.name); return; }
+      if (!confirm(t('removeAsk')(b.dataset.name))) return;
+      renderTeam(await call('team_remove', { id: b.dataset.id }));
+    } catch (e) { $('teamErr').textContent = e.message || String(e); $('teamErr').hidden = false; }
+  }));
+}
+async function loadTeam() {
+  try { renderTeam(await call('team')); } catch (e) { fail(e); }
+}
+$('inviteBtn').addEventListener('click', async () => {
+  $('teamErr').hidden = true;
+  const name = $('memberName').value.trim();
+  try {
+    const r = await call('team_invite', { name });
+    $('memberName').value = '';
+    inviteShown(r, r.member.name);
+    await loadTeam();
+  } catch (e) { $('teamErr').textContent = e.message || String(e); $('teamErr').hidden = false; }
+});
+switchTo($('shareNew'), async (v) => renderTeam(await call('team_settings', { share_new: v })));
 
 /* The person's own agents (web mode): each gets a token for the MCP server. */
 function renderAgents(list) {

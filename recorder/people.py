@@ -5,23 +5,36 @@ simulator, tests). The service token brainbot:agent command calls with stands
 for whoever its X-Indie-User header names, and only a token marked
 trusts_identity may do that. A meeting belongs to the person whose phone
 recorded it, and everyone sees only their own; admin tokens see everything; a
-token without a person sees the meetings without one."""
+token without a person sees the meetings without one.
+
+On an Indie Box the owner may invite a team: members sign in with their own
+password and read the meetings the owner shares with the team; recording and
+managing stays with the owner."""
 from .util import new_id, now_iso
 
 
 class Who:
-    def __init__(self, token, user_id=None, admin=False, caller="user"):
+    def __init__(self, token, user_id=None, admin=False, caller="user", team_owner=None):
         self.token = token
         self.user_id = user_id
         self.admin = admin
         self.caller = caller          # user, agent or service (brainbot:agent command's X-Indie-Caller)
+        self.team_owner = team_owner  # a team member: whose shared meetings they read
+
+    @property
+    def member(self):
+        return self.team_owner is not None
 
     @property
     def name(self):
         return self.token["name"]
 
     def sees(self, meeting):
-        return bool(meeting) and (self.admin or (meeting.get("owner_id") or None) == self.user_id)
+        if not meeting:
+            return False
+        if self.member:
+            return bool(meeting.get("shared")) and meeting.get("owner_id") == self.team_owner
+        return self.admin or (meeting.get("owner_id") or None) == self.user_id
 
 
 def resolve(db, token, headers):
@@ -37,7 +50,7 @@ def resolve(db, token, headers):
             return None
         caller = (headers.get("x-indie-caller") or "user").strip().lower()
         return Who(token, person_for(db, ext)["id"], caller=caller if caller in ("user", "agent", "service") else "user")
-    return Who(token, token.get("user_id"))
+    return Who(token, token.get("user_id"), team_owner=token.get("team_owner"))
 
 
 def person_for(db, ext_id):

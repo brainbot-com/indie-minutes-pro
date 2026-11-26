@@ -22,7 +22,7 @@
       <button class="switch" role="switch" aria-checked="{{ 'true' if m.storage == 'drive' else 'false' }}" aria-labelledby="lDrive"></button>
     </form>
   </div>
-  <p class="note" style="margin-top: 12px">{% if m.storage != 'drive' %}Stays on this box.{% elif m.drive_url %}Stored in Drive. <a href="{{ m.drive_url }}">Open folder</a>{% else %}Waiting for the Drive upload.{% endif %}</p>
+  <p class="note" style="margin-top: 12px">{% if m.storage != 'drive' %}Stays on this box.{% elif m.drive_url|weburl %}Stored in Drive. <a href="{{ m.drive_url|weburl }}">Open folder</a>{% else %}Waiting for the Drive upload.{% endif %}</p>
 </div>
 
 {% if has_audio %}<audio id="player" controls preload="none" src="/m/{{ m.id }}/audio"></audio>{% endif %}

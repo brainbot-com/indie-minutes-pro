@@ -1,6 +1,6 @@
 // App shell cache so the recorder opens without a network. Uploads are not
 // handled here: the page keeps unsent chunks in IndexedDB and retries.
-const CACHE = 'minutes-pro-v7';
+const CACHE = 'minutes-pro-v9';
 // The app lives at /app/ on the box or /indie-recorder/app/ behind brain-tls: paths from its scope.
 const SCOPE = new URL(self.registration.scope).pathname;
 const SHARED = new Set(['static/swiss.css', 'static/Inter.woff2', 'static/meetings.css', 'static/meetings.js'].map(p => SCOPE.replace(/app\/$/, '') + p));

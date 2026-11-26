@@ -216,7 +216,7 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
                 rows = [m for m in rows if m["state"] == args["state"]]
             return [{k: m[k] for k in ("id", "title", "started_at", "duration_s", "language", "state", "speakers",
                                        "summary_version", "summary_author", "updated_at", "storage", "drive_url",
-                                       "tldr")} | {"url": store.link(m["id"])}
+                                       "tldr", "shared")} | {"url": store.link(m["id"])}
                     for m in rows]
         if name == "status":
             rows = store.list(limit=10000, who=who)
@@ -226,9 +226,11 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
             box = outbox(who)
             return {"box": s.box_name, "reach": s.phone_reach, "drive": s.drive or followup.google.available(),
                     "worker": bool(worker and worker.thread and worker.thread.is_alive()),
-                    "current_job": worker.current if worker else None,
+                    # the caller's own jobs only: other people's meeting ids are theirs
+                    "current_job": worker.current if worker and worker.current
+                    and visible(who, worker.current["meeting_id"]) else None,
                     "engine_wait": worker.waiting if worker else None,
-                    "queued_jobs": len(worker.queue()) if worker else None,
+                    "queued_jobs": sum(1 for j in worker.queue() if visible(who, j["meeting_id"])) if worker else None,
                     "engine": s.engine, "llm": s.llm_model, "engines": engines_health() if engines_health else {},
                     "meetings": len(rows), "by_state": states,
                     "in_drive": sum(1 for m in rows if m.get("drive_url")),
@@ -240,6 +242,8 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
         if name == "get_settings":
             return store.settings(who.user_id)
         if name == "update_settings":
+            if args.get("drive_include_audio") and author(who) == "agent":
+                raise ToolError("only the person decides whether recordings go to Drive")
             try:
                 return store.update_settings(**{k: args[k] for k in ("storage_default", "drive_folder",
                                                                        "drive_include_audio") if k in args},
@@ -324,7 +328,10 @@ def mount_mcp(app, s, db, store, followup, token_row, worker=None, engines_healt
             version = store.add_summary(mid, summary, author=f"agent ({who.name})")
             return {"meeting_id": mid, "version": version, "url": store.link(mid)}
         if name == "sync_issues":
-            return followup.sync_issues(args.get("repo", ""), args.get("issues") or [])
+            try:
+                return followup.sync_issues(str(args.get("repo") or ""), args.get("issues") or [])
+            except ValueError as e:
+                raise ToolError(str(e))
         if name == "list_outbox":
             return [{"proposal_id": p["id"], "kind": p["kind"], "meeting_id": p["meeting_id"],
                      "payload": p["payload"]} for p in outbox(who)]

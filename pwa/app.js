@@ -14,13 +14,14 @@ const STR = {
     pair2: "Scan the code with this phone's camera and choose Record in the browser.",
     pair3: 'No camera at hand? Type the code here.',
     pairLabel: 'Code', connect: 'Connect', pairUsed: 'This code is used or expired. Make a new one in Minutes Pro.',
+    switchAsk: who => `This phone is connected already. Record for ${who || 'someone else'} from now on instead?`,
     pairSlow: 'Too many wrong codes. Wait a few minutes.',
     pairNote: 'This page talks only to the box. Recordings go to this box and nowhere else.',
     pairBad: 'The box did not accept this token.', pairNoBox: 'Cannot reach the box. Is this phone on its network (or the VPN)?',
     pairAgain: "The box no longer accepts this phone's token. Connect it again.",
     newRecording: 'New recording', recording: 'Recording', paused: 'Paused', title: 'Title', optional: 'Optional', untitled: 'Recording',
     box: 'Box', storage: 'Storage', drive: 'Google Drive', local: 'On the box', mic: 'Microphone', micOn: 'On', micOff: 'Off while paused',
-    forWhom: 'Recording for', forShort: 'For', phone: 'Phone', record: 'Record', pause: 'Pause', resume: 'Resume', stop: 'Stop',
+    forWhom: 'Recording for', forShort: 'For', phone: 'Phone', record: 'Record', askFirst: 'Tell everyone first', consentAsk: 'Before you record: tell everyone in the meeting that you are recording, and record only if they all agree. In Germany, recording people without their consent is a crime (§ 201 StGB). Asked once on this phone.', privacy: 'Privacy and consent', pause: 'Pause', resume: 'Resume', stop: 'Stop',
     pausedNote: 'Paused. The microphone is off; nothing is recorded until you resume.',
     recordings: 'Recordings', onPhone: 'On this phone', noRecs: 'Nothing recorded yet.',
     meetings: 'Meetings', private: 'Only you see your meetings', noMeetings: 'No meetings yet.',
@@ -45,13 +46,14 @@ const STR = {
     pair2: 'Scannen Sie den Code mit der Kamera dieses Telefons und wählen Sie Im Browser aufnehmen.',
     pair3: 'Keine Kamera zur Hand? Geben Sie den Code hier ein.',
     pairLabel: 'Code', connect: 'Verbinden', pairUsed: 'Dieser Code ist benutzt oder abgelaufen. Erstellen Sie in Minutes Pro einen neuen.',
+    switchAsk: who => `Dieses Telefon ist schon verbunden. Ab jetzt stattdessen für ${who || 'jemand anderen'} aufnehmen?`,
     pairSlow: 'Zu viele falsche Codes. Bitte einige Minuten warten.',
     pairNote: 'Diese Seite spricht nur mit der Box. Aufnahmen gehen an diese Box und nirgendwo sonst hin.',
     pairBad: 'Die Box hat dieses Token nicht angenommen.', pairNoBox: 'Die Box ist nicht erreichbar. Ist das Telefon in ihrem Netz (oder im VPN)?',
     pairAgain: 'Die Box nimmt das Token dieses Telefons nicht mehr an. Bitte neu verbinden.',
     newRecording: 'Neue Aufnahme', recording: 'Aufnahme läuft', paused: 'Pausiert', title: 'Titel', optional: 'Optional', untitled: 'Aufnahme',
     box: 'Box', storage: 'Ablage', drive: 'Google Drive', local: 'Auf der Box', mic: 'Mikrofon', micOn: 'An', micOff: 'Aus, solange pausiert',
-    forWhom: 'Aufnahme für', forShort: 'Für', phone: 'Telefon', record: 'Aufnehmen', pause: 'Pause', resume: 'Weiter', stop: 'Stopp',
+    forWhom: 'Aufnahme für', forShort: 'Für', phone: 'Telefon', record: 'Aufnehmen', askFirst: 'Erst allen Bescheid sagen', consentAsk: 'Vor der Aufnahme: Sagen Sie allen im Meeting, dass Sie aufnehmen, und nehmen Sie nur auf, wenn alle einverstanden sind. Menschen ohne ihre Einwilligung aufzunehmen ist in Deutschland strafbar (§ 201 StGB). Diese Frage kommt einmal auf diesem Telefon.', privacy: 'Datenschutz und Einwilligung', pause: 'Pause', resume: 'Weiter', stop: 'Stopp',
     pausedNote: 'Pausiert. Das Mikrofon ist aus; bis Sie fortsetzen, wird nichts aufgenommen.',
     recordings: 'Aufnahmen', onPhone: 'Auf diesem Telefon', noRecs: 'Noch nichts aufgenommen.',
     meetings: 'Meetings', private: 'Ihre Meetings sehen nur Sie', noMeetings: 'Noch keine Meetings.',
@@ -632,6 +634,17 @@ async function redeem(code) {
 
 const connect = text => (codeFrom(text) ? redeem(codeFrom(text)) : pair(tokenFrom(text)));
 
+// A link for another connection while this phone has one: ask first, naming whom it would record for
+// (someone could send a link to their own account). A code that is used or expired fails as usual.
+async function switchOk(link) {
+  const code = codeFrom(link);
+  const r = await (code ? fetch(at('/api/v1/pair/' + code), { cache: 'no-store' })
+    : fetch(at('/api/v1/me'), { headers: { Authorization: 'Bearer ' + tokenFrom(link) } })).catch(() => null);
+  if (!r || !r.ok) return true;
+  const j = await r.json().catch(() => ({}));
+  return confirm(t('switchAsk')(j.person || ''));
+}
+
 async function pair(tok) {
   const r = await fetch(at('/api/v1/me'), { headers: { Authorization: 'Bearer ' + tok } }).catch(() => null);
   if (!r || !r.ok) { show('pair', r ? t('pairBad') : t('pairNoBox')); return false; }
@@ -646,8 +659,16 @@ function wire() {
   if (wired) return;
   wired = true;
   $('rec').addEventListener('click', async () => {
+    // Everyone in the meeting has to know and agree (§ 201 StGB, GDPR): asked once on this phone
+    let ok = false;
+    try { ok = localStorage.getItem('ir_consent') === '1'; } catch (e) { /* private mode: ask */ }
+    if (!ok) {
+      if (!confirm(t('consentAsk'))) return;
+      try { localStorage.setItem('ir_consent', '1'); } catch (e) { /* private mode */ }
+    }
     try { await start(); } catch (e) { warn(t('startFail')(e.message)); stop(); }
   });
+  $('privacyLink').href = at('/privacy');
   $('pause').addEventListener('click', () => (paused ? resume() : pause()));
   $('stop').addEventListener('click', stop);
   $('driveBtn').addEventListener('click', () => { setOn($('drive'), !on($('drive'))); storageLabel(); });
@@ -700,7 +721,7 @@ async function boot() {
   if (location.hash.startsWith('#pair=') || location.hash.startsWith('#code=')) {
     const link = location.hash;
     history.replaceState(null, '', location.pathname);
-    await connect(link);
+    if (!token() || await switchOk(link)) await connect(link);
   }
   $('server').textContent = location.host;
   checkBox();

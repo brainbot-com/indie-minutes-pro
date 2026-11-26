@@ -67,16 +67,22 @@ services:
       indiebox.app.var.INDIE_MINUTES_PRO_MODEL.label: "Model for summaries"
       indiebox.app.var.INDIE_MINUTES_PRO_MODEL.description: "Leave empty to follow the box's default model (Admin > AI > Model connections). Only a model of this box is used: one of a remote provider gets no transcript."
       indiebox.app.var.INDIE_MINUTES_PRO_MODEL.required: "false"
+      indiebox.app.var.INDIE_MINUTES_PRO_PRIVACY_CONTACT.label: "Contact for privacy questions"
+      indiebox.app.var.INDIE_MINUTES_PRO_PRIVACY_CONTACT.description: "Shown on the app's privacy page, for people you record: a name and an email address, for example."
+      indiebox.app.var.INDIE_MINUTES_PRO_PRIVACY_CONTACT.required: "false"
     environment:
       # ${VAR:?}: without the install form's values the app file does not resolve,
       # so it cannot start without its key and store meetings it cannot read later
       OWNER_PASSWORD: ${INDIE_MINUTES_PRO_PASSWORD:?set the password in the install form}
       OWNER_NAME: ${INDIE_MINUTES_PRO_NAME:-}
+      PRIVACY_CONTACT: ${INDIE_MINUTES_PRO_PRIVACY_CONTACT:-}
       DATA_KEY: ${INDIE_MINUTES_PRO_DATA_KEY:?set the encryption key in the install form}
       # links follow whatever address and scheme the box's gateway serves
       PUBLIC_URL: auto
       # only the box's own containers reach this one, the gateway among them
       FORWARDED_ALLOW_IPS: "*"
+      # transcripts go only to a model the box lists as its own
+      LLM_LOCAL_ONLY: "1"
       BOX_NAME: ${INDIEBOX_INSTALL_HOSTNAME:-Indie Box}
       PHONE_REACH: lan
       # the box's own models, on the shared llm network

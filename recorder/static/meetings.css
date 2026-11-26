@@ -34,3 +34,4 @@
   .irm .spkhead { grid-template-columns: 30px minmax(0, 1fr) auto; }
   .irm .spkhead .side { grid-column: 2 / -1; grid-row: 2; font-size: 13px; color: var(--muted); }
 }
+.irm .more .danger { color: var(--red); margin-left: auto; }

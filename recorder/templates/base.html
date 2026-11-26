@@ -1,13 +1,16 @@
+{#- root "" makes the links relative: the public pages (privacy, about) also work behind
+   a proxy that serves the recorder under a path, as brain-tls does under /indie-recorder/ -#}
+{%- set root = root if root is defined else '/' -%}
 <!doctype html>
-<html lang="en">
+<html lang="{{ lang or 'en' }}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Minutes Pro{% endblock %}</title>
-<link rel="preload" href="/static/Inter.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/static/swiss.css">
-<link rel="stylesheet" href="/static/style.css">
-<link rel="icon" href="/favicon.ico">
+<link rel="preload" href="{{ root }}static/Inter.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="{{ root }}static/swiss.css">
+<link rel="stylesheet" href="{{ root }}static/style.css">
+<link rel="icon" href="{{ root }}favicon.ico">
 {% block head %}{% endblock %}
 </head>
 <body>
@@ -23,6 +26,6 @@
 <main>
 {% block main %}{% endblock %}
 </main>
-<footer>Minutes Pro {{ version }} · <a href="/review">Follow-ups</a> · <a href="/logout">Log out</a></footer>
+<footer>Minutes Pro {{ version }}{% if tok %} · <a href="/review">Follow-ups</a> · <a href="/logout">Log out</a>{% endif %} · <a href="{{ root }}privacy">{{ 'Datenschutz' if lang == 'de' else 'Privacy' }}</a> · <a href="{{ root }}about">{{ 'Über' if lang == 'de' else 'About' }}</a></footer>
 </body>
 </html>

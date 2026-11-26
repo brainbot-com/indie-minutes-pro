@@ -33,9 +33,21 @@ def local_date(iso, tz="Europe/Berlin"):
 
 
 def new_meeting_id(started=None):
-    """Sortable and readable: 20261117-1530-a1b2 (UTC)."""
+    """Sortable and readable: 20261117-1530-a1b2c3 (UTC). Store.create takes another
+    one if it exists already."""
     t = started or utcnow()
-    return t.astimezone(dt.timezone.utc).strftime("%Y%m%d-%H%M") + "-" + secrets.token_hex(2)
+    return t.astimezone(dt.timezone.utc).strftime("%Y%m%d-%H%M") + "-" + secrets.token_hex(3)
+
+
+def web_url(url):
+    """The URL if it is a web address (http or https), else None: links that agents
+    report (a Drive folder, an issue) end up in pages, where javascript: would run."""
+    from urllib.parse import urlsplit
+    try:
+        u = urlsplit(str(url or "").strip())
+    except ValueError:
+        return None
+    return u.geturl() if u.scheme in ("http", "https") and u.netloc else None
 
 
 def new_id(prefix):

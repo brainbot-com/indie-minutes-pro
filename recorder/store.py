@@ -16,15 +16,17 @@ data/meetings/<id>/
 import shutil
 
 from . import render
-from .util import local_date, now_iso, read_json, write_json, write_text
+from .util import local_date, new_meeting_id, now_iso, read_json, write_json, write_text
 
 STORAGE = ("local", "drive")
 
 
 class Store:
-    def __init__(self, settings, db):
+    def __init__(self, settings, db, drive_on=None):
         self.s = settings
         self.db = db
+        # whether this box offers Google Drive at all (DRIVE=1 or a Google sign-in set up)
+        self.drive_on = drive_on or (lambda: settings.drive)
 
     def folder(self, mid):
         return self.s.meetings_dir / mid
@@ -46,6 +48,8 @@ class Store:
         if storage_default is not None:
             if storage_default not in STORAGE:
                 raise ValueError(f"storage_default must be one of {STORAGE}")
+            if storage_default == "drive" and not self.drive_on():
+                raise ValueError("this box has Google Drive switched off")
             put("storage_default", storage_default)
         if drive_folder is not None:
             name = drive_folder.strip()
@@ -61,6 +65,8 @@ class Store:
         action items and transcript (and audio, if set) go to Google Drive."""
         if storage not in STORAGE:
             raise ValueError(f"storage must be one of {STORAGE}")
+        if storage == "drive" and not self.drive_on():
+            raise ValueError("this box has Google Drive switched off")
         self.db.run("UPDATE meetings SET storage = ?, updated_at = ? WHERE id = ?", storage, now_iso(), mid)
         if storage == "drive":
             # let the follow-up agent pick the meeting up again
@@ -99,6 +105,9 @@ class Store:
         """Every meeting (who=None, the box itself), else what that caller may see."""
         if who is None or who.admin:
             return self.db.all("SELECT * FROM meetings ORDER BY COALESCE(started_at, created_at) DESC LIMIT ?", limit)
+        if who.member:
+            return self.db.all("SELECT * FROM meetings WHERE shared = 1 AND owner_id = ?"
+                               " ORDER BY COALESCE(started_at, created_at) DESC LIMIT ?", who.team_owner, limit)
         return self.db.all("SELECT * FROM meetings WHERE owner_id IS ? ORDER BY COALESCE(started_at, created_at) DESC"
                            " LIMIT ?", who.user_id, limit)
 
@@ -108,16 +117,37 @@ class Store:
         cols = ", ".join(f"{k} = ?" for k in fields)
         self.db.run(f"UPDATE meetings SET {cols} WHERE id = ?", *fields.values(), mid)
 
-    def create(self, mid, *, title=None, started_at=None, source=None, recording_id=None, language=None,
+    def create(self, started=None, *, title=None, started_at=None, source=None, recording_id=None, language=None,
                storage=None, owner_id=None):
-        self.folder(mid).mkdir(parents=True, exist_ok=False)
+        """A new meeting: its id, folder and row. An id that is taken (two meetings
+        in one minute) is never reused: the next try takes a fresh one, so nothing
+        done to the new meeting can reach another."""
         storage = storage if storage in STORAGE else self.settings(owner_id)["storage_default"]
-        self.db.run(
-            "INSERT INTO meetings (id, title, created_at, started_at, source, recording_id, language, state, storage,"
-            " owner_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)",
-            mid, title, now_iso(), started_at, source, recording_id, language, storage, owner_id)
-        self.write_meta(mid)
-        return mid
+        if storage == "drive" and not self.drive_on():
+            storage = "local"
+        # with a team (an Indie Box): shared with it unless the owner switched that off
+        shared = 1 if owner_id and self.db.user_setting(owner_id, "share_new", "1") == "1" else 0
+        for _ in range(10):
+            mid = new_meeting_id(started)
+            if self.meta(mid):
+                continue
+            try:
+                self.folder(mid).mkdir(parents=True, exist_ok=False)
+            except FileExistsError:
+                continue
+            try:
+                self.db.run(
+                    "INSERT INTO meetings (id, title, created_at, started_at, source, recording_id, language, state,"
+                    " storage, owner_id, shared) VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)",
+                    mid, title, now_iso(), started_at, source, recording_id, language, storage, owner_id, shared)
+            except Exception:
+                shutil.rmtree(self.folder(mid), ignore_errors=True)     # the folder is this call's own
+                if self.meta(mid):
+                    continue
+                raise
+            self.write_meta(mid)
+            return mid
+        raise RuntimeError("no free meeting id")
 
     def write_meta(self, mid):
         write_json(self.folder(mid) / "meta.json", {**self.meta(mid), "url": self.link(mid)})
@@ -127,6 +157,18 @@ class Store:
         self.db.run("DELETE FROM meetings WHERE id = ?", mid)
         for table in ("jobs", "proposals", "mappings", "followup_seen"):
             self.db.run(f"DELETE FROM {table} WHERE meeting_id = ?", mid)
+
+    def erase(self, mid):
+        """Everything about a meeting on the box, for good (a person asked, or GDPR):
+        its folder, its rows, its recording's rows and any follow-up waiting in the
+        outbox. Copies already in Google Drive stay there."""
+        for p in self.db.all("SELECT id FROM proposals WHERE meeting_id = ?", mid):
+            (self.s.outbox_dir / f"{p['id']}.json").unlink(missing_ok=True)
+        for r in self.db.all("SELECT id FROM recordings WHERE meeting_id = ?", mid):
+            shutil.rmtree(self.s.uploads_dir / r["id"], ignore_errors=True)
+            self.db.run("DELETE FROM chunks WHERE recording_id = ?", r["id"])
+            self.db.run("DELETE FROM recordings WHERE id = ?", r["id"])
+        self.delete(mid)
 
     # -- files ---------------------------------------------------------------
 

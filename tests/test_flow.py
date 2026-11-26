@@ -50,6 +50,7 @@ def app(tmp_path, monkeypatch, executor):
                  public_url="https://box.test", github_token_file=tmp_path / "no-token", followup_on_done="0",
                  followup_executor=executor, drive_api_url="", followup_targets="drive,github",
                  storage_default="drive", files_base_url="https://box.test/api/v1/files", accent="0",
+                 box_name="aibox1", github_repo="brainbot-com/indie-recorder-sandbox", drive="1",
                  # no engines here: a closed port answers at once, where an unknown name can
                  # wait on DNS for longer than any HTTP timeout
                  nemo_url="http://127.0.0.1:9", qwen_url="http://127.0.0.1:9", **make_keys(tmp_path))
@@ -949,6 +950,18 @@ def web(c, op, **args):
     return r.json()["result"]
 
 
+def keep_key(c, r):
+    """What the meetings app does after signing in: keeps the key from the redirect's
+    fragment and sends it with every call."""
+    assert r.status_code == 303, r.text
+    c.headers["x-minutes-key"] = parse_qs(urlsplit(r.headers["location"]).fragment)["k"][0]
+    return r
+
+
+def sign_in(c, password="correct horse", name=""):
+    return keep_key(c, c.post("/login", data={"name": name, "token": password, "next": "/"}, follow_redirects=False))
+
+
 def test_a_box_keeps_one_secret(box, tmp_path):
     app, c, key = box
     seal = c.get("/api/v1/health").json()["seal"]
@@ -975,6 +988,10 @@ def test_the_owner_signs_in_with_the_password(box):
     r = c.post("/login", data={"token": "correct horse", "next": "/"}, follow_redirects=False)
     assert r.status_code == 303
     assert "secure" not in r.headers["set-cookie"].lower()           # plain HTTP: a Secure cookie would never come back
+    # the cookie alone opens the page, not its data: that needs the key from the redirect
+    assert c.post("/api/v1/web", json={"op": "status"}).status_code == 401
+    assert c.post("/api/v1/web", json={"op": "status"}, headers={"x-minutes-key": "guess"}).status_code == 401
+    keep_key(c, r)
     page = c.get("/").text
     assert "window.IndieApp" in page and 'lang="en"' in page and "IRMeetings" in page
     st = web(c, "status")
@@ -996,7 +1013,7 @@ def test_too_many_wrong_passwords_close_the_door(box):
 
 def test_links_follow_the_address_the_gateway_serves(box, tmp_path):
     app, c, _ = box
-    c.post("/login", data={"token": "correct horse", "next": "/"})
+    sign_in(c)
     gw = {"x-forwarded-proto": "https", "x-forwarded-for": "192.168.1.20"}
     r = c.post("/api/v1/web", json={"op": "pair_phone"}, headers=gw)
     offer = r.json()["result"]
@@ -1019,7 +1036,7 @@ def test_links_follow_the_address_the_gateway_serves(box, tmp_path):
 
 def test_the_owner_gives_an_agent_a_token(box, tmp_path):
     app, c, _ = box
-    c.post("/login", data={"token": "correct horse", "next": "/"})
+    sign_in(c)
     made = web(c, "new_agent_token", name="Claude")
     assert made["mcp_url"] == "http://box.local:9207/mcp" and made["skill_url"].endswith("/agent/SKILL.md")
     assert [a["name"] for a in made["agents"]] == ["Claude"]
@@ -1083,3 +1100,326 @@ def test_a_box_model_elsewhere_gets_no_transcript(tmp_path, monkeypatch):
     assert posted == []
     assert sm.limits(Settings(data_dir=tmp_path, llm_model="qwen3.8:27b")) == (104_880, 52_440)
     assert sm.limits(Settings(data_dir=tmp_path, llm_model="qwen3.8:27b", llm_context="65536")) == (120_000, 60_000)
+
+
+# -- a team on an Indie Box: the owner records and manages, the team reads what is shared --
+
+
+def owner_phone(c):
+    offer = web(c, "pair_phone")
+    paired = c.post("/api/v1/pair", json={"code": offer["code"], "device": "Pixel"}).json()
+    return {"Authorization": f"Bearer {paired['token']}"}
+
+
+def test_a_team_reads_what_the_owner_shares(box, tmp_path):
+    app, c, _ = box
+    sign_in(c)
+    h = owner_phone(c)
+    shared, _ = make_meeting(app, c, tmp_path, headers=h, client_id="team-0001")
+    private, _ = make_meeting(app, c, tmp_path, headers=h, client_id="team-0002")
+    web(c, "share_meeting", meeting_id=private, shared=False)
+    inv = web(c, "team_invite", name="Anna")
+    assert inv["url"].startswith("http://box.local:9207/join#") and "<svg" in inv["qr"]
+    code = inv["url"].split("#", 1)[1]
+    assert c.post("/api/v1/web", json={"op": "team_invite", "args": {"name": "anna"}}).status_code == 400   # taken
+    member = TestClient(app, base_url="http://box.local:9207")
+    peek = member.get(f"/api/v1/join/{code}").json()
+    assert peek["name"] == "Anna" and peek["owner"] == "Kim"
+    assert member.post("/join", data={"code": code, "password": "short", "password2": "short"}).status_code == 400
+    keep_key(member, member.post("/join", data={"code": code, "password": "anna-secret-1",
+                                                "password2": "anna-secret-1"}, follow_redirects=False))
+    me = web(member, "whoami")
+    assert me["role"] == "member" and me["owner"] == "Kim"
+    assert [m["id"] for m in web(member, "list_meetings")] == [shared]
+    assert web(member, "get_meeting", meeting_id=shared, include_transcript=True)["transcript_md"]
+    assert member.post("/api/v1/web", json={"op": "get_meeting", "args": {"meeting_id": private}}).status_code == 400
+    for op, args in (("rename_speakers", {"meeting_id": shared, "names": {"Speaker 1": "X"}}),
+                     ("delete_meeting", {"meeting_id": shared}), ("team", {}), ("pair_phone", {}),
+                     ("new_agent_token", {}), ("share_meeting", {"meeting_id": shared, "shared": False}),
+                     ("new_summary", {"meeting_id": shared})):
+        assert member.post("/api/v1/web", json={"op": op, "args": args}).status_code == 400, op
+    # the link worked once; later Anna signs in with her name and password
+    assert member.post("/join", data={"code": code, "password": "x" * 12, "password2": "x" * 12}).status_code == 404
+    later = TestClient(app, base_url="http://box.local:9207")
+    assert later.post("/login", data={"name": "anna", "token": "wrong-password", "next": "/"}).status_code == 401
+    sign_in(later, "anna-secret-1", name="Anna")
+    assert [m["id"] for m in web(later, "list_meetings")] == [shared]
+    # the owner sees the team, a new link resets the password, removing ends the sessions
+    team = web(c, "team")
+    assert [m["name"] for m in team["members"]] == ["Anna"] and team["members"][0]["joined"] and team["share_new"]
+    again = web(c, "team_reset", id=team["members"][0]["id"])
+    assert later.post("/api/v1/web", json={"op": "list_meetings"}).status_code == 401      # her sessions ended
+    assert TestClient(app, base_url="http://box.local:9207").post(                        # and her old password
+        "/login", data={"name": "Anna", "token": "anna-secret-1", "next": "/"}).status_code == 401
+    assert again["url"] != inv["url"]
+    web(c, "team_remove", id=team["members"][0]["id"])
+    assert web(c, "team")["members"] == []
+    assert TestClient(app, base_url="http://box.local:9207").post(
+        "/login", data={"name": "Anna", "token": "anna-secret-1", "next": "/"}).status_code == 401
+    # new meetings stay private once the owner says so
+    web(c, "team_settings", share_new=False)
+    third, _ = make_meeting(app, c, tmp_path, headers=h, client_id="team-0003")
+    assert not app.state.store.meta(third)["shared"]
+
+
+def test_too_many_wrong_passwords_for_one_name(box):
+    app, c, _ = box
+    sign_in(c)
+    web(c, "team_invite", name="Ben")
+    other = TestClient(app, base_url="http://box.local:9207")
+    for _ in range(5):
+        assert other.post("/login", data={"name": "Ben", "token": "guess-guess", "next": "/"}).status_code == 401
+    assert other.post("/login", data={"name": "Ben", "token": "guess-guess", "next": "/"}).status_code == 429
+    # the owner is not locked out by guesses at someone else's name
+    assert other.post("/login", data={"token": "correct horse", "next": "/"}, follow_redirects=False).status_code == 303
+
+
+def test_the_owner_deletes_a_meeting_for_good(box, tmp_path):
+    app, c, _ = box
+    sign_in(c)
+    mid, _ = make_meeting(app, c, tmp_path, headers=owner_phone(c), client_id="del-0001")
+    folder, db = app.state.store.folder(mid), app.state.db
+    rid = db.one("SELECT id FROM recordings WHERE meeting_id = ?", mid)["id"]
+    assert folder.exists() and db.one("SELECT 1 FROM chunks WHERE recording_id = ?", rid)
+    assert web(c, "delete_meeting", meeting_id=mid) == {"deleted": mid}
+    assert not folder.exists() and app.state.store.meta(mid) is None
+    assert db.one("SELECT 1 FROM recordings WHERE id = ?", rid) is None
+    assert db.one("SELECT 1 FROM chunks WHERE recording_id = ?", rid) is None
+    assert web(c, "list_meetings") == []
+
+
+def test_a_person_deletes_their_meeting_through_the_connector(app, client, tmp_path):
+    db = app.state.db
+    service = create_token(db, "brainbot:agent command", "agent", trusts_identity=True)
+    person = {"Authorization": f"Bearer {service}", "X-Indie-User": "u-del"}
+    client.post("/api/v1/indiechat", json={"op": "whoami"}, headers=person)
+    uid = db.one("SELECT id FROM users WHERE ext_id = 'u-del'")["id"]
+    mid, _ = make_meeting(app, client, tmp_path, headers={
+        "Authorization": f"Bearer {create_token(db, 'phone', 'device', user_id=uid)}"}, client_id="del-0002")
+    agent = client.post("/api/v1/indiechat", json={"op": "delete_meeting", "args": {"meeting_id": mid}},
+                        headers={**person, "X-Indie-Caller": "agent"})
+    assert agent.status_code == 400 and app.state.store.meta(mid)
+    other = client.post("/api/v1/indiechat", json={"op": "delete_meeting", "args": {"meeting_id": mid}},
+                        headers={**person, "X-Indie-User": "someone-else"})
+    assert other.status_code == 400 and app.state.store.meta(mid)
+    ok = client.post("/api/v1/indiechat", json={"op": "delete_meeting", "args": {"meeting_id": mid}}, headers=person)
+    assert ok.json()["result"] == {"deleted": mid} and app.state.store.meta(mid) is None
+
+
+def test_privacy_and_about_pages(box):
+    app, c, _ = box
+    en = c.get("/privacy").text
+    assert "§ 201 StGB" in en and "indiebox-test" in en and "Art. 15" in en
+    de = c.get("/privacy", headers={"accept-language": "de-DE"}).text
+    assert "Einwilligung" in de and "nichtöffentlich" in de
+    assert "Apache License 2.0" in c.get("/about").text and "OpenMDW" in c.get("/about").text
+    assert 'name="name"' in c.get("/login").text
+
+
+# -- from the security review (2026-11-26) --
+
+
+def test_a_taken_meeting_id_is_never_touched(app, client, tmp_path, monkeypatch):
+    """Finalize used to delete "its" meeting on any error, also when the new id was an
+    existing meeting's: a phone could delete someone else's meeting."""
+    from recorder import audio, store as st
+    victim, _ = make_meeting(app, client, tmp_path, client_id="victim-001")
+    h = {"Authorization": f"Bearer {create_token(app.state.db, 'mallory', 'device')}"}
+    rid = client.post("/api/v1/recordings", json={"client_id": "attack-001", "mime": "audio/wav"},
+                      headers=h).json()["recording_id"]
+    client.put(f"/api/v1/recordings/{rid}/chunks/0", content=b"anything", headers=h)
+
+    def cannot_open(mime):                  # as a chunk that does not decrypt
+        raise vault.VaultError("cannot open")
+    with monkeypatch.context() as mp:
+        ids = iter([victim, victim, "20261126-1030-c0ffee"])
+        mp.setattr(st, "new_meeting_id", lambda started=None: next(ids))
+        mp.setattr(audio, "ext_for_mime", cannot_open)
+        r = client.post(f"/api/v1/recordings/{rid}/finalize", json={"total_chunks": 1}, headers=h)
+    assert r.status_code == 422
+    assert app.state.store.meta(victim) and app.state.store.transcript(victim)        # untouched
+    assert app.state.store.meta("20261126-1030-c0ffee") is None                       # its own one, cleaned up
+    # and a meeting in the same minute as another gets an id of its own
+    ids = iter([victim, "20261126-1030-beef00"])
+    monkeypatch.setattr(st, "new_meeting_id", lambda started=None: next(ids))
+    mid, _ = make_meeting(app, client, tmp_path, client_id="same-minute")
+    assert mid == "20261126-1030-beef00" and app.state.store.meta(victim)
+
+
+def test_jobs_show_only_ones_own(app, client, tmp_path):
+    from recorder.people import add_person
+    db = app.state.db
+    ana = add_person(db, name="Ana")
+    h = {"Authorization": f"Bearer {create_token(db, 'phone', 'device', user_id=ana['id'])}"}
+    data = tone(tmp_path / "j.wav", 3)
+    rid = client.post("/api/v1/recordings", json={"client_id": "jobs-0001", "mime": "audio/wav"}, headers=h).json()["recording_id"]
+    client.put(f"/api/v1/recordings/{rid}/chunks/0", content=data, headers=h)
+    mid = client.post(f"/api/v1/recordings/{rid}/finalize", json={"total_chunks": 1}, headers=h).json()["meeting_id"]
+    assert [j["meeting_id"] for j in client.get("/api/v1/jobs", headers=h).json()["queue"]] == [mid]
+    other = {"Authorization": f"Bearer {create_token(db, 'other', 'device', user_id='u-other')}"}
+    assert client.get("/api/v1/jobs", headers=other).json()["queue"] == []
+
+
+def test_links_from_agents_are_web_addresses(app, client, tmp_path):
+    from recorder.util import web_url
+    assert web_url("javascript:alert(1)") is None and web_url(" JavaScript:x") is None
+    assert web_url("data:text/html,x") is None and web_url("https://drive.google.com/x") == "https://drive.google.com/x"
+    f = app.state.followup
+    with pytest.raises(ValueError):
+        f.sync_issues("someone/else", [])
+    f.sync_issues("brainbot-com/indie-recorder-sandbox", [{"number": 1, "title": "x", "html_url": "javascript:alert(1)"}])
+    assert read_json_file(f.index_path)["issues"][0]["html_url"] is None
+    db = app.state.db
+    mid, _ = make_meeting(app, client, tmp_path, client_id="links-001")
+    db.run("DELETE FROM proposals WHERE meeting_id = ?", mid)
+    db.run("INSERT INTO proposals (id, meeting_id, item_key, kind, payload, state, created_at) VALUES"
+           " ('p_x', ?, 'k', 'drive_store', '{}', 'approved', '2026-11-26T10:00:00Z')", mid)
+    assert "web address" in f.ack("p_x", "javascript:alert(document.cookie)")["error"]
+    assert app.state.store.meta(mid)["drive_url"] is None
+    db.run("UPDATE meetings SET drive_url = 'javascript:alert(1)' WHERE id = ?", mid)   # from before the fix
+    admin = create_token(db, "admin", "admin")
+    page = client.get(f"/m/{mid}", headers={"Authorization": f"Bearer {admin}"}).text
+    assert "javascript:" not in page
+
+
+def read_json_file(path):
+    return json.loads(read_text(path))
+
+
+def test_cookies_only_where_they_belong(app, client, tmp_path):
+    db = app.state.db
+    admin = create_token(db, "admin", "admin")
+    phone = create_token(db, "phone", "device", user_id="u-cookie")
+    client.cookies.set("ir_token", phone)
+    assert client.get("/api/v1/me").status_code == 401                   # the APIs take the header
+    assert client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "ping"}).status_code == 401
+    client.cookies.set("ir_token", admin)
+    assert client.get("/review").status_code == 200                      # pages take the cookie
+    # a form from another app on the same host name (another port) does not act with it
+    assert client.post("/review/run", headers={"origin": "https://box.test:9300"},
+                       follow_redirects=False).headers["location"].startswith("/login")
+    assert client.post("/review/run", headers={"origin": "http://testserver"}, follow_redirects=False).headers[
+        "location"] == "/review"
+
+
+def test_a_session_cookie_is_no_bearer_token(box):
+    app, c, _ = box
+    r = c.post("/login", data={"token": "correct horse", "next": "/"}, follow_redirects=False)
+    raw, key = c.cookies.get("ir_token"), parse_qs(urlsplit(r.headers["location"]).fragment)["k"][0]
+    other = TestClient(app, base_url="http://box.local:9207")
+    assert other.post("/api/v1/web", json={"op": "status"},
+                      headers={"Authorization": f"Bearer {raw}", "x-minutes-key": key}).status_code == 401
+    assert other.post("/api/v1/app", json={"op": "status"}, headers={"Authorization": f"Bearer {raw}"}).status_code == 401
+    # a phone's token is no password on a box: it would sit in a cookie every app there gets
+    sign_in(c)
+    paired = owner_phone(c)
+    r = other.post("/login", data={"token": paired["Authorization"][7:], "next": "/"}, follow_redirects=False)
+    assert r.status_code == 401 and "ir_token" not in r.headers.get("set-cookie", "")
+    # a meeting's link through the sign-in still opens the meeting
+    r = other.post("/login", data={"token": "correct horse", "next": "/m/20261126-1030-abcdef"}, follow_redirects=False)
+    assert r.headers["location"].startswith("/#m=20261126-1030-abcdef&k=")
+
+
+def test_wrong_passwords_lock_out_one_address_only(box):
+    app, c, _ = box
+    here = TestClient(app, base_url="http://box.local:9207", client=("10.0.0.5", 50000))
+    for _ in range(30):
+        here.post("/login", data={"name": f"n{_}", "token": "nope", "next": "/"})
+    assert here.post("/login", data={"token": "correct horse", "next": "/"}).status_code == 429
+    there = TestClient(app, base_url="http://box.local:9207", client=("10.0.0.6", 50000))
+    assert there.post("/login", data={"token": "correct horse", "next": "/"}, follow_redirects=False).status_code == 303
+    for _ in range(30):
+        here.get("/api/v1/pair/AAAAAAAA")
+    assert here.get("/api/v1/pair/AAAAAAAA").status_code == 429
+    assert there.get("/api/v1/pair/AAAAAAAA").status_code == 404
+
+
+def test_a_new_owner_password_ends_old_sessions(box, tmp_path):
+    app, c, key = box
+    sign_in(c)
+    assert web(c, "whoami")["role"] == "owner"
+    s = app.state.settings
+    again = create_app(Settings(data_dir=s.data_dir, worker="0", engine="fake", public_url="auto", data_key=vault.b64u(key),
+                                data_key_file=tmp_path / "none.key", seal_key_file=tmp_path / "none.pem",
+                                scratch_dir=tmp_path / "scratch", owner_password="battery staple", owner_name="Kim",
+                                qwen_url="off", nemo_url="http://127.0.0.1:9", ca_cert_file=tmp_path / "none.crt",
+                                apk_file=tmp_path / "none.apk", google_oauth_file=tmp_path / "none.json"))
+    with TestClient(again, base_url="http://box.local:9207") as c2:
+        c2.cookies.set("ir_token", c.cookies.get("ir_token"))
+        c2.headers["x-minutes-key"] = c.headers["x-minutes-key"]
+        assert c2.post("/api/v1/web", json={"op": "status"}).status_code == 401
+        sign_in(c2, "battery staple")
+        assert web(c2, "whoami")["role"] == "owner"
+
+
+def test_team_names_stay_unique(box):
+    app, c, _ = box
+    sign_in(c)
+    anna = web(c, "team_invite", name="Anna")
+    ben = web(c, "team_invite", name="Ben")
+    for who, inv in (("anna", anna), ("ben", ben)):
+        m = TestClient(app, base_url="http://box.local:9207")
+        keep_key(m, m.post("/join", data={"code": inv["url"].split("#")[1], "password": f"{who}-secret-1",
+                                          "password2": f"{who}-secret-1"}, follow_redirects=False))
+        if who == "ben":
+            for taken in ("Anna", "anna", "Kim", "owner", ""):
+                assert m.post("/api/v1/web", json={"op": "set_name", "args": {"name": taken}}).status_code == 400, taken
+            assert web(m, "set_name", name="Benjamin")["name"] == "Benjamin"
+    assert c.post("/api/v1/web", json={"op": "set_name", "args": {"name": "Anna"}}).status_code == 400
+
+
+def test_drive_stays_off_when_the_box_has_it_off(box, tmp_path):
+    app, c, _ = box
+    sign_in(c)
+    h = owner_phone(c)
+    mid, _ = make_meeting(app, c, tmp_path, headers=h, client_id="drive-off")
+    assert c.post("/api/v1/web", json={"op": "set_storage", "args": {"meeting_id": mid, "storage": "drive"}}).status_code == 400
+    assert c.post("/api/v1/web", json={"op": "update_settings", "args": {"storage_default": "drive"}}).status_code == 400
+    # a recording that asks for Drive stays on the box
+    rid = c.post("/api/v1/recordings", json={"client_id": "drive-off-2", "mime": "audio/wav", "storage": "drive"},
+                 headers=h).json()["recording_id"]
+    c.put(f"/api/v1/recordings/{rid}/chunks/0", content=tone(tmp_path / "d.wav", 2), headers=h)
+    m2 = c.post(f"/api/v1/recordings/{rid}/finalize", json={"total_chunks": 1}, headers=h).json()["meeting_id"]
+    assert app.state.store.meta(m2)["storage"] == "local"
+    # an agent does not switch on sending the recordings themselves
+    made = web(c, "new_agent_token", name="Claude")
+    res = c.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+        "name": "update_settings", "arguments": {"drive_include_audio": True}}},
+        headers={"Authorization": f"Bearer {made['token']}"}).json()
+    assert res["result"]["isError"]
+    assert app.state.db.one("SELECT 1 FROM user_settings WHERE key = 'drive_include_audio' AND value = '1'") is None
+
+
+def test_a_box_summarizes_only_with_its_own_models(tmp_path, monkeypatch):
+    from recorder import llm
+    s = Settings(data_dir=tmp_path, llm_model="qwen3.8:27b", llm_local_only="1")
+    for listing in ({}, {"local": False}, {"local": None}):
+        monkeypatch.setattr(llm, "model_info", lambda settings, listing=listing: listing)
+        with pytest.raises(llm.LLMError, match="does not list"):
+            llm.chat_json(s, "system", "user", {"type": "object"})
+    monkeypatch.setattr(llm, "model_info", lambda settings: {})
+    s2 = Settings(data_dir=tmp_path, llm_model="qwen3.8:27b", ollama_url="http://127.0.0.1:9")
+    with pytest.raises(Exception) as e:                                 # elsewhere (plain Ollama) it asks the model
+        llm.chat_json(s2, "system", "user", {"type": "object"})
+    assert "does not list" not in str(e.value)
+
+
+def test_codes_stay_out_of_the_access_log():
+    import logging
+    from recorder.api import NoCodes
+    rec = logging.LogRecord("uvicorn.access", logging.INFO, "", 0, '%s - "%s %s HTTP/%s" %d',
+                            ("10.0.0.5:5000", "GET", "/api/v1/pair/K7Q4M2XB", "1.1", 404), None)
+    NoCodes().filter(rec)
+    assert "K7Q4M2XB" not in rec.getMessage() and "/api/v1/pair/***" in rec.getMessage()
+    rec = logging.LogRecord("uvicorn.access", logging.INFO, "", 0, '%s - "%s %s HTTP/%s" %d',
+                            ("10.0.0.5:5000", "GET", "/api/v1/meetings", "1.1", 200), None)
+    NoCodes().filter(rec)
+    assert "/api/v1/meetings" in rec.getMessage()
+
+
+def test_only_a_signed_in_request_sets_the_address_for_links(box):
+    from recorder import urls
+    app, c, _ = box
+    before = urls._last["base"]
+    c.get("/api/v1/health", headers={"host": "evil.example", "x-forwarded-proto": "https"})
+    assert urls._last["base"] == before

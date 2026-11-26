@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Team beitreten' if lang == 'de' else 'Join the team' }} · Minutes Pro{% endblock %}
+{% block main %}
+{% set de = lang == 'de' %}
+<section class="card narrow">
+  <h1 id="title">{{ 'Team beitreten' if de else 'Join the team' }}</h1>
+  <p class="muted" id="sub">{{ 'Sie lesen dann die Meetings, die der Inhaber mit dem Team teilt.' if de else 'You then read the meetings the owner shares with the team.' }}</p>
+  {% if error %}<p class="error">{% if error == 'blocked' %}{{ 'Zu viele falsche Links. Bitte in ein paar Minuten noch einmal.' if de else 'Too many wrong links. Try again in a few minutes.' }}{% elif error == 'short' %}{{ 'Das Passwort braucht mindestens 10 Zeichen.' if de else 'The password needs at least 10 characters.' }}{% elif error == 'differ' %}{{ 'Die beiden Passwörter sind verschieden.' if de else 'The two passwords differ.' }}{% else %}{{ 'Dieser Link ist benutzt oder abgelaufen. Bitten Sie den Inhaber um einen neuen.' if de else 'This link is used or expired. Ask the owner for a new one.' }}{% endif %}</p>{% endif %}
+  <p class="error" id="bad" hidden>{{ 'Dieser Link ist benutzt oder abgelaufen. Bitten Sie den Inhaber um einen neuen.' if de else 'This link is used or expired. Ask the owner for a new one.' }}</p>
+  <form method="post" action="/join" id="form">
+    <input type="hidden" name="code" id="code" value="{{ code or '' }}">
+    <label>{{ 'Neues Passwort (mindestens 10 Zeichen)' if de else 'New password (at least 10 characters)' }} <input name="password" type="password" autocomplete="new-password" minlength="10" required autofocus></label>
+    <label>{{ 'Noch einmal' if de else 'Once more' }} <input name="password2" type="password" autocomplete="new-password" minlength="10" required></label>
+    <button>{{ 'Beitreten' if de else 'Join' }}</button>
+  </form>
+  <p class="muted">{{ 'Zum Anmelden später: Ihr Name und dieses Passwort.' if de else 'To sign in later: your name and this password.' }} <a href="/privacy">{{ 'Datenschutz' if de else 'Privacy' }}</a></p>
+</section>
+<script>
+(async () => {
+  const code = $code();
+  function $code() {
+    const el = document.getElementById('code');
+    if (!el.value) el.value = decodeURIComponent((location.hash || '').slice(1));
+    return el.value;
+  }
+  if (!code) { document.getElementById('bad').hidden = false; document.getElementById('form').hidden = true; return; }
+  try {
+    const r = await fetch('/api/v1/join/' + encodeURIComponent(code));
+    if (!r.ok) { document.getElementById('bad').hidden = false; document.getElementById('form').hidden = true; return; }
+    const j = await r.json();
+    const de = {{ 'true' if de else 'false' }};
+    document.getElementById('title').textContent = de ? `Willkommen, ${j.name}` : `Welcome, ${j.name}`;
+    if (j.owner) document.getElementById('sub').textContent = de
+      ? `${j.owner} lädt Sie in das Team von Minutes Pro auf ${j.box} ein. Wählen Sie Ihr Passwort.`
+      : `${j.owner} invites you to the team of Minutes Pro on ${j.box}. Choose your password.`;
+  } catch (e) { /* the form still works */ }
+})();
+</script>
+{% endblock %}

@@ -37,22 +37,33 @@ def _hash(code):
 
 
 class Guesses:
-    """Wrong codes from anyone, per 10 minutes. The box sees every phone through
-    one proxy, so this counts globally: 30 misses close the door for a while,
-    against about 10^12 codes."""
+    """Wrong codes or passwords per client address (what the gateway forwards), per
+    10 minutes: `limit` misses close the door to that address for a while. Per
+    address, so one address cannot lock everyone else out; codes are long enough
+    (about 10^12) that many addresses guessing together still find none."""
 
     def __init__(self, limit=30, window=600):
-        self.limit, self.window, self.misses, self.lock = limit, window, [], threading.Lock()
+        self.limit, self.window, self.misses, self.lock = limit, window, {}, threading.Lock()
 
-    def blocked(self):
-        with self.lock:
-            cut = time.monotonic() - self.window
-            self.misses = [t for t in self.misses if t > cut]
-            return len(self.misses) >= self.limit
+    def _recent(self, key, now):
+        got = [t for t in self.misses.get(key, ()) if t > now - self.window]
+        if got:
+            self.misses[key] = got
+        else:
+            self.misses.pop(key, None)
+        return got
 
-    def miss(self):
+    def blocked(self, key="-"):
         with self.lock:
-            self.misses.append(time.monotonic())
+            return len(self._recent(key, time.monotonic())) >= self.limit
+
+    def miss(self, key="-"):
+        with self.lock:
+            now = time.monotonic()
+            if len(self.misses) > 5000:
+                for k in list(self.misses):
+                    self._recent(k, now)
+            self.misses.setdefault(key, []).append(now)
 
 
 class Codes:

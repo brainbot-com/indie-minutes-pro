@@ -6,7 +6,9 @@
    reach the box, call(op, args) with the ops of the "indie-recorder"
    connector, in which language, what the box is called (box), whether
    meetings can go to Google Drive there (drive) and whether to link to the
-   box's own meeting page (boxLink). */
+   box's own meeting page (boxLink). In a team (an Indie Box): readOnly for a
+   member, who reads what the owner shares; team, the owner's switch that
+   shares a meeting; canDelete and onDeleted, deleting a meeting for good. */
 (function () {
   'use strict';
   const STR = {
@@ -26,6 +28,8 @@
         romanian: 'Romanian', slovak: 'Slovak', estonian: 'Estonian', lithuanian: 'Lithuanian', croatian: 'Croatian', slovene: 'Slovene' },
       transcript: 'Transcript', more: 'More', newSummary: 'Write a new summary', openBox: 'Open on {box}',
       tldr: 'Summary', decisions: 'Decisions', actions: 'Action items', questions: 'Open questions',
+      team: 'Team', deleteMeeting: 'Delete meeting', noName: 'No name yet',
+      deleteAsk: 'Delete this meeting for good? Its recording, transcript and summaries go from {box}. Copies in Google Drive stay there.',
     },
     de: {
       today: 'Heute', yesterday: 'Gestern', local: 'Lokal', processing: 'In Arbeit', failed: 'Fehler', uploading: 'Lädt hoch',
@@ -43,12 +47,17 @@
         romanian: 'Rumänisch', slovak: 'Slowakisch', estonian: 'Estnisch', lithuanian: 'Litauisch', croatian: 'Kroatisch', slovene: 'Slowenisch' },
       transcript: 'Transkript', more: 'Mehr', newSummary: 'Neue Zusammenfassung schreiben', openBox: 'Auf {box} öffnen',
       tldr: 'Zusammenfassung', decisions: 'Entscheidungen', actions: 'Aufgaben', questions: 'Offene Fragen',
+      team: 'Team', deleteMeeting: 'Meeting löschen', noName: 'Noch ohne Namen',
+      deleteAsk: 'Dieses Meeting endgültig löschen? Aufnahme, Transkript und Zusammenfassungen werden von {box} entfernt. Kopien in Google Drive bleiben dort.',
     },
   };
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  // links that agents report (a Drive folder) only as web addresses: javascript: would run
+  const webUrl = (u) => (/^https?:\/\/[^\s]+$/i.test(String(u || '').trim()) ? String(u).trim() : '');
   const pad = (n) => String(n).padStart(2, '0');
 
-  function create({ lang, call, fail = () => {}, onChange = () => {}, box = () => 'aibox1', drive = () => true, boxLink = true }) {
+  function create({ lang, call, fail = () => {}, onChange = () => {}, box = () => 'aibox1', drive = () => true, boxLink = true,
+                    readOnly = () => false, team = () => false, canDelete = () => false, onDeleted = () => {} }) {
     const L = lang === 'de' ? 'de' : 'en';
     const t = (k) => {
       const v = STR[L][k] !== undefined ? STR[L][k] : STR.en[k];
@@ -165,16 +174,17 @@
        applies them everywhere. */
     const accent = (list) => (list || []).filter((a) => a.p >= 0.1)
       .map((a) => `${t('accents')[a.accent] || a.accent} ${Math.round(a.p * 100)}%`).join(' · ');
-    function speakers(cards) {
+    function speakers(cards, ro) {
       return cards.map((c, i) => `<div class="spk">
         <div class="spkhead"><span class="num">${pad(i + 1)}</span><span class="who">${esc(c.label)}</span>
           <span class="side">${c.turns ? esc(t('talk')(c.share, c.turns, length(c.first))) : ''}</span>
           ${c.clip_url ? `<button type="button" class="textbtn play" data-url="${esc(c.clip_url)}">${esc(t('play'))}</button>` : '<span></span>'}</div>
         ${accent(c.accent) ? `<p class="said accent">${esc(t('accentGuess')(accent(c.accent)))}</p>` : ''}
         ${(c.lines || []).map((l) => `<p class="said">"${esc(l)}"</p>`).join('')}
-        ${(c.suggestions || []).map((x) => `<p class="sugg"><button type="button" class="textbtn use" data-label="${esc(c.label)}" data-name="${esc(x.name)}">${esc(t('use')(x.name))}</button>` +
+        ${ro ? '' : (c.suggestions || []).map((x) => `<p class="sugg"><button type="button" class="textbtn use" data-label="${esc(c.label)}" data-name="${esc(x.name)}">${esc(t('use')(x.name))}</button>` +
           `<span class="muted">${esc(t('by')[x.by] || '')}${x.why ? ': ' + esc(x.why) : ''}</span></p>`).join('')}
-        <label class="cell"><span class="label">${esc(t('nameLabel'))}</span><input class="line" data-label="${esc(c.label)}" value="${esc(c.name)}"></label>
+        ${ro ? `<div class="cell"><span class="label">${esc(t('nameLabel'))}</span><span class="v">${esc(c.name || t('noName'))}</span></div>`
+          : `<label class="cell"><span class="label">${esc(t('nameLabel'))}</span><input class="line" data-label="${esc(c.label)}" value="${esc(c.name)}"></label>`}
       </div>`).join('');
     }
 
@@ -199,7 +209,9 @@
         ({ label, name, suggestions: [], lines: [], share: 0, turns: 0, first: 0 }));
       const nSpk = Array.isArray(m.speakers) ? m.speakers.length : m.speakers;
       const unnamed = cards.filter((c) => !c.name).length;
-      const withDrive = drive() || m.storage === 'drive';
+      const ro = readOnly();
+      const withDrive = !ro && (drive() || m.storage === 'drive');
+      const withTeam = !ro && team();
       const note = m.storage !== 'drive' ? t('noteLocal') : (m.drive_url ? t('noteDone') : t('noteWaiting'));
       el.innerHTML = `<div class="head"><span class="kicker" id="dWhen">${esc(d.toLocaleDateString(L, { day: 'numeric', month: 'short', year: 'numeric' }))} · ${esc(time(d))}</span>` +
         `<h1 class="h2" id="dTitle">${esc(m.title || m.id)}</h1></div>
@@ -208,19 +220,20 @@
             <div class="cell"><span class="label">${esc(t('length'))}</span><span class="v tnum" id="dLen">${esc(length(m.duration_s))}</span></div>
             <div class="cell"><span class="label">${esc(t('speakers'))}</span><span class="v" id="dSpkN">${esc(nSpk ? String(nSpk) : t('notYet'))}</span></div>
             ${withDrive ? `<div class="cell"><span class="label" id="dLDrive">${esc(t('drive'))}</span><button type="button" class="switch" role="switch" aria-checked="${m.storage === 'drive'}" id="dDrive" aria-labelledby="dLDrive"></button></div>` : ''}
+            ${withTeam ? `<div class="cell"><span class="label" id="dLTeam">${esc(t('team'))}</span><button type="button" class="switch" role="switch" aria-checked="${!!m.shared}" id="dTeam" aria-labelledby="dLTeam"></button></div>` : ''}
           </div>
-          <p class="note" style="margin-top: 12px"><span id="dNote">${esc(note)}</span> ${m.drive_url ? `<a id="dLink" target="_blank" rel="noopener" href="${esc(m.drive_url)}">${esc(t('openFolder'))}</a>` : ''}</p>
+          <p class="note" style="margin-top: 12px"><span id="dNote">${esc(note)}</span> ${webUrl(m.drive_url) ? `<a id="dLink" target="_blank" rel="noopener" href="${esc(webUrl(m.drive_url))}">${esc(t('openFolder'))}</a>` : ''}</p>
         </div>
         <div class="sum" id="dSum">${summary(m.summary_md)}</div>
         <div class="folds">
           <details class="fold" id="dSpkBox"${cards.length ? '' : ' hidden'}>
             <summary>${esc(t('speakerNames') + (unnamed ? t('unnamed')(unnamed) : ''))}</summary>
-            <div class="inner"><div class="names" id="dSpk">${speakers(cards)}</div><button type="button" class="btn" id="dSave">${esc(t('saveNames'))}</button></div>
+            <div class="inner"><div class="names" id="dSpk">${speakers(cards, ro)}</div>${ro ? '' : `<button type="button" class="btn" id="dSave">${esc(t('saveNames'))}</button>`}</div>
           </details>
           <details class="fold" id="dTrBox"><summary>${esc(t('transcript'))}</summary><div class="inner"><div class="tr" id="dTr"></div></div></details>
-          <details class="fold"><summary>${esc(t('more'))}</summary>
-            <div class="inner more"><button type="button" class="btn" id="dRedo">${esc(t('newSummary'))}</button>${m.url && boxLink ? `<a id="dBox" target="_blank" rel="noopener" href="${esc(m.url)}">${esc(t('openBox'))}</a>` : ''}</div>
-          </details>
+          ${ro ? '' : `<details class="fold"><summary>${esc(t('more'))}</summary>
+            <div class="inner more"><button type="button" class="btn" id="dRedo">${esc(t('newSummary'))}</button>${m.url && boxLink ? `<a id="dBox" target="_blank" rel="noopener" href="${esc(m.url)}">${esc(t('openBox'))}</a>` : ''}${canDelete() ? `<button type="button" class="textbtn danger" id="dDelete">${esc(t('deleteMeeting'))}</button>` : ''}</div>
+          </details>`}
         </div>`;
       const $ = (s) => el.querySelector(s);
       if ($('#dDrive')) $('#dDrive').addEventListener('click', async () => {
@@ -231,6 +244,16 @@
           onChange(m.id);
           await meeting(el, m.id, true);
         } catch (e) { $('#dDrive').setAttribute('aria-checked', String(!drive)); fail(e); }
+      });
+      if ($('#dTeam')) $('#dTeam').addEventListener('click', async () => {
+        const shared = $('#dTeam').getAttribute('aria-checked') !== 'true';
+        $('#dTeam').setAttribute('aria-checked', String(shared));
+        try { await call('share_meeting', { meeting_id: m.id, shared }); m.shared = shared ? 1 : 0; onChange(m.id); }
+        catch (e) { $('#dTeam').setAttribute('aria-checked', String(!shared)); fail(e); }
+      });
+      if ($('#dDelete')) $('#dDelete').addEventListener('click', async () => {
+        if (!confirm(t('deleteAsk'))) return;
+        try { stop(); await call('delete_meeting', { meeting_id: m.id }); current = null; onDeleted(m.id); } catch (e) { fail(e); }
       });
       $('#dSpk').querySelectorAll('.play').forEach((b) => b.addEventListener('click', () => {
         const again = playing === b;
@@ -243,7 +266,7 @@
         const input = [...$('#dSpk').querySelectorAll('input')].find((x) => x.dataset.label === b.dataset.label);
         if (input) { input.value = b.dataset.name; input.focus(); }
       }));
-      $('#dSave').addEventListener('click', async () => {
+      if ($('#dSave')) $('#dSave').addEventListener('click', async () => {
         const names = {};
         $('#dSpk').querySelectorAll('input').forEach((i) => { names[i.dataset.label] = i.value; });
         try {
@@ -259,7 +282,7 @@
         catch (e) { fail(e); }
       };
       $('#dTrBox').addEventListener('toggle', loadTranscript);
-      $('#dRedo').addEventListener('click', async () => {
+      if ($('#dRedo')) $('#dRedo').addEventListener('click', async () => {
         try { await call('new_summary', { meeting_id: m.id }); $('#dNote').textContent = t('queued'); } catch (e) { fail(e); }
       });
       if (was) {
