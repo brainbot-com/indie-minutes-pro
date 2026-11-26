@@ -100,9 +100,14 @@ link resets someone's password; removing them ends their sessions.
 - Speech recognition, speaker labels and the first summary run on the
   recorder's machine with its own models. The recorder makes no cloud calls
   for them, and refuses a model an Indie Box would relay to a remote provider
-  (`LLM_REMOTE_OK=1` allows it).
+  (`LLM_REMOTE_OK=1` allows it). On a box (`LLM_LOCAL_ONLY=1` in the app file)
+  the model must be one the box lists as its own: without that answer, summaries wait.
 - Each person sees only their own meetings: a person's phones record into
-  their account.
+  their account. A team member sees the meetings the owner shares.
+- A browser signs in with a cookie and a key the page keeps; the APIs take
+  tokens only in the Authorization header. On an Indie Box every app shares
+  the host name, and cookies ignore ports: the key is what other apps there
+  never see.
 - Speakers stay "Speaker 1..N" until a person names them; an agent only
   suggests names. No voiceprints are kept.
 - Google Drive is optional and only where a Google sign-in is set up (aibox1):
@@ -152,6 +157,7 @@ in `recorder/config.py`):
 | `FORWARDED_ALLOW_IPS` | proxies whose `X-Forwarded-Proto` counts |
 | `BOX_NAME`, `PHONE_REACH` | what the apps call the machine, and whether phones reach it over the `vpn` or the `lan` |
 | `OLLAMA_URL`, `LLM_MODEL`, `LLM_CONTEXT` | the model for the minutes, and how much it reads at once (on a box: what the box says) |
+| `LLM_LOCAL_ONLY`, `LLM_REMOTE_OK` | on an Indie Box: only a model the box lists as local; or allow a remote one after all |
 | `NEMO_URL`, `QWEN_URL` | the speech engines; `off` for one that is not there |
 | `DRIVE`, `GOOGLE_OAUTH_FILE` | Google Drive per meeting: `DRIVE=0` hides it where no one carries it out |
 | `GPU_LOCK` | one GPU job at a time: the lock the engine and the recorder share |
