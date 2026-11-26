@@ -76,6 +76,8 @@ services:
       PUBLIC_URL: auto
       # only the box's own containers reach this one, the gateway among them
       FORWARDED_ALLOW_IPS: "*"
+      # transcripts go only to a model the box lists as its own
+      LLM_LOCAL_ONLY: "1"
       BOX_NAME: ${INDIEBOX_INSTALL_HOSTNAME:-Indie Box}
       PHONE_REACH: lan
       # the box's own models, on the shared llm network

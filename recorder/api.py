@@ -13,7 +13,7 @@ import threading
 import time
 from datetime import timedelta
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import segno
 from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
@@ -35,8 +35,8 @@ from .gdrive import Google, GoogleError
 from .people import add_person, label, person_for, resolve
 from .render import display_name, local_time, render_summary_md, words_to_segments
 from .store import Store
-from .util import (fmt_clock, fmt_duration, fmt_ts, hash_token, new_id, new_meeting_id, new_token, now_iso,
-                   parse_iso, read_bytes, read_text, sha256_hex, utcnow, write_bytes)
+from .util import (fmt_clock, fmt_duration, fmt_ts, hash_token, new_id, new_token, now_iso, parse_iso, read_bytes,
+                   read_text, sha256_hex, utcnow, web_url, write_bytes)
 from .worker import Worker
 
 HERE = Path(__file__).parent
@@ -46,6 +46,7 @@ WEB_APP = HERE.parent / "integrations" / "indie-chat" / "minutes-pro.html"
 AGENT_SKILL = HERE.parent / "agents" / "meeting-follow-up" / "SKILL.md"
 mimetypes.add_type("font/woff2", ".woff2")   # the slim image does not know it
 COOKIE = "ir_token"
+KEY_HEADER = "x-minutes-key"        # a signed-in browser's second half (start_session)
 SESSION_DAYS = 30
 READERS = ("device", "admin")
 WRITERS = ("agent", "admin")
@@ -123,7 +124,7 @@ def create_app(settings=None):
     s = settings or Settings()
     s.ensure_dirs()
     db = open_index(s)                       # also loads the keys (vault.configure)
-    store = Store(s, db)
+    store = Store(s, db, drive_on=lambda: s.drive or google.available())
     engines = Engines(s)
     google = Google(s, db)
     followup = Followup(s, db, store, google)
@@ -132,6 +133,7 @@ def create_app(settings=None):
     templates = Jinja2Templates(directory=HERE / "templates")
     templates.env.globals.update(fmt_ts=fmt_ts, fmt_duration=fmt_duration, fmt_clock=fmt_clock, version=__version__,
                                  local_time=lambda iso: local_time(iso, s.display_tz))
+    templates.env.filters["weburl"] = lambda u: web_url(u) or ""     # links from agents: http(s) only
     def page_md(text):
         # The meeting page shows title, date and Drive link itself: skip the header
         # lines render_summary_md writes (title, byline, link) and keep the rest.
@@ -169,28 +171,57 @@ def create_app(settings=None):
         if s.owner_name and not owner["name"]:
             db.run("UPDATE users SET name = ? WHERE id = ?", s.owner_name.strip()[:80], owner["id"])
         owner_id = owner["id"]
+        # a new password (changed in the install form) ends what was signed in with the old one
+        if not passwords.check(s.owner_password, db.setting("owner_password") or ""):
+            db.run("DELETE FROM sessions WHERE user_id = ?", owner_id)
+            db.set_setting("owner_password", passwords.make(s.owner_password))
 
     # -- auth: per-device and per-agent tokens, stored hashed ----------------
 
     def token_row(request):
-        raw = ""
+        raw, cookie = "", False
         auth = request.headers.get("authorization", "")
         if auth.lower().startswith("bearer "):
             raw = auth[7:].strip()
-        raw = raw or request.cookies.get(COOKIE, "")
+        if not raw:
+            raw, cookie = request.cookies.get(COOKIE, ""), True
+            if raw and not cookie_counts(request):
+                return None
         if not raw:
             return None
         row = db.one("SELECT * FROM tokens WHERE token_hash = ? AND revoked_at IS NULL", hash_token(raw))
         if row and (row["last_used_at"] or "")[:16] != now_iso()[:16]:
             db.run("UPDATE tokens SET last_used_at = ? WHERE id = ?", now_iso(), row["id"])
-        return row or session_row(raw)
+        row = row or (session_row(raw, request) if cookie else None)
+        if row:
+            urls.remember(request)          # only a signed-in request says how people reach the box
+        return row
 
-    def session_row(raw):
+    def cookie_counts(request):
+        """The browser's cookie signs in pages, forms and the meetings app's endpoint,
+        nothing else: the APIs take tokens in the Authorization header. A cookie goes to
+        every port of a host name, so on an Indie Box the other apps' pages are not
+        cross-site: a form or script there must not act with it (Origin check)."""
+        path = request.url.path
+        if path.startswith(("/api/", "/mcp")) and path != "/api/v1/web":
+            return False
+        if request.method in ("GET", "HEAD", "OPTIONS") or path == "/api/v1/web":
+            return True                     # /api/v1/web: the key header (start_session) instead
+        origin = request.headers.get("origin")
+        host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
+        return origin is None or urlsplit(origin).netloc.lower() == host.split(",")[0].strip().lower()
+
+    def session_row(raw, request):
         """A browser signed in with a password (the owner's, or a team member's own): a
-        token-like row of role "web". A member's carries whose shared meetings they read."""
+        token-like row of role "web". A member's carries whose shared meetings they read.
+        Its cookie only opens pages; the meetings app's data also needs the key the page
+        keeps (KEY_HEADER), which another app on the same host name cannot read."""
         ses = db.one("SELECT s.*, u.role AS user_role, u.invited_by FROM sessions s JOIN users u ON u.id = s.user_id"
                      " WHERE s.token_hash = ? AND s.expires_at > ?", hash_token(raw), now_iso())
         if not ses:
+            return None
+        if request.url.path == "/api/v1/web" and not hmac.compare_digest(
+                ses["key_hash"] or "-", hash_token("key:" + request.headers.get(KEY_HEADER, ""))):
             return None
         if (ses["last_used_at"] or "")[:16] != now_iso()[:16]:
             db.run("UPDATE sessions SET last_used_at = ? WHERE id = ?", now_iso(), ses["id"])
@@ -316,13 +347,12 @@ def create_app(settings=None):
             return JSONResponse({"error": "missing chunks", "missing": missing[:500]}, status_code=409)
         if db.run("UPDATE recordings SET state = 'finalizing' WHERE id = ? AND state = 'uploading'", rid) != 1:
             raise HTTPException(409, "finalize already in progress")
-        mid = None
+        mid = None                              # set once this call has made its meeting, and only then
         try:
-            started = parse_iso(row["started_at"])
-            mid = new_meeting_id(started)
-            store.create(mid, title=body.title or row["title"], started_at=row["started_at"] or now_iso(),
-                         source=f"device:{tok['name']}", recording_id=rid, language=row["language"],
-                         storage=row["storage"], owner_id=tok.get("user_id"))
+            mid = store.create(parse_iso(row["started_at"]), title=body.title or row["title"],
+                               started_at=row["started_at"] or now_iso(), source=f"device:{tok['name']}",
+                               recording_id=rid, language=row["language"], storage=row["storage"],
+                               owner_id=tok.get("user_id"))
             dst = store.folder(mid) / f"original.{audio.ext_for_mime(row['mime'])}"
             # sealed on the phone: opened here with the box's sealing key; stored encrypted at rest
             key = vault.SEALER.chunk_key(row["seal_epk"], row["client_id"]) if row["seal_epk"] else None
@@ -332,7 +362,7 @@ def create_app(settings=None):
                     out.write(vault.open_chunk(key, row["client_id"], i, data) if key else data)
         except Exception as e:
             db.run("UPDATE recordings SET state = 'uploading' WHERE id = ?", rid)
-            if mid and store.meta(mid):
+            if mid:
                 store.delete(mid)               # no half-made meeting; the phone sends again and finalizes later
             if isinstance(e, vault.VaultError):
                 raise HTTPException(422, str(e)) from e
@@ -419,6 +449,8 @@ def create_app(settings=None):
 
     @app.put("/api/v1/settings")
     def put_settings(body: SettingsIn, who=Depends(person("agent", "admin"))):
+        if body.drive_include_audio and is_agent(who):
+            raise HTTPException(403, "only the person decides whether recordings go to Drive")
         try:
             return store.update_settings(**body.model_dump(), user_id=who.user_id)
         except ValueError as e:
@@ -427,7 +459,10 @@ def create_app(settings=None):
     @app.put("/api/v1/meetings/{mid}/storage")
     def put_storage(mid: str, body: StorageIn, who=Depends(person("device", "agent", "admin"))):
         meeting_or_404(mid, who)
-        change_storage(mid, body.storage)
+        try:
+            change_storage(mid, body.storage)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
         return {"meeting_id": mid, "storage": body.storage}
 
     def change_storage(mid, storage):
@@ -460,9 +495,15 @@ def create_app(settings=None):
             raise HTTPException(404)
         return plain_file(files[name], filename=name)
 
+    def jobs_of(who):
+        """The queue as far as it is the caller's: their own meetings' jobs."""
+        return [j for j in worker.queue() if who.sees(store.meta(j["meeting_id"]))]
+
     @app.get("/api/v1/jobs")
-    def jobs(tok=Depends(need("device", "agent", "admin"))):
-        return {"current": worker.current, "queue": worker.queue()}
+    def jobs(who=Depends(person("device", "agent", "admin"))):
+        current = worker.current
+        return {"current": current if current and who.sees(store.meta(current["meeting_id"])) else None,
+                "queue": jobs_of(who)}
 
     @app.get("/api/v1/health")
     def health():
@@ -501,28 +542,34 @@ def create_app(settings=None):
 
     @app.put("/api/v1/issues-index")
     def issues_index(body: IssuesIn, tok=Depends(need(*WRITERS))):
-        return followup.sync_issues(body.repo, body.issues)
+        try:
+            return followup.sync_issues(body.repo, body.issues)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
 
     # -- web view ---------------------------------------------------------------
 
-    logins = Guesses(limit=30)          # wrong sign-ins from anyone, per 10 minutes
-    tries = {}                          # and per name, so one name cannot be guessed at
+    # wrong sign-ins per address (the gateway forwards the phone's or computer's own), so
+    # nobody locks out everyone else; and per address and name, so one name is not guessed at
+    logins, tries = Guesses(limit=30), Guesses(limit=5)
     no_member = passwords.make(secrets.token_urlsafe(16))   # checked for unknown names, so they take as long
 
-    def tried(name):
-        key = name.lower()
-        if key not in tries:
-            if len(tries) > 1000:
-                tries.clear()
-            tries[key] = Guesses(limit=5)
-        return tries[key]
+    def client(request):
+        return request.client.host if request.client else "-"
 
-    def start_session(resp, request, user_id):
-        raw = new_token()
+    def start_session(request, user_id, next="/"):
+        """A browser signed in with a password: a cookie, and a key the page keeps in its
+        own storage and sends with every call (KEY_HEADER). Other apps on the same host
+        name get the cookie (cookies ignore ports) but never the key: it arrives once, in
+        the fragment of this redirect, which no server sees."""
+        raw, key = new_token(), secrets.token_urlsafe(24)
         expires = (utcnow() + timedelta(days=SESSION_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        db.run("INSERT INTO sessions (id, user_id, token_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
-               new_id("ses"), user_id, hash_token(raw), now_iso(), expires)
+        db.run("INSERT INTO sessions (id, user_id, token_hash, key_hash, created_at, expires_at)"
+               " VALUES (?, ?, ?, ?, ?, ?)",
+               new_id("ses"), user_id, hash_token(raw), hash_token("key:" + key), now_iso(), expires)
         db.run("DELETE FROM sessions WHERE expires_at <= ?", now_iso())
+        mid = next[3:].split("?")[0].split("#")[0] if next.startswith("/m/") else ""
+        resp = RedirectResponse("/#" + (f"m={quote(mid)}&" if mid else "") + f"k={key}", status_code=303)
         # a cookie marked Secure is never sent back over plain HTTP (an Indie Box's default)
         resp.set_cookie(COOKIE, raw, httponly=True, secure=s.secure_cookies and request.url.scheme == "https",
                         samesite="strict", max_age=SESSION_DAYS * 86400)
@@ -531,6 +578,12 @@ def create_app(settings=None):
     def owner_named(name):
         me = db.one("SELECT name FROM users WHERE id = ?", owner_id) if owner_id else None
         return not name or name.lower() in ("owner", ((me or {}).get("name") or "").lower())
+
+    def name_taken(name, uid=None):
+        """People sign in with their name: one person each ("owner" and the owner's name count)."""
+        if db.one("SELECT 1 FROM users WHERE role = 'member' AND lower(name) = lower(?) AND id IS NOT ?", name, uid):
+            return True
+        return uid != owner_id and owner_named(name)
 
     def lang_of(request):
         return "de" if request.headers.get("accept-language", "").lower().startswith("de") else "en"
@@ -555,22 +608,24 @@ def create_app(settings=None):
         resp = RedirectResponse(next if safe else "/", status_code=303)
         again = {"next": next, "lang": lang, "login_name": who}
         if s.owner_password:
-            if logins.blocked() or tried(who).blocked():
+            # Passwords only: a phone's token in a cookie would reach every app on the box's host name
+            where, named = client(request), f"{client(request)} {who.lower()}"
+            if logins.blocked(where) or tries.blocked(named):
                 return page(request, "login.html", None, error="blocked", status_code=429, **again)
             if owner_named(who):
                 if hmac.compare_digest(given.encode(), s.owner_password.encode()):
-                    return start_session(resp, request, owner_id)
+                    return start_session(request, owner_id, next if safe else "/")
             else:
                 m = db.one("SELECT * FROM users WHERE role = 'member' AND lower(name) = lower(?)", who)
                 if passwords.check(given, (m or {}).get("password_hash") or no_member) and m:
-                    return start_session(resp, request, m["id"])
+                    return start_session(request, m["id"], next if safe else "/")
+            if not given.startswith("irt_"):    # a token (the phone app signing in its web view) is no guess
+                logins.miss(where)
+                tries.miss(named)
+            return page(request, "login.html", None, error="password", status_code=401, **again)
         row = db.one("SELECT * FROM tokens WHERE token_hash = ? AND revoked_at IS NULL", hash_token(given))
         if not row or row["role"] not in READERS:
-            if s.owner_password:
-                logins.miss()
-                tried(who).miss()
-            return page(request, "login.html", None, error="password" if s.owner_password else "token",
-                        status_code=401, **again)
+            return page(request, "login.html", None, error="token", status_code=401, **again)
         resp.set_cookie(COOKIE, given, httponly=True, secure=s.secure_cookies and request.url.scheme == "https",
                         samesite="strict", max_age=180 * 86400)
         return resp
@@ -590,12 +645,12 @@ def create_app(settings=None):
         return templates.TemplateResponse(request, "join.html", {"s": s, "lang": lang_of(request), "error": None})
 
     @app.get("/api/v1/join/{code}")
-    def join_peek(code: str):
-        if joins.blocked():
+    def join_peek(code: str, request: Request):
+        if joins.blocked(client(request)):
             raise HTTPException(429, "too many wrong links, try again in a few minutes")
         row = invite_row(code)
         if not row:
-            joins.miss()
+            joins.miss(client(request))
             raise HTTPException(404, "unknown, used or expired link")
         member = db.one("SELECT * FROM users WHERE id = ?", row["user_id"])
         owner = db.one("SELECT * FROM users WHERE id = ?", member["invited_by"]) if member else None
@@ -605,7 +660,7 @@ def create_app(settings=None):
     @app.post("/join")
     def join(request: Request, code: str = Form(...), password: str = Form(...), password2: str = Form(...)):
         lang = lang_of(request)
-        if joins.blocked():
+        if joins.blocked(client(request)):
             return templates.TemplateResponse(request, "join.html", {"s": s, "lang": lang, "error": "blocked"},
                                               status_code=429)
         wrong = passwords.problem(password) and "short" or (password != password2 and "differ")
@@ -618,14 +673,14 @@ def create_app(settings=None):
             if row:
                 con.execute("UPDATE invites SET used_at = ? WHERE code_hash = ?", (now_iso(), row["code_hash"]))
         if not row:
-            joins.miss()
+            joins.miss(client(request))
             return templates.TemplateResponse(request, "join.html", {"s": s, "lang": lang, "error": "used"},
                                               status_code=404)
         # a new link for someone who joined before is how a password is reset: old sessions end
         db.run("DELETE FROM sessions WHERE user_id = ?", row["user_id"])
         db.run("UPDATE users SET password_hash = ?, last_seen_at = ? WHERE id = ?", passwords.make(password), now_iso(),
                row["user_id"])
-        return start_session(RedirectResponse("/", status_code=303), request, row["user_id"])
+        return start_session(request, row["user_id"])
 
     @app.get("/logout")
     def logout(request: Request):
@@ -644,16 +699,20 @@ def create_app(settings=None):
         who = resolve(db, row, request.headers) if row and row["role"] in READERS else None
         if not who:
             return RedirectResponse("/login?next=/", status_code=303)
-        return page(request, "meetings.html", who, meetings=store.list(who=who), jobs=worker.queue())
+        return page(request, "meetings.html", who, meetings=store.list(who=who), jobs=jobs_of(who))
 
     def web_app(request):
         """The Meetings app, as in brainbot:agent command, talking to /api/v1/web."""
         lang = lang_of(request)
         html = WEB_APP.read_text()
-        shim = ("<script>window.IndieApp = window.IndieApp || { web: true, ask: async () => { throw new Error('no agent'); },"
-                " fetch: async (connector, body) => {"
+        # the key from the sign-in's redirect (#k=...) goes into this page's own storage
+        shim = ("<script>(() => { const h = new URLSearchParams(location.hash.slice(1)), k = h.get('k');"
+                " if (!k) return; try { localStorage.setItem('mp_key', k); } catch (e) {} h.delete('k');"
+                " const rest = h.toString(); history.replaceState(null, '', location.pathname + (rest ? '#' + rest : '')); })();"
+                " window.IndieApp = window.IndieApp || { web: true, ask: async () => { throw new Error('no agent'); },"
+                " fetch: async (connector, body) => { let key = ''; try { key = localStorage.getItem('mp_key') || ''; } catch (e) {}"
                 " const r = await fetch('/api/v1/web', { method: 'POST', credentials: 'same-origin',"
-                " headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });"
+                " headers: { 'content-type': 'application/json', 'x-minutes-key': key }, body: JSON.stringify(body) });"
                 " if (r.status === 401) { location.href = '/login?next=/'; throw new Error('signed out'); }"
                 " const j = await r.json().catch(() => ({})); if (!j.ok) throw new Error(j.error || r.statusText);"
                 " return j; } };</script>")
@@ -714,7 +773,10 @@ def create_app(settings=None):
         meeting_or_404(mid, who)
         if storage not in ("local", "drive"):
             raise HTTPException(400)
-        change_storage(mid, storage)
+        try:
+            change_storage(mid, storage)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
         return RedirectResponse(f"/m/{mid}", status_code=303)
 
     @app.post("/m/{mid}/reprocess")
@@ -888,27 +950,27 @@ def create_app(settings=None):
         return google_page(request, True, email=done["email"])
 
     @app.get("/api/v1/pair/{code}")
-    def pair_peek(code: str):
+    def pair_peek(code: str, request: Request):
         """What a code would connect to, so the phone can ask before it spends it."""
-        if guesses.blocked():
+        if guesses.blocked(client(request)):
             raise HTTPException(429, "too many wrong codes, try again in a few minutes")
         row = codes.peek(code)
         if not row:
-            guesses.miss()
+            guesses.miss(client(request))
             raise HTTPException(404, "unknown, used or expired code")
         return {"person": person_name(row["user_id"]), "box": s.box_name, "box_url": s.public_url, "ca": ca_der(),
                 "expires_at": row["expires_at"], "webapp": s.webapp_url,
                 "apk_url": s.apk_url}
 
     @app.post("/api/v1/pair")
-    def pair_redeem(body: PairIn):
+    def pair_redeem(body: PairIn, request: Request):
         """Spends a code: the phone's own token, and where and how to reach the box."""
-        if guesses.blocked():
+        if guesses.blocked(client(request)):
             raise HTTPException(429, "too many wrong codes, try again in a few minutes")
         name = " ".join(body.device.split())[:60] or "Phone"
         raw, row = codes.redeem(body.code, phone_token, name)
         if not raw:
-            guesses.miss()
+            guesses.miss(client(request))
             raise HTTPException(404, "unknown, used or expired code")
         return {"token": raw, "box_url": s.public_url, "ca": ca_der(), "person": person_name(row["user_id"]),
                 "device": name, "box": s.box_name}
@@ -1043,7 +1105,12 @@ def create_app(settings=None):
             return {"deleted": mid}
         if op == "set_name":
             # brainbot:agent command names people only by id; the person picks the name their phones show
-            name = str(args.get("name") or "").strip()[:80] or None
+            name = " ".join(str(args.get("name") or "").split())[:80] or None
+            if who.token["role"] == "web":      # the owner and the team sign in with their names
+                if who.member and not name:
+                    raise ToolError("a name, please: you sign in with it")
+                if name and name_taken(name, who.user_id):
+                    raise ToolError(f"{name} is taken: pick another name")
             db.run("UPDATE users SET name = ? WHERE id = ?", name, who.user_id)
             return {"name": name}
         if op == "phones":
@@ -1083,7 +1150,7 @@ def create_app(settings=None):
                 raise ToolError("a name, please")
             if len(members(owner)) >= MAX_MEMBERS:
                 raise ToolError(f"at most {MAX_MEMBERS} people in a team")
-            if owner_named(name) or db.one("SELECT 1 FROM users WHERE role = 'member' AND lower(name) = lower(?)", name):
+            if name_taken(name):
                 raise ToolError(f"{name} is taken: pick another name")
             uid = add_person(db, name=name)["id"]
             db.run("UPDATE users SET role = 'member', invited_by = ? WHERE id = ?", owner, uid)
@@ -1093,8 +1160,9 @@ def create_app(settings=None):
             if not m:
                 raise ToolError("no such person in the team")
             db.run("DELETE FROM sessions WHERE user_id = ?", m["id"])
-            if op == "team_reset":
-                return {"member": m, **invite(m["id"])}
+            if op == "team_reset":              # the old password stops now, not when the new link is used
+                db.run("UPDATE users SET password_hash = NULL WHERE id = ?", m["id"])
+                return {"member": {**m, "joined": False, "last_seen_at": None}, **invite(m["id"])}
             for table in ("invites", "user_settings"):
                 db.run(f"DELETE FROM {table} WHERE user_id = ?", m["id"])
             db.run("DELETE FROM users WHERE id = ?", m["id"])
@@ -1173,6 +1241,18 @@ class Address:
         await self.app(scope, receive, send)
 
 
+class NoCodes:
+    """Connect and invite codes travel in the path of their look-up (GET /api/v1/pair/CODE,
+    /api/v1/join/CODE): the access log shows those paths without them."""
+
+    def filter(self, record):
+        args = record.args
+        if isinstance(args, tuple) and len(args) > 2 and isinstance(args[2], str) \
+                and args[2].startswith(("/api/v1/pair/", "/api/v1/join/")):
+            record.args = (*args[:2], args[2].rsplit("/", 1)[0] + "/***", *args[3:])
+        return True
+
+
 def create_token(db, name, role, user_id=None, trusts_identity=False):
     """A new token, stored hashed. trusts_identity: brainbot:agent command's service
     token, which speaks for the person its X-Indie-User header names (people.py)."""
@@ -1201,6 +1281,8 @@ def main():
     # the proxies whose X-Forwarded-Proto counts: Caddy on aibox1's Docker network by default;
     # an Indie Box's gateway sits on a network of the box's choosing ("*" there: only the
     # box's own containers reach this one)
+    import logging
+    logging.getLogger("uvicorn.access").addFilter(NoCodes())
     uvicorn.run(create_app(), host="0.0.0.0", port=int(os.environ.get("PORT", "8000")), proxy_headers=True,
                 forwarded_allow_ips=os.environ.get("FORWARDED_ALLOW_IPS", "127.0.0.1,172.16.0.0/12"),
                 log_level="info")

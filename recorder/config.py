@@ -37,6 +37,9 @@ class Settings:
         # an Indie Box may offer a remote provider's model under a local-looking name:
         # transcripts would leave the box, so only with LLM_REMOTE_OK=1
         self.llm_remote_ok = get("LLM_REMOTE_OK", "0") == "1"
+        # an Indie Box: summaries only from a model the box lists as its own ("local": true);
+        # no listing, or a model it does not list, holds them (fail closed)
+        self.llm_local_only = get("LLM_LOCAL_ONLY", "0") == "1"
         self.engine = get("ENGINE", "A-iq4")
         self.nemo_url = get("NEMO_URL", "http://engine-nemo:8090").rstrip("/")
         self.qwen_url = get("QWEN_URL", "off").rstrip("/")          # engine B: aibox1 only

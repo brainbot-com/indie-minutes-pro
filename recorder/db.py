@@ -165,6 +165,8 @@ MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN password_hash TEXT",
     "ALTER TABLE users ADD COLUMN invited_by TEXT",
     "ALTER TABLE meetings ADD COLUMN shared INTEGER NOT NULL DEFAULT 0",
+    # a browser's sign-in: the cookie opens pages, the key (kept by the page) its data
+    "ALTER TABLE sessions ADD COLUMN key_hash TEXT",
 ]
 
 

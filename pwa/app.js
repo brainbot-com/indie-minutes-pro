@@ -14,6 +14,7 @@ const STR = {
     pair2: "Scan the code with this phone's camera and choose Record in the browser.",
     pair3: 'No camera at hand? Type the code here.',
     pairLabel: 'Code', connect: 'Connect', pairUsed: 'This code is used or expired. Make a new one in Minutes Pro.',
+    switchAsk: who => `This phone is connected already. Record for ${who || 'someone else'} from now on instead?`,
     pairSlow: 'Too many wrong codes. Wait a few minutes.',
     pairNote: 'This page talks only to the box. Recordings go to this box and nowhere else.',
     pairBad: 'The box did not accept this token.', pairNoBox: 'Cannot reach the box. Is this phone on its network (or the VPN)?',
@@ -45,6 +46,7 @@ const STR = {
     pair2: 'Scannen Sie den Code mit der Kamera dieses Telefons und wählen Sie Im Browser aufnehmen.',
     pair3: 'Keine Kamera zur Hand? Geben Sie den Code hier ein.',
     pairLabel: 'Code', connect: 'Verbinden', pairUsed: 'Dieser Code ist benutzt oder abgelaufen. Erstellen Sie in Minutes Pro einen neuen.',
+    switchAsk: who => `Dieses Telefon ist schon verbunden. Ab jetzt stattdessen für ${who || 'jemand anderen'} aufnehmen?`,
     pairSlow: 'Zu viele falsche Codes. Bitte einige Minuten warten.',
     pairNote: 'Diese Seite spricht nur mit der Box. Aufnahmen gehen an diese Box und nirgendwo sonst hin.',
     pairBad: 'Die Box hat dieses Token nicht angenommen.', pairNoBox: 'Die Box ist nicht erreichbar. Ist das Telefon in ihrem Netz (oder im VPN)?',
@@ -632,6 +634,17 @@ async function redeem(code) {
 
 const connect = text => (codeFrom(text) ? redeem(codeFrom(text)) : pair(tokenFrom(text)));
 
+// A link for another connection while this phone has one: ask first, naming whom it would record for
+// (someone could send a link to their own account). A code that is used or expired fails as usual.
+async function switchOk(link) {
+  const code = codeFrom(link);
+  const r = await (code ? fetch(at('/api/v1/pair/' + code), { cache: 'no-store' })
+    : fetch(at('/api/v1/me'), { headers: { Authorization: 'Bearer ' + tokenFrom(link) } })).catch(() => null);
+  if (!r || !r.ok) return true;
+  const j = await r.json().catch(() => ({}));
+  return confirm(t('switchAsk')(j.person || ''));
+}
+
 async function pair(tok) {
   const r = await fetch(at('/api/v1/me'), { headers: { Authorization: 'Bearer ' + tok } }).catch(() => null);
   if (!r || !r.ok) { show('pair', r ? t('pairBad') : t('pairNoBox')); return false; }
@@ -708,7 +721,7 @@ async function boot() {
   if (location.hash.startsWith('#pair=') || location.hash.startsWith('#code=')) {
     const link = location.hash;
     history.replaceState(null, '', location.pathname);
-    await connect(link);
+    if (!token() || await switchOk(link)) await connect(link);
   }
   $('server').textContent = location.host;
   checkBox();

@@ -31,7 +31,7 @@ import httpx
 
 from .gdrive import Google, GoogleError
 from .llm import chat_json
-from .util import new_id, now_iso, read_bytes, read_json, write_json
+from .util import new_id, now_iso, read_bytes, read_json, web_url, write_json
 
 DECIDE_SCHEMA = {
     "type": "object",
@@ -243,8 +243,14 @@ class Followup:
         return self.executor == "agent" or self.github.available()
 
     def sync_issues(self, repo, issues):
+        # one index for the box: of the repo follow-ups go to, with web links only
+        if self.s.github_repo and repo.lower() != self.s.github_repo.lower():
+            raise ValueError(f"follow-ups go to {self.s.github_repo}, not {repo}")
         keep = ("number", "title", "body", "state", "html_url")
-        rows = [{k: (i.get(k) or "")[:2000] if k == "body" else i.get(k) for k in keep} for i in issues]
+        rows = [{k: (i.get(k) or "")[:2000] if k == "body" else i.get(k) for k in keep}
+                for i in issues if isinstance(i, dict)]
+        for r in rows:
+            r["html_url"] = web_url(r["html_url"])
         write_json(self.index_path, {"repo": repo, "synced_at": now_iso(), "issues": rows})
         return {"repo": repo, "issues": len(rows)}
 
@@ -470,6 +476,9 @@ class Followup:
             return {"id": pid, "state": "executed", "note": "already acknowledged"}
         if p["state"] not in ("approved", "superseded"):    # superseded: one an agent had started on still counts
             return {"id": pid, "error": f"proposal is {p['state']}, not approved"}
+        if not web_url(url):
+            return {"id": pid, "error": "url must be a web address (https://...)"}
+        url = web_url(url)
         res = self._executed(pid, p["kind"], url, note=note, who=who)
         (self.s.outbox_dir / f"{pid}.json").unlink(missing_ok=True)
         return res

@@ -52,6 +52,8 @@
     },
   };
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  // links that agents report (a Drive folder) only as web addresses: javascript: would run
+  const webUrl = (u) => (/^https?:\/\/[^\s]+$/i.test(String(u || '').trim()) ? String(u).trim() : '');
   const pad = (n) => String(n).padStart(2, '0');
 
   function create({ lang, call, fail = () => {}, onChange = () => {}, box = () => 'aibox1', drive = () => true, boxLink = true,
@@ -220,7 +222,7 @@
             ${withDrive ? `<div class="cell"><span class="label" id="dLDrive">${esc(t('drive'))}</span><button type="button" class="switch" role="switch" aria-checked="${m.storage === 'drive'}" id="dDrive" aria-labelledby="dLDrive"></button></div>` : ''}
             ${withTeam ? `<div class="cell"><span class="label" id="dLTeam">${esc(t('team'))}</span><button type="button" class="switch" role="switch" aria-checked="${!!m.shared}" id="dTeam" aria-labelledby="dLTeam"></button></div>` : ''}
           </div>
-          <p class="note" style="margin-top: 12px"><span id="dNote">${esc(note)}</span> ${m.drive_url ? `<a id="dLink" target="_blank" rel="noopener" href="${esc(m.drive_url)}">${esc(t('openFolder'))}</a>` : ''}</p>
+          <p class="note" style="margin-top: 12px"><span id="dNote">${esc(note)}</span> ${webUrl(m.drive_url) ? `<a id="dLink" target="_blank" rel="noopener" href="${esc(webUrl(m.drive_url))}">${esc(t('openFolder'))}</a>` : ''}</p>
         </div>
         <div class="sum" id="dSum">${summary(m.summary_md)}</div>
         <div class="folds">

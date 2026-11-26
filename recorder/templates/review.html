@@ -24,7 +24,7 @@
       · {{ local_time(p.created_at) }}
     </div>
     {% if p.kind == 'github_comment' %}
-      <p>Comment on <a href="{{ p.payload.issue_url }}">#{{ p.payload.issue_number }} {{ p.payload.issue_title }}</a></p>
+      <p>Comment on <a href="{{ p.payload.issue_url|weburl }}">#{{ p.payload.issue_number }} {{ p.payload.issue_title }}</a></p>
       <pre>{{ p.payload.body }}</pre>
     {% elif p.kind == 'github_issue' %}
       <p>New issue: <strong>{{ p.payload.title }}</strong></p>
@@ -35,7 +35,7 @@
     {% endif %}
     {% if p.rationale %}<p class="muted">Why: {{ p.rationale }}</p>{% endif %}
     {% if p.error %}<p class="error">{{ p.error }}</p>{% endif %}
-    {% if p.result and p.result.url %}<p>Result: <a href="{{ p.result.url }}">{{ p.result.url }}</a></p>{% endif %}
+    {% if p.result and p.result.url|weburl %}<p>Result: <a href="{{ p.result.url|weburl }}">{{ p.result.url }}</a></p>{% endif %}
     {% if p.state == 'approved' %}<p class="muted">In the outbox: waiting for the Agent Command Center agent.</p>{% endif %}
     {% if p.kind.startswith('github') and 'github' not in targets %}
     <p class="muted">GitHub is switched off as a target: this proposal is kept but cannot run.</p>

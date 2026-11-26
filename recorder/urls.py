@@ -10,12 +10,16 @@ _last = {"base": "http://localhost:8000"}
 
 
 def set_from(request):
-    base = f"{request.url.scheme}://{request.url.netloc}"
-    _current.set(base)
-    # only a request through the gateway says how people reach us; an app on the box
-    # calling http://indie-minutes-pro:8000 directly does not
+    _current.set(f"{request.url.scheme}://{request.url.netloc}")
+
+
+def remember(request):
+    """A signed-in request (api.token_row) through the gateway: how people reach us,
+    for work without a request. Not just any request: its Host header is the
+    sender's to choose. An app on the box calling http://indie-minutes-pro:8000
+    directly does not count either."""
     if request.headers.get("x-forwarded-proto") or request.headers.get("x-forwarded-host"):
-        _last["base"] = base
+        _last["base"] = f"{request.url.scheme}://{request.url.netloc}"
 
 
 def current():
