@@ -40,6 +40,11 @@ services:
       # The release, written by indiebox/pin-images.sh together with the image
       # defaults above and below; a literal, so the box reports what it runs.
       indiebox.app.version: "0.0.0"
+      # The meetings' index is SQLite (SQLCipher, WAL) next to the meeting
+      # folders, so the box pauses this service while a backup reads /data:
+      # the database file and its WAL are then copied as one state. Phones
+      # retry an upload that falls into the pause.
+      indiebox.pause-for-backup: "true"
       indiebox.app.description: "Meetings mit dem Telefon aufnehmen, auf der Box transkribieren und zusammenfassen. Nichts davon verlässt die Box."
 
       # ---- the install form (docs/app-integration.md, "Required variables")
@@ -100,6 +105,12 @@ services:
   # ---- speech: NVIDIA NeMo-Speech.cpp on the GPU (Vulkan) ---------------------
   # Nemotron 3.5 Transcribe 30B-A4B, the words with who said them. Started per
   # meeting, so nothing stays in GPU memory between meetings.
+  #
+  # For now the app brings this runner and its model itself. The box's model
+  # endpoint does not see it: it shares the GPU with the box's models outside
+  # the box's arbitration, and its model sits in the app's data folder. It moves
+  # to a runner the box provides once the box's runners are modular (indie-box,
+  # docs/app-integration.md, "Not implemented yet").
   indie-minutes-pro-engine:
     image: ghcr.io/brainbot-com/indie-minutes-pro-engine:${INDIE_MINUTES_PRO_TAG:-0.0.0}
     profiles:
