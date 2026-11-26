@@ -63,8 +63,8 @@ m = (ms[-1] if n == 'last' else ms[int(n) - 1] if len(ms) >= int(n) else None) i
 print((int(m[0]) + int(m[2])) // 2, (int(m[1]) + int(m[3])) // 2) if m else print('')" "${1:-1}")
 	[ -n "$xy" ] && A shell input tap $xy
 }
-hide_keyboard() {  # closes the on-screen keyboard if it is open (BACK would leave the screen otherwise)
-	A shell dumpsys input_method | grep -qE "mInputShown=true|isInputViewShown=true" && A shell input keyevent KEYCODE_BACK
+scroll_down() {  # swipes the page up, as a person does to reach what the keyboard covers
+	A shell input swipe 540 1300 540 400 300
 	sleep 1
 }
 fields() {  # how many text fields the screen shows
@@ -177,13 +177,13 @@ if [ "$(fields)" -gt 1 ]; then
 	say "connect by typing the box's address and a code (the build without a connect address: GitHub's)"
 	tap_field 1; sleep 1
 	A shell input text "$BOX"; sleep 1
-	hide_keyboard                   # the code field sits behind it
+	scroll_down                     # the code field is below, behind the keyboard
 else
 	say "connect by typing a code (looked up at the build's connect address, as on a phone)"
 fi
 CODE1=$(code)
 type_code "$CODE1"
-hide_keyboard
+scroll_down                         # and the Connect button under it
 shots 0-connect-typed
 tap_text "Connect"
 sleep 5
@@ -207,7 +207,7 @@ tap_text "SETTINGS"; sleep 2
 tap_text "Disconnect this phone"; sleep 3
 paired && { echo "still connected after Disconnect"; exit 1; } || echo "disconnected"
 type_code "$CODE1"
-hide_keyboard
+scroll_down
 tap_text "Connect"
 sleep 5
 ui_contains "This code is used or expired" && echo "refused: This code is used or expired. Make a new one in Minutes Pro, ..." ||
