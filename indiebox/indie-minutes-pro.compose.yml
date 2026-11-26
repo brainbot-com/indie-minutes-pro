@@ -27,7 +27,7 @@ services:
 
   # ---- the app: the one labelled service, so the one gateway route ---------
   indie-minutes-pro:
-    image: ghcr.io/brainbot-com/indie-minutes-pro:${INDIE_MINUTES_PRO_TAG:-0.0.0}
+    image: ghcr.io/brainbot-com/indie-minutes-pro:${INDIE_MINUTES_PRO_TAG:-1.0.0}
     # Recordings, transcripts and summaries are people's words: on boxes with
     # encrypted storage the recorder waits for the unlock.
     profiles:
@@ -39,7 +39,7 @@ services:
       indiebox.app.http-port: "8000"
       # The release, written by indiebox/pin-images.sh together with the image
       # defaults above and below; a literal, so the box reports what it runs.
-      indiebox.app.version: "0.0.0"
+      indiebox.app.version: "1.0.0"
       # The meetings' index is SQLite (SQLCipher, WAL) next to the meeting
       # folders, so the box pauses this service while a backup reads /data:
       # the database file and its WAL are then copied as one state. Phones
@@ -112,7 +112,7 @@ services:
   # to a runner the box provides once the box's runners are modular (indie-box,
   # docs/app-integration.md, "Not implemented yet").
   indie-minutes-pro-engine:
-    image: ghcr.io/brainbot-com/indie-minutes-pro-engine:${INDIE_MINUTES_PRO_TAG:-0.0.0}
+    image: ghcr.io/brainbot-com/indie-minutes-pro-engine:${INDIE_MINUTES_PRO_TAG:-1.0.0}
     profiles:
       - ${SECURE_STORAGE_PROFILE:-stable}
     restart: always
