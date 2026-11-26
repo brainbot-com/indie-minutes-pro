@@ -2,7 +2,7 @@
 """Phone simulator: streams an audio file through the same chunked upload API
 the PWA uses, then optionally waits for the transcript and summary.
 
-    python3 sim/phone_sim.py --url https://10.1.9.7:8443 --cacert ca.crt \\
+    python3 sim/phone_sim.py --url https://box.local:8443 --cacert ca.crt \\
         --token-file ~/.config/minutes-pro/token meeting.wav --title "Weekly" --wait
 
 Like the phone it encodes to WebM/Opus first (--encode opus, needs ffmpeg; use
@@ -77,7 +77,7 @@ def encode_opus(src, dst):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("audio", type=Path)
-    ap.add_argument("--url", default=os.environ.get("IR_URL", "https://10.1.9.7:8443"))
+    ap.add_argument("--url", default=os.environ.get("IR_URL", "https://localhost:8443"))
     ap.add_argument("--token", default=os.environ.get("IR_TOKEN"))
     ap.add_argument("--token-file", type=Path)
     ap.add_argument("--cacert", default=os.environ.get("IR_CACERT"))

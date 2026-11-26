@@ -33,6 +33,31 @@ object ConnectCode {
     fun shown(code: String): String = if (code.length > 4) code.take(4) + "-" + code.drop(4) else code
 }
 
+/**
+ * The box's address, typed on the connect screen when the build has no connect address of its
+ * own (the build on GitHub, for any Indie Box): "box.local:9207", or the connect page's link.
+ */
+object BoxAddress {
+    private const val PREFS = "connect"     // not "box": Disconnect clears that one
+
+    /** Its base URL ("https://box.local:9207"), or null when it names no host. */
+    fun base(text: String): String? {
+        var t = text.trim().substringBefore('#').substringBefore('?').trimEnd('/')
+        if (t.isEmpty() || t.any { it.isWhitespace() }) return null
+        if (!t.startsWith("https://", ignoreCase = true) && !t.startsWith("http://", ignoreCase = true)) t = "https://$t"
+        t = t.removeSuffix("/connect").removeSuffix("/app").trimEnd('/')
+        val host = try { java.net.URI(t).host } catch (e: Exception) { null }
+        return if (host.isNullOrBlank()) null else t
+    }
+
+    /** The one typed last, so a phone connected again finds it filled in. */
+    fun last(ctx: Context): String = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("address", "") ?: ""
+
+    fun remember(ctx: Context, text: String) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("address", text.trim()).apply()
+    }
+}
+
 /** What a link opens the app with. */
 sealed interface PairLink {
     /**

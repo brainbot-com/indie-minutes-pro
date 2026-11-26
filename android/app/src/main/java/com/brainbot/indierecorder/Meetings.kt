@@ -156,7 +156,7 @@ fun speakerCards(m: JSONObject): List<SpeakerCard> {
 }
 
 /**
- * Where the phone fetches a speaker's clip: the signed link's path at the box itself. The link names
- * the brain-tls address, whose certificate the phone may not trust; the box answers the same path.
+ * Where the phone fetches a speaker's clip: the signed link's path at the box itself. The link may
+ * name a proxy in front of the box, whose certificate the phone may not trust; the box answers the same path.
  */
 fun clipPath(url: String?): String? = url?.substringAfter("/api/v1/files/", "")?.takeIf { it.isNotEmpty() }?.let { "/api/v1/files/$it" }

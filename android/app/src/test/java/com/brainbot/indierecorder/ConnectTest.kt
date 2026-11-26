@@ -15,9 +15,20 @@ class ConnectTest {
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 
     @Test
+    fun aTypedBoxAddress() {
+        assertEquals("https://box.local:9207", BoxAddress.base(" box.local:9207 "))
+        assertEquals("https://box.local:9207", BoxAddress.base("https://box.local:9207/connect#K7Q4M2XB"))
+        assertEquals("https://box.local:9207", BoxAddress.base("box.local:9207/app/"))
+        assertEquals("http://192.168.1.20:9207", BoxAddress.base("http://192.168.1.20:9207"))
+        assertEquals("https://agent.example.com/indie-recorder", BoxAddress.base("https://agent.example.com/indie-recorder/connect"))
+        assertNull(BoxAddress.base(""))
+        assertNull(BoxAddress.base("box local"))
+    }
+
+    @Test
     fun codesAreReadHoweverTheyAreTyped() {
         assertEquals("K7Q4M2XB", ConnectCode.normalize(" k7q4-m2xb "))
-        assertEquals("K7Q4M2XB", ConnectCode.normalize("https://ai-knowledge.mz.brainbot.com/indie-recorder/connect#K7Q4M2XB"))
+        assertEquals("K7Q4M2XB", ConnectCode.normalize("https://agent.example.com/indie-recorder/connect#K7Q4M2XB"))
         assertEquals("K7Q4M2XB", ConnectCode.normalize("K7Q4 M2XB 9999"))       // at most 8 characters
         assertEquals("", ConnectCode.normalize("0O1IL"))                       // not in the alphabet
         assertEquals("K7Q4-M2XB", ConnectCode.shown("K7Q4M2XB"))
@@ -26,25 +37,25 @@ class ConnectTest {
 
     @Test
     fun theConnectPagesLinkCarriesCodeAddressAndCa() {
-        val l = PairLink.parse("indierecorder://pair?c=k7q4m2xb&u=${enc("https://10.1.9.7:8443/")}&ca=$ca") as PairLink.Code
+        val l = PairLink.parse("indierecorder://pair?c=k7q4m2xb&u=${enc("https://192.168.1.20:8443/")}&ca=$ca") as PairLink.Code
         assertEquals("K7Q4M2XB", l.code)
-        assertEquals("https://10.1.9.7:8443", l.url)
+        assertEquals("https://192.168.1.20:8443", l.url)
         assertArrayEquals(der, l.caDer)
     }
 
     @Test
     fun olderLinksWithATokenStillWork() {
-        val l = PairLink.parse("indierecorder://pair?u=${enc("https://10.1.9.7:8443")}&t=abcdefghijklmnopqrstuvwxyz012345&ca=$ca")
+        val l = PairLink.parse("indierecorder://pair?u=${enc("https://192.168.1.20:8443")}&t=abcdefghijklmnopqrstuvwxyz012345&ca=$ca")
         assertTrue(l is PairLink.Token)
         assertEquals("abcdefghijklmnopqrstuvwxyz012345", (l as PairLink.Token).cfg.token)
     }
 
     @Test
     fun refusesLinksThatCannotConnect() {
-        assertNull(PairLink.parse("https://10.1.9.7:8443/connect#K7Q4M2XB"))
-        assertNull(PairLink.parse("indierecorder://pair?c=K7Q4M2XB&u=${enc("http://10.1.9.7")}&ca=$ca"))   // no https
-        assertNull(PairLink.parse("indierecorder://pair?c=K7Q4&u=${enc("https://10.1.9.7:8443")}&ca=$ca")) // short
-        assertNull(PairLink.parse("indierecorder://pair?c=K7Q4M2XB&u=${enc("https://10.1.9.7:8443")}&ca=@@@@"))  // a CA that does not decode
+        assertNull(PairLink.parse("https://192.168.1.20:8443/connect#K7Q4M2XB"))
+        assertNull(PairLink.parse("indierecorder://pair?c=K7Q4M2XB&u=${enc("http://192.168.1.20")}&ca=$ca"))   // no https
+        assertNull(PairLink.parse("indierecorder://pair?c=K7Q4&u=${enc("https://192.168.1.20:8443")}&ca=$ca")) // short
+        assertNull(PairLink.parse("indierecorder://pair?c=K7Q4M2XB&u=${enc("https://192.168.1.20:8443")}&ca=@@@@"))  // a CA that does not decode
     }
 
     @Test
@@ -57,17 +68,17 @@ class ConnectTest {
 
     @Test
     fun anOfferSurvivesItsOwnJson() {
-        val o = Offer.from(JSONObject().put("person", "Ana").put("box", "aibox1").put("box_url", "https://10.1.9.7:8443/").put("ca", ca))!!
+        val o = Offer.from(JSONObject().put("person", "Ana").put("box", "aibox1").put("box_url", "https://192.168.1.20:8443/").put("ca", ca))!!
         val back = Offer.parse(o.toJson())!!
         assertEquals("Ana", back.person)
         assertEquals("aibox1", back.box)
-        assertEquals("https://10.1.9.7:8443", back.boxUrl)
+        assertEquals("https://192.168.1.20:8443", back.boxUrl)
         assertArrayEquals(der, back.caDer)
-        val nameless = Offer.from(JSONObject().put("person", JSONObject.NULL).put("box_url", "https://10.1.9.7:8443"))!!
+        val nameless = Offer.from(JSONObject().put("person", JSONObject.NULL).put("box_url", "https://192.168.1.20:8443"))!!
         assertNull(nameless.person)
         assertNull(nameless.caDer)
-        assertEquals("10.1.9.7:8443", nameless.box)
-        assertNull(Offer.from(JSONObject().put("box_url", "http://10.1.9.7")))
+        assertEquals("192.168.1.20:8443", nameless.box)
+        assertNull(Offer.from(JSONObject().put("box_url", "http://192.168.1.20")))
     }
 
     @Test

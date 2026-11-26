@@ -90,7 +90,7 @@ class MeetingsTest {
         val m = JSONObject().put("speakers", JSONArray().put(JSONObject().put("label", "Speaker 2").put("name", JSONObject.NULL)
             .put("share", 35).put("turns", 12).put("first", 5.2).put("lines", JSONArray().put("We ship on Monday."))
             .put("suggestions", JSONArray().put(JSONObject().put("name", "Anna").put("why", "addressed as Anna").put("by", "agent")))
-            .put("clip_url", "https://ai-knowledge.mz.brainbot.com/indie-recorder/api/v1/files/20261119-0839-b89d/1795340902/abcdefghijklmnopqrstuv/clip%3ASpeaker%202")))
+            .put("clip_url", "https://agent.example.com/indie-recorder/api/v1/files/20261119-0839-b89d/1795340902/abcdefghijklmnopqrstuv/clip%3ASpeaker%202")))
         val c = speakerCards(m).single()
         assertEquals("Speaker 2", c.label)
         assertEquals("", c.name)

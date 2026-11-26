@@ -12,7 +12,7 @@ class SummaryTest {
 
             _18 Nov 2026, 47 min, 4 speakers_
 
-            https://10.1.9.7:8443/meetings/abc
+            https://192.168.1.20:8443/meetings/abc
 
             ## TL;DR
 

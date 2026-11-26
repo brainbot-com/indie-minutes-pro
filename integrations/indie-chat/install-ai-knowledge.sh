@@ -13,11 +13,11 @@
 #
 # What it changes, each file backed up once as <file>.pre-indie-recorder:
 #   1. /opt/kb/brain-tls/Caddyfile: /indie-recorder/mcp, /indie-recorder/api/v1/files/*
-#      and /indie-recorder/api/v1/indiechat on https://ai-knowledge.mz.brainbot.com go
-#      to https://10.1.9.7:8443, trusting the recorder's CA. Nothing else of the
-#      recorder is passed through. Validated first, then a graceful reload.
-#   2. /opt/kb/indiechat-src/.env: INDIE_PRIVATE_HOSTS gets ai-knowledge.mz.brainbot.com
-#      (a person's own MCP server may point there), INDIE_RECORDER_TOKEN the token.
+#      and /indie-recorder/api/v1/indiechat on https://$HOST go to https://$RECORDER:8443,
+#      trusting the recorder's CA. Nothing else of the recorder is passed through.
+#      Validated first, then a graceful reload.
+#   2. /opt/kb/indiechat-src/.env: INDIE_PRIVATE_HOSTS gets $HOST (a person's own MCP
+#      server may point there), INDIE_RECORDER_TOKEN the token.
 #   3. /opt/kb/indiechat-config/connectors.json: the "indie-recorder" connector,
 #      with "identity": true, so the recorder learns who asks and answers that
 #      person only.
@@ -28,13 +28,16 @@
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
-HOST=ai-knowledge.mz.brainbot.com
-RECORDER=10.1.9.7
+# This server's own values, in site.env next to the script (kept on the server, not in
+# the repository): HOST, brainbot:agent command's host name; RECORDER, the recorder's
+# address (its Caddy's site); CA_SHA256, the fingerprint of the recorder's CA; SELF,
+# this server's address as the recorder sees it; BOX_LABEL, what the app calls the box.
+[ -f "$HERE/site.env" ] && . "$HERE/site.env"
+: "${HOST:?HOST missing (site.env next to this script)}" "${RECORDER:?RECORDER missing}" "${CA_SHA256:?CA_SHA256 missing}"
 TLS=/opt/kb/brain-tls
 SRC=/opt/kb/indiechat-src
 CFG=/opt/kb/indiechat-config
 COMPOSE="docker compose -p indiechat -f $SRC/docker-compose.ai-knowledge.yml"
-CA_SHA256=${CA_SHA256:-E6:89:A7:83:FA:CE:DC:3C:1E:82:E7:A9:8F:45:6B:54:8A:56:F6:2D:ED:E2:E4:83:F5:43:F9:40:07:F1:2D:9F}
 PATHS="/indie-recorder/mcp /indie-recorder/api/v1/files/* /indie-recorder/api/v1/indiechat /indie-recorder/connect /indie-recorder/api/v1/pair /indie-recorder/api/v1/pair/* /indie-recorder/indie-recorder.apk /indie-recorder/static/* /indie-recorder/app/* /indie-recorder/api/v1/health /indie-recorder/api/v1/me /indie-recorder/api/v1/settings /indie-recorder/api/v1/recordings /indie-recorder/api/v1/recordings/* /indie-recorder/oauth/google/* /indie-recorder/privacy /indie-recorder/about"
 
 [ "$(id -u)" = 0 ] || { echo "Run this as root." >&2; exit 1; }
@@ -65,7 +68,7 @@ if grep -qF "@indie_recorder path $PATHS" $TLS/Caddyfile; then
 else
 	backup $TLS/Caddyfile
 	cp -p $TLS/Caddyfile "$tmp/Caddyfile.before"
-	CA_DER=$CA_DER PATHS=$PATHS python3 - $TLS/Caddyfile > "$tmp/Caddyfile" <<'PY'
+	CA_DER=$CA_DER PATHS=$PATHS HOST=$HOST RECORDER=$RECORDER python3 - $TLS/Caddyfile > "$tmp/Caddyfile" <<'PY'
 import os, re, sys
 s = open(sys.argv[1]).read()
 matcher = "\t@indie_recorder path " + os.environ["PATHS"] + "\n"
@@ -73,7 +76,7 @@ if "@indie_recorder" in s:
     # an earlier install: only the list of paths grows
     s = re.sub(r"\t@indie_recorder path [^\n]*\n", lambda m: matcher, s, count=1)
 else:
-    route = """	# Minutes Pro on aibox1: its MCP endpoint, signed file links and the
+    route = """	# Minutes Pro on the box: its MCP endpoint, signed file links and the
 	# endpoint behind the "indie-recorder" connector, for the Meetings app and
 	# meeting agents in brainbot:agent command (each needs a recorder token or a
 	# signed link); the page a phone's connect code opens, the code's two
@@ -84,20 +87,20 @@ else:
 	# indie-minutes-pro/integrations/indie-chat/install-ai-knowledge.sh.
 """ + matcher + """	handle @indie_recorder {
 		uri strip_prefix /indie-recorder
-		reverse_proxy https://10.1.9.7:8443 {
-			# the recorder's Caddy serves the site 10.1.9.7 only
-			header_up Host 10.1.9.7:8443
+		reverse_proxy https://%(rec)s:8443 {
+			# the recorder's Caddy serves the site %(rec)s only
+			header_up Host %(rec)s:8443
 			flush_interval -1
 			transport http {
-				tls_server_name 10.1.9.7
+				tls_server_name %(rec)s
 				tls_trust_pool inline {
-					trust_der %s
+					trust_der %(ca)s
 				}
 			}
 		}
 	}
-""" % os.environ["CA_DER"]
-    site = s.index("ai-knowledge.mz.brainbot.com {\n")
+""" % {"rec": os.environ["RECORDER"], "ca": os.environ["CA_DER"]}
+    site = s.index(os.environ["HOST"] + " {\n")
     at = s.index("\timport site\n", site)
     s = s[:at] + route + s[at:]
 sys.stdout.write(s)
@@ -117,7 +120,7 @@ for path in /indie-recorder/mcp /indie-recorder/api/v1/indiechat; do
 	code=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" -d "{}" "https://$HOST$path")
 	case $code in
 		401) echo "$path works (the recorder asks for its token)" ;;
-		403) echo "WARNING: aibox1 does not admit this host yet: ALLOW_CIDRS in ~/indie-recorder/.env there needs 10.1.1.26/32" ;;
+		403) echo "WARNING: the recorder does not admit this host yet: ALLOW_CIDRS in its .env needs ${SELF:-the address of this server}/32" ;;
 		*) echo "WARNING: $path answered $code (expected 401)" ;;
 	esac
 done
@@ -190,12 +193,12 @@ else
 	echo "html copied"
 fi
 backup $CFG/app-templates.json
-if python3 - $CFG/app-templates.json <<'PY'
-import json, sys
+if BOX_LABEL=${BOX_LABEL:-the box} python3 - $CFG/app-templates.json <<'PY'
+import json, os, sys
 p = sys.argv[1]
 t = json.load(open(p))
 want = {"file": "indie-recorder.html", "key": "indie-recorder", "name": "Minutes Pro", "icon": "🔴",
-        "description": "Your meetings from Minutes Pro on aibox1: summaries, action items, speakers, Drive or local, your phones and your meeting agent. Each person sees only their own.",
+        "description": f"Your meetings from Minutes Pro on {os.environ['BOX_LABEL']}: summaries, action items, speakers, Drive or local, your phones and your meeting agent. Each person sees only their own.",
         "refresh": True, "seed": {"id": "indie-recorder", "state": {}, "adopt": ["Meetings"]}}
 have = next((e for e in t if e.get("key") == "indie-recorder"), None)
 if have == want:

@@ -173,8 +173,8 @@ class MainActivity : ComponentActivity() {
 
     /**
      * Debug builds only, for the end-to-end test over adb: where typed connect codes are looked up
-     * (the emulator has no VPN to ai-knowledge, so the box itself with its CA), and record a WAV
-     * file or the microphone, pause, resume, stop.
+     * and the CA to trust there (the box itself with its CA: the emulator trusts no other), and
+     * record a WAV file or the microphone, pause, resume, stop.
      */
     private fun testHooks(intent: Intent) {
         intent.getStringExtra("test_connect_base")?.let { ConnectApi.base = it.trimEnd('/') }
@@ -768,6 +768,9 @@ private fun PairScreen(initial: String?, auto: Boolean, paired: Boolean, onPaire
     var error by rememberSaveable { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     val device = remember { deviceName(ctx) }
+    // Where a typed code is looked up: the build's connect address, else the box's own, typed here
+    val askAddress = ConnectApi.base.isBlank()
+    var address by rememberSaveable { mutableStateOf(BoxAddress.last(ctx)) }
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = LocalFocusManager.current
     val msgUsed = stringResource(R.string.err_used)
@@ -883,13 +886,21 @@ private fun PairScreen(initial: String?, auto: Boolean, paired: Boolean, onPaire
                 Rule()
             }
         }
-        val ready = !busy && code.length == ConnectCode.LENGTH
+        val base = if (askAddress) BoxAddress.base(address) else ConnectApi.base
+        val ready = !busy && code.length == ConnectCode.LENGTH && base != null
         // The keyboard goes away, so the answer under the field is in view.
         fun submit() {
-            if (!ready) return
+            if (!ready || base == null) return
             keyboard?.hide()
             focus.clearFocus()
-            look(code, ConnectApi.base, ConnectApi.baseCa)
+            if (askAddress) BoxAddress.remember(ctx, address)
+            look(code, base, ConnectApi.baseCa)
+        }
+        if (askAddress) Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Label(stringResource(R.string.box_address))
+            LineField(address, { address = it }, "box.local:9207",
+                KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Uri, imeAction = ImeAction.Next))
+            Text(stringResource(R.string.box_address_note), fontSize = 13.sp, lineHeight = 19.sp, color = pal().muted)
         }
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Label(stringResource(R.string.code_label))
@@ -1246,9 +1257,11 @@ private fun MeetingListRow(n: Int, m: MeetingRow, zone: ZoneId, locale: Locale, 
 
 /** A text field drawn as a line: the text over a 1dp rule, the hint in grey. */
 @Composable
-private fun LineField(value: String, onChange: (String) -> Unit, hint: String) {
+private fun LineField(value: String, onChange: (String) -> Unit, hint: String,
+                      keyboard: KeyboardOptions = KeyboardOptions.Default) {
     val p = pal()
     BasicTextField(value, onChange, Modifier.fillMaxWidth(), singleLine = true, cursorBrush = SolidColor(p.ink),
+        keyboardOptions = keyboard,
         textStyle = LocalTextStyle.current.copy(fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.W500, color = p.ink),
         decorationBox = { inner ->
             Column {
@@ -1379,7 +1392,7 @@ private fun MeetingScreen(cfg: BoxConfig, mid: String, onBack: () -> Unit) {
             .onSuccess { note = queued }
             .onFailure { note = it.message }
     }
-    // Seven seconds of a speaker's voice, from the box itself (the link names brain-tls), played from the cache.
+    // Seven seconds of a speaker's voice, from the box itself (the link may name a proxy in front of it), played from the cache.
     fun play(c: SpeakerCard) {
         runCatching { player.reset() }
         if (playing == c.label) { playing = null; return }

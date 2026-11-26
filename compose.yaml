@@ -1,5 +1,5 @@
-# Minutes Pro on aibox1. Nothing here listens on the LAN except Caddy on
-# BIND_IP (10.1.9.7), and Caddy only lets in ALLOW_CIDRS (the VPN clients).
+# Minutes Pro on a server of your own, as on aibox1 at brainbot. Nothing here listens on
+# the LAN except Caddy on BIND_IP, and Caddy only lets in ALLOW_CIDRS (the VPN clients).
 name: indie-recorder
 
 services:

@@ -92,8 +92,9 @@ link resets someone's password; removing them ends their sessions.
   install form).
 - The owner deletes a meeting for good from its page (More, Delete meeting):
   recording, transcript, summaries and everything the box kept about it.
-- For companies: a template for the data protection impact assessment, in
-  German, [docs/dsfa-vorlage.md](docs/dsfa-vorlage.md). It is not legal advice.
+- For companies: a template for the data protection impact assessment,
+  [docs/dpia-template.md](docs/dpia-template.md) (German:
+  [docs/dsfa-vorlage.md](docs/dsfa-vorlage.md)). It is not legal advice.
 
 ## What stays where
 

@@ -52,14 +52,20 @@ print((int(m[1]) + int(m[3])) // 2, (int(m[2]) + int(m[4])) // 2) if m else prin
 	[ -n "$xy" ] && A shell input tap $xy
 }
 
-tap_field() {  # taps the first text field on the screen
+tap_field() {  # taps a text field on the screen: the Nth (default the first), or "last"
 	A shell uiautomator dump /sdcard/ui.xml > /dev/null
 	local xy
 	xy=$(A shell cat /sdcard/ui.xml | python3 -c "
 import re, sys
-m = re.search(r'class=\"android.widget.EditText\"[^>]*bounds=\"\[(\d+),(\d+)\]\[(\d+),(\d+)\]\"', sys.stdin.read())
-print((int(m[1]) + int(m[3])) // 2, (int(m[2]) + int(m[4])) // 2) if m else print('')")
+ms = re.findall(r'class=\"android.widget.EditText\"[^>]*bounds=\"\[(\d+),(\d+)\]\[(\d+),(\d+)\]\"', sys.stdin.read())
+n = sys.argv[1]
+m = (ms[-1] if n == 'last' else ms[int(n) - 1] if len(ms) >= int(n) else None) if ms else None
+print((int(m[0]) + int(m[2])) // 2, (int(m[1]) + int(m[3])) // 2) if m else print('')" "${1:-1}")
 	[ -n "$xy" ] && A shell input tap $xy
+}
+fields() {  # how many text fields the screen shows
+	A shell uiautomator dump /sdcard/ui.xml > /dev/null
+	A shell cat /sdcard/ui.xml | grep -o 'class="android.widget.EditText"' | wc -l
 }
 
 say "test audio: 75 s of German conversation (MLS, stitched)"
@@ -68,7 +74,8 @@ docker compose exec -T recorder ffmpeg -nostdin -loglevel error -y -t 75 -i /dat
 
 say "a test person; the emulator connects to their account with connect codes"
 PERSON=$(cli user add --ext-id "emulator-test-$(date +%s)" --name "Emulator Test" | python3 -c "import json, sys; print(json.load(sys.stdin)['id'])")
-BOX=https://10.1.9.7:8443
+BOX=${BOX:-$(sed -n 's/^PUBLIC_URL=//p' .env | tail -1)}     # the box itself, as phones reach it
+[ -n "$BOX" ] || { echo "PUBLIC_URL missing in .env (or set BOX)"; exit 1; }
 CA=$(python3 - <<'PY'
 import base64
 pem = open("secrets/tls/ca.crt").read()
@@ -149,26 +156,33 @@ A root > /dev/null; sleep 2
 A shell "settings put global device_name 'Test Pixel 8'"     # the name the phone's settings give it
 
 paired() { A shell "run-as $PKG cat shared_prefs/box.xml" 2> /dev/null | grep -q 'name="url"'; }   # Disconnect leaves an empty file
-type_code() {  # into the code field, the way a person types it
-	tap_field
+type_code() {  # into the code field (the last one), the way a person types it
+	tap_field last
 	sleep 1
 	A shell input text "$1"
 	sleep 1
 }
 
 say "the connect screen, before connecting"
-A shell am start -W -n $PKG/.MainActivity > /dev/null
+# the box's CA for addresses typed here: the emulator trusts no other (debug hook)
+A shell am start -W -n $PKG/.MainActivity --es test_connect_ca $CA > /dev/null
 sleep 4
 shots 0-connect
 
-say "connect by typing a code (looked up at the connect address, ai-knowledge, as on a phone)"
+if [ "$(fields)" -gt 1 ]; then
+	say "connect by typing the box's address and a code (the build without a connect address: GitHub's)"
+	tap_field 1; sleep 1
+	A shell input text "$BOX"; sleep 1
+else
+	say "connect by typing a code (looked up at the build's connect address, as on a phone)"
+fi
 CODE1=$(code)
 type_code "$CODE1"
 shots 0-connect-typed
 tap_text "Connect"
 sleep 5
 if ui_contains "The box is not reachable"; then
-	echo "the emulator does not reach ai-knowledge: typed codes are looked up at the box itself (debug override)"
+	echo "the emulator does not reach the build's connect address: typed codes are looked up at the box itself (debug override)"
 	A shell "am start -n $PKG/.MainActivity --es test_connect_base $BOX --es test_connect_ca $CA" > /dev/null
 	sleep 2; tap_text "Connect"; sleep 5
 fi

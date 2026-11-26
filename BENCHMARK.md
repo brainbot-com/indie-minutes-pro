@@ -9,7 +9,7 @@ transcripts in `data/bench/runs/`, LLM probe in `data/bench/runs/llm-probe.jsonl
 - Box: aibox1, Ryzen AI Max+ 395, Radeon 8060S (gfx1151), 128 GB unified
   memory (102 GiB usable as GTT), Ubuntu 24.04.3, kernel 6.14.0-1013-oem.
   Other services kept running as usual (Ollama with the embedding and
-  reranker models for ai-knowledge, Open WebUI, ComfyUI idle).
+  reranker models for a knowledge base, Open WebUI, ComfyUI idle).
 - Engine A: NeMo-Speech.cpp 0.3.0 (NVIDIA's prebuilt Vulkan archive), Mesa
   25.2.8 RADV, Nemotron 3.5 Transcribe 30B-A4B with the F16 encoder and the
   AtomicChat AD-IQ4_NL (19.7 GB) or Q8_0 (35.0 GB) decoder, `--diarize`,

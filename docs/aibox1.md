@@ -1,5 +1,9 @@
 # Minutes Pro on aibox1
 
+Addresses are placeholders here: `<aibox1>` is `BIND_IP` in aibox1's `.env`,
+`<agent-host>` brainbot:agent command's host name and `<ai-knowledge>` that
+server's address (`HOST` and `SELF` in `/root/indie-recorder-kit/site.env` there).
+
 brainbot's own deployment, where the recorder started: the details of that
 setup (the VPN, two speech engines, the benchmark, the connector in
 brainbot:agent command, Google Drive). For what the recorder is and the other
@@ -26,7 +30,7 @@ their own account there: a person's phones record into it, and each person
 sees only their own meetings.
 
 ```
-phone (Android app or PWA, VPN)                 aibox1 (10.1.9.7)
+phone (Android app or PWA, VPN)                 aibox1 (<aibox1>)
   record, 30 s chunks,  --HTTPS, VPN only-->  Caddy :8443 (private CA, allowlist ALLOW_CIDRS)
   offline buffer                                 |
                                                recorder (FastAPI): upload API, queue (1 job), web view, MCP
@@ -53,7 +57,7 @@ phone (Android app or PWA, VPN)                 aibox1 (10.1.9.7)
   `drive_include_audio` is on) into a Drive folder per meeting. The person
   decides per meeting (web view, Minutes Pro app, phone app); the default for new
   recordings starts as `STORAGE_DEFAULT` and is a setting after that.
-- Everything listens on the box only: Caddy binds 10.1.9.7 and admits only
+- Everything listens on the box only: Caddy binds <aibox1> and admits only
   `ALLOW_CIDRS` (the VPN client pools, ai-knowledge for
   brainbot:agent command, the box itself for the simulator). The recorder listens on
   127.0.0.1:18000, the engines only on an internal Docker network. aibox1 has
@@ -142,7 +146,7 @@ For any phone with a current browser; on Android the native app (below) also
 records with the screen off.
 
 1. Connect the phone to the VPN.
-2. Install the box's CA certificate once: open `http://10.1.9.7:8480/ca.crt`,
+2. Install the box's CA certificate once: open `http://<aibox1>:8480/ca.crt`,
    then Settings, Security and privacy, More security settings, Install a
    certificate, CA certificate. Compare the SHA-256 fingerprint with the one
    `deploy/make-ca.sh` printed. Android then shows "network may be
@@ -183,7 +187,7 @@ Connect a phone (on the empty list, or in Settings) shows a QR code and the
 same code to type, for example `K7Q4-M2XB`:
 
 1. The phone (VPN on) scans the QR code. It opens the connect page,
-   `https://ai-knowledge.mz.brainbot.com/indie-recorder/connect#K7Q4M2XB`,
+   `https://<agent-host>/indie-recorder/connect#K7Q4M2XB`,
    through brain-tls, so the browser trusts it without the box's CA.
 2. The page says whose account the phone will record into. On Android:
    "Open the app" (or "Install the app" first, then "Open the app"); the app
@@ -202,7 +206,7 @@ Minutes Pro app offers "Connect this phone" instead of the QR code.
   (`GET /api/v1/pair/{code}` shows whose it is, `POST /api/v1/pair` spends
   it). 30 wrong codes in 10 minutes close the door for everyone for a while
   (8 characters from 31: about 10^12 codes).
-- Recordings go from the phone straight to the box (`https://10.1.9.7:8443`,
+- Recordings go from the phone straight to the box (`https://<aibox1>:8443`,
   the app pins its CA); only the connect page, the two code endpoints, the
   APK and the page's stylesheet pass through ai-knowledge. The web app still
   runs on the box's own address, so a phone needs the box's CA once to use it
@@ -267,7 +271,7 @@ for the targets in `FOLLOWUP_TARGETS` (default `drive`):
   in memory; Disconnect revokes it at Google. The OAuth client is the one
   brainbot:agent command uses (`secrets/google_oauth.json`,
   `{"client_id", "client_secret"}`), with the redirect address
-  `https://ai-knowledge.mz.brainbot.com/indie-recorder/oauth/google/callback`
+  `https://<agent-host>/indie-recorder/oauth/google/callback`
   added to it in the Google Cloud console. Without the file the app shows no
   Connect button and Drive stays the agent's (below). A newer summary sets
   aside Drive items an older one still waited for ("superseded").
@@ -281,7 +285,7 @@ for the targets in `FOLLOWUP_TARGETS` (default `drive`):
   - `direct` (demo and tests, the default in `.env.example`): the box calls
     the mock GitHub and Drive in `mock/server.py` itself, so the whole loop
     runs without accounts. The mock's issues, comments and docs are at
-    `https://10.1.9.7:8443/mock/`.
+    `https://<aibox1>:8443/mock/`.
 - Idempotent: one proposal per (meeting, item), a mapping (meeting, item) ->
   issue, comment or doc once done, and a hidden marker in every GitHub body
   (checked before posting in direct mode; the agent posts bodies unchanged),
@@ -310,7 +314,7 @@ agent with its instructions and hourly routine). In short:
   phones, name). Tokens of the role agent with `--trusts-identity` may do
   that; a phone's token belongs to one person.
 - A person's meeting agent reaches the MCP endpoint as
-  `https://ai-knowledge.mz.brainbot.com/indie-recorder/mcp`, a personal MCP
+  `https://<agent-host>/indie-recorder/mcp`, a personal MCP
   server with their own recorder token (only their agents get it).
 - `AGENT_SUMMARIES_SINCE` keeps meetings from before go-live out of
   `pending_work`; `FILES_BASE_URL` is where the agent downloads files from.
@@ -515,9 +519,9 @@ forgets the token; remove the phone in Minutes Pro to lock it out.
   Drive switch. English and German, light and dark.
 
 Install: the connect page offers it ("Install the app"), from
-`https://ai-knowledge.mz.brainbot.com/indie-recorder/indie-recorder.apk` (VPN
+`https://<agent-host>/indie-recorder/indie-recorder.apk` (VPN
 on; Android asks to allow installs from the browser; the same file is at
-`http://10.1.9.7:8480/indie-recorder.apk`). Inter is bundled under the SIL
+`http://<aibox1>:8480/indie-recorder.apk`). Inter is bundled under the SIL
 Open Font License (`assets/licenses/Inter-OFL.txt` in the APK).
 
 Build and test, on aibox1 from `~/indie-recorder`:
@@ -526,10 +530,15 @@ Build and test, on aibox1 from `~/indie-recorder`:
   SDK, Gradle, an emulator image), unit tests, a debug build and a release
   build signed with `secrets/android-release.jks` (made on the first run; keep
   it: Android installs an update only with the same key), copied to
-  `secrets/tls/public/indie-recorder.apk`.
+  `secrets/tls/public/indie-recorder.apk`. This build looks typed connect
+  codes up at aibox1's `CONNECT_URL` (from `.env`).
+- `PUBLIC=1 android/build.sh`: the build for GitHub, without a connect address
+  of its own (its connect screen asks for the box's address), signed with the
+  same key and left in the build folder; `android/publish-github.sh` puts it
+  on the rolling `android` release.
 - `android/e2e/emulator-test.sh`: an Android 14 emulator (KVM) with the debug
-  build connects as a test person by a typed code (a used code is then
-  refused) and by the connect page's link (`recorder.cli connect`), records a 75 s speech
+  build connects as a test person by a typed code (with the public build:
+  the box's address and the code; a used code is then refused) and by the connect page's link (`recorder.cli connect`), records a 75 s speech
   file in place of the microphone (a debug-only hook), and the box transcribes
   it; then the same with the network cut during the recording, with the app
   killed after 40 s, and with a pause (30 s, about 23 s paused, 30 s: the

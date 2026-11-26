@@ -5,7 +5,7 @@ Datenschutz-Folgenabschätzung nach Art. 35 DSGVO. Die technischen Angaben
 beschreiben, wie Minutes Pro arbeitet; die Felder in eckigen Klammern füllt
 der Verantwortliche aus. Sie ist keine Rechtsberatung: Prüfen Sie das Ergebnis
 mit Ihrer oder Ihrem Datenschutzbeauftragten und, wo es einen gibt, mit dem
-Betriebsrat.
+Betriebsrat. Englische Fassung: [dpia-template.md](dpia-template.md).
 
 ## 1. Rahmen
 
